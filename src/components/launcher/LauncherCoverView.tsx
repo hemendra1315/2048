@@ -5,6 +5,8 @@ import { useGame } from '../../context/GameContext';
 import { Game2048 } from '../games/Game2048';
 import { GameSnake } from '../games/GameSnake';
 import { GameTicTacToe } from '../games/GameTicTacToe';
+import { GameMinesweeper } from '../games/GameMinesweeper';
+import { GameMemoryMatch } from '../games/GameMemoryMatch';
 import { GameStub } from '../games/GameStub';
 import { GameSelectorModal } from '../games/GameSelectorModal';
 import { StealthUnlockModal } from './StealthUnlockModal';
@@ -87,7 +89,9 @@ export const LauncherCoverView: React.FC = () => {
         {currentGame === 'game_2048' && <Game2048 />}
         {currentGame === 'snake' && <GameSnake />}
         {currentGame === 'tic_tac_toe' && <GameTicTacToe />}
-        {!['game_2048', 'snake', 'tic_tac_toe'].includes(currentGame) && (
+        {currentGame === 'minesweeper' && <GameMinesweeper />}
+        {currentGame === 'memory_match' && <GameMemoryMatch />}
+        {!['game_2048', 'snake', 'tic_tac_toe', 'minesweeper', 'memory_match'].includes(currentGame) && (
           <GameStub gameId={currentGame} />
         )}
       </main>

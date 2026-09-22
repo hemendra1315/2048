@@ -175,9 +175,98 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const handleSendVoiceNote = () => {
-    handleSend('[VOICE_NOTE:0:14]');
-    showToast('Encrypted voice note transmitted', 'success');
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [audioSeconds, setAudioSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+
+  // Audio recording timer
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isRecordingAudio) {
+      interval = setInterval(() => setAudioSeconds(s => s + 1), 1000);
+    } else {
+      setAudioSeconds(0);
+    }
+    return () => clearInterval(interval);
+  }, [isRecordingAudio]);
+
+  const handleStartVoiceRecord = async () => {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        showToast('Microphone not supported in this environment', 'error');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = e => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(t => t.stop());
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result as string;
+          handleSend(`[VOICE_NOTE:${audioSeconds || 1}s]${dataUrl}`);
+          showToast('Voice note transmitted securely', 'success');
+        };
+        reader.readAsDataURL(blob);
+      };
+
+      recorder.start();
+      setIsRecordingAudio(true);
+    } catch (err) {
+      console.warn('Microphone error:', err);
+      showToast('Microphone access denied or unavailable', 'info');
+    }
+  };
+
+  const handleStopVoiceRecord = (send: boolean) => {
+    if (mediaRecorderRef.current && isRecordingAudio) {
+      if (!send) {
+        mediaRecorderRef.current.ondataavailable = null;
+        mediaRecorderRef.current.onstop = null;
+        mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+        showToast('Voice note discarded', 'info');
+      } else {
+        mediaRecorderRef.current.stop();
+      }
+      setIsRecordingAudio(false);
+    }
+  };
+
+  const playAudio = (audioUrl: string, msgId: string) => {
+    if (playingAudioId === msgId) {
+      if (audioElementRef.current) {
+        audioElementRef.current.pause();
+      }
+      setPlayingAudioId(null);
+      return;
+    }
+
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+    }
+
+    const audio = new Audio(audioUrl);
+    audioElementRef.current = audio;
+    setPlayingAudioId(msgId);
+
+    audio.onended = () => {
+      setPlayingAudioId(null);
+    };
+
+    audio.onerror = () => {
+      setPlayingAudioId(null);
+    };
+
+    audio.play().catch(() => setPlayingAudioId(null));
   };
 
   return (
@@ -229,6 +318,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             const isMe = msg.sender_id === user?.id;
             const isImage = msg.content.startsWith('[IMAGE]');
             const isVoice = msg.content.startsWith('[VOICE_NOTE');
+            const voiceMatch = msg.content.match(/^\[VOICE_NOTE:(.*?)\](.*)$/);
+            const voiceDuration = voiceMatch ? voiceMatch[1] : '0:14';
+            const voiceDataUrl = voiceMatch ? voiceMatch[2] : '';
 
             return (
               <div
@@ -256,10 +348,10 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                   ) : isVoice ? (
                     <div className="flex items-center gap-3 min-w-[180px] py-1">
                       <button
-                        onClick={() => setPlayingAudioId(playingAudioId === msg.id ? null : msg.id)}
+                        onClick={() => voiceDataUrl ? playAudio(voiceDataUrl, msg.id) : setPlayingAudioId(playingAudioId === msg.id ? null : msg.id)}
                         className={`w-8 h-8 rounded-full flex items-center justify-center ${
                           isMe ? 'bg-black text-[#10B981]' : 'bg-[#10B981] text-black'
-                        }`}
+                        } active:scale-90 transition-transform`}
                       >
                         {playingAudioId === msg.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
                       </button>
@@ -272,7 +364,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                           />
                         </div>
                         <span className={`text-[10px] font-mono ${isMe ? 'text-black/70' : 'text-zinc-400'}`}>
-                          Voice Note (0:14)
+                          Voice Note ({voiceDuration})
                         </span>
                       </div>
                     </div>
@@ -318,38 +410,63 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           className="hidden"
         />
 
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-400 hover:text-white transition-all active:scale-95"
-          title="Attach Photo"
-        >
-          <ImageIcon className="w-5 h-5 text-zinc-300" />
-        </button>
+        {isRecordingAudio ? (
+          <div className="flex-1 flex items-center justify-between bg-red-950/80 border border-red-600/50 rounded-xl px-4 py-2 text-red-300 animate-pulse">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+              <span className="text-xs font-mono font-bold">RECORDING {audioSeconds}s</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleStopVoiceRecord(false)}
+                className="px-2.5 py-1 bg-[#171717] hover:bg-[#222222] text-xs font-semibold rounded-lg text-zinc-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleStopVoiceRecord(true)}
+                className="px-3 py-1 bg-[#10B981] hover:bg-emerald-400 text-black text-xs font-bold rounded-lg shadow-md"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-400 hover:text-white transition-all active:scale-95"
+              title="Attach Photo"
+            >
+              <ImageIcon className="w-5 h-5 text-zinc-300" />
+            </button>
 
-        <button
-          onClick={handleSendVoiceNote}
-          className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-400 hover:text-white transition-all active:scale-95"
-          title="Send Voice Note"
-        >
-          <Mic className="w-5 h-5 text-[#10B981]" />
-        </button>
+            <button
+              onClick={handleStartVoiceRecord}
+              className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-400 hover:text-white transition-all active:scale-95"
+              title="Record Voice Note"
+            >
+              <Mic className="w-5 h-5 text-[#10B981]" />
+            </button>
 
-        <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex-1 flex items-center gap-2">
-          <input
-            type="text"
-            value={inputContent}
-            onChange={e => setInputContent(e.target.value)}
-            placeholder={`Message ${partner.display_name}...`}
-            className="flex-1 bg-[#171717] border border-[#262626] focus:border-[#10B981] rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition-colors"
-          />
-          <button
-            type="submit"
-            disabled={!inputContent.trim()}
-            className="bg-[#10B981] hover:bg-emerald-400 disabled:opacity-40 active:scale-95 text-black p-2.5 rounded-xl flex items-center justify-center font-bold shadow-md transition-all"
-          >
-            <Send className="w-4 h-4 fill-current" />
-          </button>
-        </form>
+            <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex-1 flex items-center gap-2">
+              <input
+                type="text"
+                value={inputContent}
+                onChange={e => setInputContent(e.target.value)}
+                placeholder={`Message ${partner.display_name}...`}
+                className="flex-1 bg-[#171717] border border-[#262626] focus:border-[#10B981] rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition-colors"
+              />
+              <button
+                type="submit"
+                disabled={!inputContent.trim()}
+                className="bg-[#10B981] hover:bg-emerald-400 disabled:opacity-40 active:scale-95 text-black p-2.5 rounded-xl flex items-center justify-center font-bold shadow-md transition-all"
+              >
+                <Send className="w-4 h-4 fill-current" />
+              </button>
+            </form>
+          </>
+        )}
       </div>
     </div>
   );
