@@ -158,11 +158,34 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             setActiveConversation({ id: convId, partner });
             if (onSelectConversationForDesktop) onSelectConversationForDesktop(partner, convId);
           }
+        } else {
+          (async () => {
+            try {
+              const { data: rawPartner } = await supabase.from('profiles').select('*').eq('id', initialPartnerId).maybeSingle();
+              if (rawPartner) {
+                const partner = rawPartner as unknown as UserProfile;
+                const userA = user.id < partner.id ? user.id : partner.id;
+                const userB = user.id < partner.id ? partner.id : user.id;
+                let { data: conv } = await supabase.from('conversations').select('*').eq('user_a', userA).eq('user_b', userB).maybeSingle();
+                if (!conv) {
+                  const { data: newConv } = await supabase.from('conversations').insert({ user_a: userA, user_b: userB }).select('*').single();
+                  conv = newConv;
+                }
+                if (conv) {
+                  await loadConversations();
+                  setActiveConversation({ id: conv.id, partner });
+                  if (onSelectConversationForDesktop) onSelectConversationForDesktop(partner, conv.id);
+                }
+              }
+            } catch (e) {
+              console.error('Error starting chat for initial partner in Supabase:', e);
+            }
+          })();
         }
       }
       if (onClearInitialPartner) onClearInitialPartner();
     }
-  }, [initialPartnerId, conversations, user, onClearInitialPartner, onSelectConversationForDesktop]);
+  }, [initialPartnerId, conversations, user, onClearInitialPartner, onSelectConversationForDesktop, loadConversations]);
 
   const handleStartDirectChat = (partner: UserProfile, convId: string) => {
     setActiveConversation({ id: convId, partner });

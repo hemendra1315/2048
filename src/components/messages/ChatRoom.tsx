@@ -107,6 +107,14 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             scrollToBottom();
           }
         )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
+          payload => {
+            const updatedMsg = payload.new as unknown as MessageItem;
+            setMessages(prev => prev.map(m => (m.id === updatedMsg.id ? updatedMsg : m)));
+          }
+        )
         .subscribe();
 
       return () => {

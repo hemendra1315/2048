@@ -56,6 +56,21 @@ export const GalleryView: React.FC = () => {
 
   useEffect(() => {
     loadGallery();
+
+    if (!isSupabaseConfigured()) {
+      const unsub = mockBackend.subscribe('gallery:updated', () => loadGallery());
+      return unsub;
+    } else {
+      const channel = supabase
+        .channel('public:gallery_items')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'gallery_items' }, () => {
+          loadGallery();
+        })
+        .subscribe();
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
   }, [loadGallery]);
 
   const handleDelete = async (item: GalleryItem) => {

@@ -81,6 +81,21 @@ export const VaultView: React.FC = () => {
   useEffect(() => {
     if (isUnlocked) {
       loadVaultItems();
+
+      if (!isSupabaseConfigured()) {
+        const unsub = mockBackend.subscribe('gallery:updated', () => loadVaultItems());
+        return unsub;
+      } else {
+        const channel = supabase
+          .channel('public:vault_gallery_items')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'gallery_items' }, () => {
+            loadVaultItems();
+          })
+          .subscribe();
+        return () => {
+          supabase.removeChannel(channel);
+        };
+      }
     }
   }, [isUnlocked, loadVaultItems]);
 

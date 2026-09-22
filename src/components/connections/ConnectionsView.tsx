@@ -104,6 +104,19 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
         unsubReqs();
         unsubConns();
       };
+    } else {
+      const channel = supabase
+        .channel('public:connections_and_requests')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'connections' }, () => {
+          loadData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'connection_requests' }, () => {
+          loadData();
+        })
+        .subscribe();
+      return () => {
+        supabase.removeChannel(channel);
+      };
     }
   }, [loadData]);
 
