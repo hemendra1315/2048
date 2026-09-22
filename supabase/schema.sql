@@ -1,0 +1,2 @@
+-- Schema snapshot matching 20260922000001_initial_schema.sql
+-- Run migrations/20260922000001_initial_schema.sql on your Supabase instance.
