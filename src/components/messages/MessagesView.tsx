@@ -18,13 +18,17 @@ import { ChatRoom } from './ChatRoom';
 
 interface MessagesViewProps {
   initialPartnerId?: string | null;
+  initialAttachment?: string | null;
   onClearInitialPartner?: () => void;
+  onClearInitialAttachment?: () => void;
   onSelectConversationForDesktop?: (partner: UserProfile, convId: string) => void;
 }
 
 export const MessagesView: React.FC<MessagesViewProps> = ({
   initialPartnerId,
+  initialAttachment,
   onClearInitialPartner,
+  onClearInitialAttachment,
   onSelectConversationForDesktop,
 }) => {
   const { user } = useAuth();
@@ -458,6 +462,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               conversationId={activeConversation.id}
               partner={activeConversation.partner}
               onBack={() => setActiveConversation(null)}
+              initialAttachment={initialAttachment}
+              onClearInitialAttachment={onClearInitialAttachment}
             />
           ) : (
             <div className="h-full bg-[#0A0A0A] border border-[#262626] rounded-2xl flex flex-col items-center justify-center p-8 text-center space-y-3">
@@ -475,7 +481,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
       {/* Mobile Single View (< 1024px) */}
       <div className="lg:hidden pb-20">
-        {ConversationListView}
+        {activeConversation ? (
+          <ChatRoom
+            conversationId={activeConversation.id}
+            partner={activeConversation.partner}
+            onBack={() => setActiveConversation(null)}
+            initialAttachment={initialAttachment}
+            onClearInitialAttachment={onClearInitialAttachment}
+          />
+        ) : (
+          ConversationListView
+        )}
       </div>
 
       {/* Direct UID Connect Modal */}

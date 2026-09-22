@@ -67,6 +67,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
       if (!error && data) {
         const profile = data as unknown as UserProfile;
+        if (profile.status === 'banned') {
+          await supabase.auth.signOut();
+          setUser(null);
+          showToast('This account has been permanently suspended by administration.', 'error');
+          return null;
+        }
         setUser(profile);
         return profile;
       }
@@ -94,7 +100,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setUser(null);
     return null;
-  }, []);
+  }, [showToast]);
 
   const refreshUser = useCallback(async () => {
     try {
@@ -106,7 +112,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setUser(null);
         }
       } else if (useMock) {
-        setUser(mockBackend.getCurrentUser());
+        const mockUser = mockBackend.getCurrentUser();
+        if (mockUser && mockUser.status === 'banned') {
+          setUser(null);
+          showToast('This account is suspended.', 'error');
+        } else {
+          setUser(mockUser);
+        }
       } else {
         setUser(null);
       }
@@ -116,7 +128,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } finally {
       setLoading(false);
     }
-  }, [loadProfile, useMock]);
+  }, [loadProfile, useMock, showToast]);
 
   useEffect(() => {
     // Sessions stored by the old client were plain JSON profiles that anyone could edit.
@@ -127,16 +139,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     refreshUser();
 
+    // Cross-tab synchronization
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'vault_mock_current_user' || e.key === 'vault_mock_profiles') {
+        refreshUser();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
     if (isSupabaseConfigured()) {
       const { data } = supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT') setUser(null);
         else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') void loadProfile(session?.user?.id, session?.user);
       });
-      return () => data.subscription.unsubscribe();
+      return () => {
+        window.removeEventListener('storage', handleStorage);
+        data.subscription.unsubscribe();
+      };
     }
     if (useMock) {
-      return mockBackend.subscribe('auth:state_change', data => setUser(data as UserProfile | null));
+      const unsub = mockBackend.subscribe('auth:state_change', data => setUser(data as UserProfile | null));
+      return () => {
+        window.removeEventListener('storage', handleStorage);
+        unsub();
+      };
     }
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
   }, [refreshUser, loadProfile, useMock]);
 
   const adoptSession = async (result: AuthResult): Promise<UserProfile> => {

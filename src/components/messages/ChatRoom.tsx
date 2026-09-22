@@ -23,6 +23,8 @@ interface ChatRoomProps {
   partner: UserProfile;
   onBack: () => void;
   onOpenMedia?: (url: string) => void;
+  initialAttachment?: string | null;
+  onClearInitialAttachment?: () => void;
 }
 
 export const ChatRoom: React.FC<ChatRoomProps> = ({
@@ -30,6 +32,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   partner,
   onBack,
   onOpenMedia,
+  initialAttachment,
+  onClearInitialAttachment,
 }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -126,6 +130,26 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    if (initialAttachment) {
+      handleSend(`[IMAGE]${initialAttachment}`);
+      showToast('Camera snapshot sent to chat', 'success');
+      if (onClearInitialAttachment) onClearInitialAttachment();
+    }
+  }, [initialAttachment]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+        } catch {
+          // stream already closed
+        }
+      }
+    };
+  }, []);
 
   const handleSend = async (contentToSend?: string) => {
     const content = (contentToSend || inputContent).trim();

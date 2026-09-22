@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ToastProvider } from './context/ToastContext';
+import React, { useState, useEffect } from 'react';
+import { ToastProvider, useToast } from './context/ToastContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { VaultProvider, useVault } from './context/VaultContext';
 import { GameProvider } from './context/GameContext';
@@ -11,7 +11,25 @@ import { AdminLayout } from './components/admin/AdminLayout';
 const MainNavigator: React.FC = () => {
   const { user, isSuperAdmin, recoveryCodeToShow } = useAuth();
   const { isUnlocked } = useVault();
+  const { showToast } = useToast();
   const [adminMode, setAdminMode] = useState(false);
+
+  // Network disconnect/reconnect detector
+  useEffect(() => {
+    const handleOnline = () => {
+      showToast('Network connection restored. Sovereign sync resumed.', 'success');
+    };
+    const handleOffline = () => {
+      showToast('Network disconnected. Operating in local sandbox mode.', 'error');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [showToast]);
 
   // 1. If Vault is locked, display the customizable Cover Game Launcher
   if (!isUnlocked) {

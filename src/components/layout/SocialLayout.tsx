@@ -33,6 +33,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
   // Chats is the default landing page
   const [currentTab, setCurrentTab] = useState<SocialTab>('chats');
   const [chatPartnerId, setChatPartnerId] = useState<string | null>(null);
+  const [pendingMediaAttachment, setPendingMediaAttachment] = useState<string | null>(null);
   const [selectedDesktopPartner, setSelectedDesktopPartner] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState({
     unreadCount: 0,
@@ -189,13 +190,18 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
           {currentTab === 'chats' && (
             <MessagesView
               initialPartnerId={chatPartnerId}
+              initialAttachment={pendingMediaAttachment}
               onClearInitialPartner={() => setChatPartnerId(null)}
+              onClearInitialAttachment={() => setPendingMediaAttachment(null)}
               onSelectConversationForDesktop={partner => setSelectedDesktopPartner(partner)}
             />
           )}
           {currentTab === 'camera' && (
             <CameraView
-              onSendToChat={() => setCurrentTab('chats')}
+              onSendToChat={media => {
+                setPendingMediaAttachment(media);
+                setCurrentTab('chats');
+              }}
               onSavedToGallery={() => setCurrentTab('gallery')}
               onSavedToVault={() => setCurrentTab('vault')}
             />
