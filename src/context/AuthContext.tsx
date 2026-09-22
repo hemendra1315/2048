@@ -57,47 +57,48 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     BiometricService.isAvailable().then(res => setIsBiometricsSupported(res.available));
   }, []);
 
-  /** Loads the signed-in user's profile. Identity comes from the Supabase session, never from local storage. */
-  const loadProfile = useCallback(async (userId: string | undefined, sessionUser?: { email?: string; user_metadata?: Record<string, unknown>; created_at?: string }) => {
+  /**
+   * Loads the signed-in user's profile. Identity, role and status come ONLY from public.profiles
+   * (read under RLS with the Supabase session). Never from auth metadata, JWT claims or local storage.
+   */
+  const loadProfile = useCallback(async (userId: string | undefined, hasSession = false) => {
     if (!userId) {
       setUser(null);
       return null;
     }
+    let profileMissing = false;
     try {
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      // PGRST116 = no row visible for this user: the session has no server-side profile.
+      if (error?.code === 'PGRST116') profileMissing = true;
       if (!error && data) {
         const profile = data as unknown as UserProfile;
-        if (profile.status === 'banned') {
+        if (profile.status !== 'active') {
+          // Suspended or banned accounts keep no session, including sessions opened before the change.
+          console.warn('[auth] profile status is not active; signing out', { status: profile.status });
           await supabase.auth.signOut();
           setUser(null);
-          showToast('This account has been permanently suspended by administration.', 'error');
+          showToast(
+            profile.status === 'banned'
+              ? 'This account has been permanently suspended by administration.'
+              : 'This account is suspended.',
+            'error',
+          );
           return null;
         }
         setUser(profile);
         return profile;
       }
     } catch (e) {
-      console.warn('Could not query profiles table:', e);
+      console.warn('[auth] could not load profile', e);
     }
 
-    if (sessionUser) {
-      const meta = sessionUser.user_metadata || {};
-      const username = (meta.username as string) || sessionUser.email?.split('@')[0] || 'User';
-      const fallback: UserProfile = {
-        id: userId,
-        uid: (meta.uid as string) || `PHOENIX-${Math.floor(1000 + Math.random() * 9000)}`,
-        username: username,
-        display_name: (meta.display_name as string) || username,
-        avatar_url: (meta.avatar_url as string) || null,
-        role: (meta.role as 'user' | 'super_admin') || (username.toLowerCase() === 'sanah' ? 'super_admin' : 'user'),
-        status: 'active',
-        created_at: sessionUser.created_at || new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      setUser(fallback);
-      return fallback;
+    // No fallback: a session without a readable server-side profile is not signed in, and no role
+    // or status is inferred. (Auth user_metadata is user-editable and is never read.)
+    if (hasSession && profileMissing) {
+      console.warn('[auth] session has no profile row; signing out');
+      await supabase.auth.signOut();
     }
-
     setUser(null);
     return null;
   }, [showToast]);
@@ -107,7 +108,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (isSupabaseConfigured()) {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
-          await loadProfile(session.user.id, session.user);
+          await loadProfile(session.user.id, true);
         } else {
           setUser(null);
         }
@@ -150,7 +151,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (isSupabaseConfigured()) {
       const { data } = supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT') setUser(null);
-        else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') void loadProfile(session?.user?.id, session?.user);
+        else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') void loadProfile(session?.user?.id, Boolean(session));
       });
       return () => {
         window.removeEventListener('storage', handleStorage);
@@ -176,7 +177,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       refresh_token: result.session.refresh_token,
     });
     if (error) throw error;
-    const profile = (await loadProfile(result.profile.id)) ?? result.profile;
+    // The UI identity is the profile row read back under the new session, not the response body.
+    const profile = await loadProfile(result.profile.id, true);
+    if (!profile) {
+      await supabase.auth.signOut();
+      throw new Error('Could not load your profile. Please sign in again.');
+    }
     return profile;
   };
 
@@ -185,6 +191,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       return await fn();
     } catch (err) {
+      // Diagnostics only: error code/status, never credentials.
+      const e = err as { code?: string; status?: number; message?: string };
+      console.warn('[auth] request failed', { code: e?.code, status: e?.status, message: e?.message });
       showToast(err instanceof Error ? err.message : fallback, 'error');
       throw err;
     } finally {
@@ -197,21 +206,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       let profile: UserProfile;
       const cleanId = identifier.trim();
       if (isSupabaseConfigured()) {
-        try {
-          profile = await adoptSession(await callVaultAuth<AuthResult>('login', { identifier: cleanId, password }));
-        } catch (vaultErr) {
-          console.warn('Edge function vault-auth unavailable, falling back to direct Supabase Auth:', vaultErr);
-          const email = cleanId.includes('@') ? cleanId : `${cleanId.toLowerCase()}@vault.local`;
-          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-          });
-          if (authError) throw authError;
-          if (!authData.user || !authData.session) throw new Error('No user session returned');
-          const loaded = await loadProfile(authData.user.id, authData.user);
-          if (!loaded) throw new Error('Could not load user profile');
-          profile = loaded;
-        }
+        // All credential checks, lockouts and legacy-account migration happen in vault-auth.
+        profile = await adoptSession(await callVaultAuth<AuthResult>('login', { identifier: cleanId, password }));
       } else if (useMock) {
         profile = await mockBackend.loginWithPassword(cleanId, password);
         setUser(profile);
@@ -274,84 +270,27 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     withErrors('Registration failed', async () => {
       const cleanUsername = params.username.toLowerCase().trim();
       if (isSupabaseConfigured()) {
-        try {
-          const result = await callVaultAuth<AuthResult>('register', {
-            username: cleanUsername,
-            password: params.password,
-          });
-          // Show the recovery key before the vault opens.
-          setRecoveryCodeToShow(result.recoveryCode ?? null);
-          const profile = await adoptSession(result);
-          if (params.enableBiometrics) {
-            try {
-              const options = await callVaultAuth<{ publicKey: ServerCreationOptions }>('webauthn-register-options');
-              const credential = await BiometricService.createCredential(options.publicKey);
-              const res = await callVaultAuth<{ profile: UserProfile }>('webauthn-register-verify', { credential });
-              BiometricService.setLocalEnrollment(true);
-              setUser(res.profile);
-            } catch (err) {
-              showToast(`Fingerprint not enabled: ${err instanceof Error ? err.message : 'cancelled'}`, 'info');
-            }
-          }
-          showToast('Vault identity activated', 'success');
-          return { user: profile, recoveryCode: result.recoveryCode ?? '' };
-        } catch (vaultErr) {
-          console.warn('Edge function vault-auth unavailable, falling back to direct Supabase signup:', vaultErr);
-          const email = `${cleanUsername}@vault.local`;
-          const generatedUid = `PHOENIX-${Math.floor(1000 + Math.random() * 9000)}`;
-          const recoveryCode = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-            .map(b => b.toString(16).padStart(2, '0'))
-            .join('')
-            .toUpperCase()
-            .match(/.{1,4}/g)!
-            .join('-');
-          const role = cleanUsername === 'sanah' ? 'super_admin' : 'user';
-
-          const { data: authData, error: authError } = await supabase.auth.signUp({
-            email,
-            password: params.password,
-            options: {
-              data: {
-                username: cleanUsername,
-                display_name: params.username.trim(),
-                uid: generatedUid,
-                role,
-              },
-            },
-          });
-
-          if (authError) throw authError;
-          if (!authData.user) throw new Error('Registration failed');
-
+        // Accounts are created only by vault-auth (server-side validation, throttling, bcrypt).
+        const result = await callVaultAuth<AuthResult>('register', {
+          username: cleanUsername,
+          password: params.password,
+        });
+        // Show the recovery key before the vault opens.
+        setRecoveryCodeToShow(result.recoveryCode ?? null);
+        const profile = await adoptSession(result);
+        if (params.enableBiometrics) {
           try {
-            await supabase.from('profiles').upsert({
-              id: authData.user.id,
-              uid: generatedUid,
-              display_name: params.username.trim(),
-              role,
-              status: 'active',
-            });
-          } catch (e) {
-            console.warn('Could not upsert to public.profiles:', e);
+            const options = await callVaultAuth<{ publicKey: ServerCreationOptions }>('webauthn-register-options');
+            const credential = await BiometricService.createCredential(options.publicKey);
+            const res = await callVaultAuth<{ profile: UserProfile }>('webauthn-register-verify', { credential });
+            BiometricService.setLocalEnrollment(true);
+            setUser(res.profile);
+          } catch (err) {
+            showToast(`Fingerprint not enabled: ${err instanceof Error ? err.message : 'cancelled'}`, 'info');
           }
-
-          const profile: UserProfile = {
-            id: authData.user.id,
-            uid: generatedUid,
-            username: cleanUsername,
-            display_name: params.username.trim(),
-            avatar_url: null,
-            role,
-            status: 'active',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-
-          setUser(profile);
-          setRecoveryCodeToShow(recoveryCode);
-          showToast('Vault identity activated', 'success');
-          return { user: profile, recoveryCode };
         }
+        showToast('Vault identity activated', 'success');
+        return { user: profile, recoveryCode: result.recoveryCode ?? '' };
       }
       if (!useMock) throw new Error(NOT_CONFIGURED);
       const res = await mockBackend.registerFrictionless(params);

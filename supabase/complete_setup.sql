@@ -1,8 +1,14 @@
--- ====================================================
--- COMPLETE SOVEREIGN VAULT SUPABASE SCHEMA SETUP
--- ====================================================
+-- ====================================================================
+-- COMPLETE SCHEMA SETUP (generated from supabase/migrations, in order)
+-- For a brand-new, empty Supabase project only. For an existing project use:
+--   npx supabase db push
+-- Contains no accounts and no credentials. Create admins with grant_super_admin()
+-- after signing up in the app (see supabase/init_schema_and_admin.sql).
+-- ====================================================================
 
+-- ------------------------------------------------------------------
 -- File: supabase/migrations/20260922000001_initial_schema.sql
+-- ------------------------------------------------------------------
 -- Migration: 20260922000001_initial_schema.sql
 -- Description: Production Schema with Hashed Secrets, Strict 1-to-1 Conversations, Centralized Admin Logging, RLS & Storage
 
@@ -620,8 +626,680 @@ CREATE POLICY "avatars_storage_insert" ON storage.objects FOR INSERT TO authenti
 DROP POLICY IF EXISTS "avatars_storage_delete" ON storage.objects;
 CREATE POLICY "avatars_storage_delete" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'avatars' AND (storage.foldername(name))[1] = auth.uid()::text);
 
+-- ------------------------------------------------------------------
+-- File: supabase/migrations/20260923000001_frictionless_auth.sql
+-- ------------------------------------------------------------------
+-- Migration: 20260923000001_frictionless_auth.sql
+-- Description: Frictionless PIN & Biometric Authentication Schema, RPCs, and Profile Enhancements
 
+-- 1. Alter profiles table
+ALTER TABLE public.profiles ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_id_fkey;
+
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS pin_hash TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS recovery_code_hash TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS biometric_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+-- Populate username for existing profiles
+UPDATE public.profiles 
+SET username = LOWER(REPLACE(display_name, ' ', '_')) 
+WHERE username IS NULL;
+
+-- Enable permissions
+GRANT ALL ON public.profiles TO anon, authenticated, service_role;
+GRANT ALL ON public.user_preferences TO anon, authenticated, service_role;
+GRANT ALL ON public.game_preferences TO anon, authenticated, service_role;
+GRANT ALL ON public.game_progress TO anon, authenticated, service_role;
+GRANT ALL ON public.conversations TO anon, authenticated, service_role;
+GRANT ALL ON public.conversation_members TO anon, authenticated, service_role;
+GRANT ALL ON public.messages TO anon, authenticated, service_role;
+GRANT ALL ON public.connections TO anon, authenticated, service_role;
+GRANT ALL ON public.connection_requests TO anon, authenticated, service_role;
+GRANT ALL ON public.gallery_items TO anon, authenticated, service_role;
+GRANT ALL ON public.admin_access_log TO anon, authenticated, service_role;
+
+-- 2. Frictionless Register RPC
+CREATE OR REPLACE FUNCTION public.register_frictionless_user(
+  p_username TEXT,
+  p_uid TEXT,
+  p_pin_hash TEXT,
+  p_recovery_code_hash TEXT,
+  p_biometric_enabled BOOLEAN DEFAULT FALSE,
+  p_avatar_url TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $func$
+DECLARE
+  v_user_id UUID;
+  v_clean_username TEXT;
+  v_clean_uid TEXT;
+  v_profile RECORD;
+BEGIN
+  v_clean_username := LOWER(TRIM(p_username));
+  v_clean_uid := UPPER(TRIM(p_uid));
+
+  IF char_length(v_clean_username) < 2 THEN
+    RAISE EXCEPTION 'Username must be at least 2 characters long';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE username = v_clean_username) THEN
+    RAISE EXCEPTION 'Username "%" is already taken', v_clean_username;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE uid = v_clean_uid) THEN
+    RAISE EXCEPTION 'UID "%" is already allocated', v_clean_uid;
+  END IF;
+
+  v_user_id := gen_random_uuid();
+
+  INSERT INTO public.profiles (
+    id,
+    uid,
+    username,
+    display_name,
+    avatar_url,
+    pin_hash,
+    recovery_code_hash,
+    biometric_enabled,
+    role,
+    status,
+    created_at,
+    last_login_at,
+    updated_at
+  ) VALUES (
+    v_user_id,
+    v_clean_uid,
+    v_clean_username,
+    TRIM(p_username),
+    p_avatar_url,
+    p_pin_hash,
+    p_recovery_code_hash,
+    COALESCE(p_biometric_enabled, FALSE),
+    'user',
+    'active',
+    NOW(),
+    NOW(),
+    NOW()
+  )
+  RETURNING * INTO v_profile;
+
+  -- Create initial preferences
+  INSERT INTO public.user_preferences (
+    user_id,
+    custom_app_name,
+    selected_icon,
+    selected_game,
+    unlock_method,
+    unlock_secret_hash,
+    theme_preference,
+    auto_lock_seconds
+  ) VALUES (
+    v_user_id,
+    'Retro Arcade',
+    'arcade_gamepad',
+    'game_2048',
+    'pin',
+    p_pin_hash,
+    'dark_modern',
+    60
+  ) ON CONFLICT (user_id) DO NOTHING;
+
+  -- Create initial game preferences
+  INSERT INTO public.game_preferences (
+    user_id,
+    selected_game,
+    sound_enabled,
+    haptics_enabled,
+    difficulty
+  ) VALUES (
+    v_user_id,
+    'game_2048',
+    TRUE,
+    TRUE,
+    'normal'
+  ) ON CONFLICT (user_id) DO NOTHING;
+
+  RETURN jsonb_build_object(
+    'id', v_profile.id,
+    'uid', v_profile.uid,
+    'username', v_profile.username,
+    'display_name', v_profile.display_name,
+    'avatar_url', v_profile.avatar_url,
+    'biometric_enabled', v_profile.biometric_enabled,
+    'role', v_profile.role,
+    'status', v_profile.status,
+    'created_at', v_profile.created_at,
+    'last_login_at', v_profile.last_login_at,
+    'updated_at', v_profile.updated_at
+  );
+END;
+$func$;
+
+-- 3. Frictionless Login RPC
+CREATE OR REPLACE FUNCTION public.login_frictionless_user(
+  p_identifier TEXT,
+  p_pin_hash TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $func$
+DECLARE
+  v_profile RECORD;
+  v_clean_ident TEXT;
+BEGIN
+  v_clean_ident := TRIM(p_identifier);
+
+  SELECT * INTO v_profile
+  FROM public.profiles
+  WHERE (username = LOWER(v_clean_ident) OR uid = UPPER(v_clean_ident))
+    AND status <> 'banned';
+
+  IF v_profile.id IS NULL THEN
+    RAISE EXCEPTION 'User not found or account is suspended';
+  END IF;
+
+  IF v_profile.pin_hash <> p_pin_hash THEN
+    RAISE EXCEPTION 'Invalid PIN code';
+  END IF;
+
+  UPDATE public.profiles
+  SET last_login_at = NOW()
+  WHERE id = v_profile.id;
+
+  RETURN jsonb_build_object(
+    'id', v_profile.id,
+    'uid', v_profile.uid,
+    'username', v_profile.username,
+    'display_name', v_profile.display_name,
+    'avatar_url', v_profile.avatar_url,
+    'biometric_enabled', v_profile.biometric_enabled,
+    'role', v_profile.role,
+    'status', v_profile.status,
+    'created_at', v_profile.created_at,
+    'last_login_at', NOW(),
+    'updated_at', v_profile.updated_at
+  );
+END;
+$func$;
+
+-- 4. Biometric Direct Login RPC
+CREATE OR REPLACE FUNCTION public.biometric_login_user(
+  p_identifier TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $func$
+DECLARE
+  v_profile RECORD;
+  v_clean_ident TEXT;
+BEGIN
+  v_clean_ident := TRIM(p_identifier);
+
+  SELECT * INTO v_profile
+  FROM public.profiles
+  WHERE (username = LOWER(v_clean_ident) OR uid = UPPER(v_clean_ident))
+    AND status <> 'banned';
+
+  IF v_profile.id IS NULL THEN
+    RAISE EXCEPTION 'User not found';
+  END IF;
+
+  IF NOT v_profile.biometric_enabled THEN
+    RAISE EXCEPTION 'Biometric authentication is not enabled for this identity';
+  END IF;
+
+  UPDATE public.profiles
+  SET last_login_at = NOW()
+  WHERE id = v_profile.id;
+
+  RETURN jsonb_build_object(
+    'id', v_profile.id,
+    'uid', v_profile.uid,
+    'username', v_profile.username,
+    'display_name', v_profile.display_name,
+    'avatar_url', v_profile.avatar_url,
+    'biometric_enabled', v_profile.biometric_enabled,
+    'role', v_profile.role,
+    'status', v_profile.status,
+    'created_at', v_profile.created_at,
+    'last_login_at', NOW(),
+    'updated_at', v_profile.updated_at
+  );
+END;
+$func$;
+
+-- 5. Reset PIN via Recovery Code RPC
+CREATE OR REPLACE FUNCTION public.reset_user_pin(
+  p_identifier TEXT,
+  p_recovery_code_hash TEXT,
+  p_new_pin_hash TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $func$
+DECLARE
+  v_profile RECORD;
+  v_clean_ident TEXT;
+BEGIN
+  v_clean_ident := TRIM(p_identifier);
+
+  SELECT * INTO v_profile
+  FROM public.profiles
+  WHERE (username = LOWER(v_clean_ident) OR uid = UPPER(v_clean_ident));
+
+  IF v_profile.id IS NULL THEN
+    RAISE EXCEPTION 'Identity not found';
+  END IF;
+
+  IF v_profile.recovery_code_hash <> p_recovery_code_hash THEN
+    RAISE EXCEPTION 'Invalid recovery code';
+  END IF;
+
+  UPDATE public.profiles
+  SET pin_hash = p_new_pin_hash,
+      updated_at = NOW(),
+      last_login_at = NOW()
+  WHERE id = v_profile.id;
+
+  UPDATE public.user_preferences
+  SET unlock_secret_hash = p_new_pin_hash,
+      updated_at = NOW()
+  WHERE user_id = v_profile.id;
+
+  RETURN jsonb_build_object(
+    'id', v_profile.id,
+    'uid', v_profile.uid,
+    'username', v_profile.username,
+    'display_name', v_profile.display_name,
+    'avatar_url', v_profile.avatar_url,
+    'biometric_enabled', v_profile.biometric_enabled,
+    'role', v_profile.role,
+    'status', v_profile.status,
+    'created_at', v_profile.created_at,
+    'last_login_at', NOW(),
+    'updated_at', NOW()
+  );
+END;
+$func$;
+
+-- 6. Update Profile RPC
+CREATE OR REPLACE FUNCTION public.update_profile_frictionless(
+  p_user_id UUID,
+  p_display_name TEXT DEFAULT NULL,
+  p_avatar_url TEXT DEFAULT NULL,
+  p_biometric_enabled BOOLEAN DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $func$
+DECLARE
+  v_profile RECORD;
+BEGIN
+  UPDATE public.profiles
+  SET 
+    display_name = COALESCE(p_display_name, display_name),
+    avatar_url = COALESCE(p_avatar_url, avatar_url),
+    biometric_enabled = COALESCE(p_biometric_enabled, biometric_enabled),
+    updated_at = NOW()
+  WHERE id = p_user_id
+  RETURNING * INTO v_profile;
+
+  IF v_profile.id IS NULL THEN
+    RAISE EXCEPTION 'User profile not found';
+  END IF;
+
+  RETURN jsonb_build_object(
+    'id', v_profile.id,
+    'uid', v_profile.uid,
+    'username', v_profile.username,
+    'display_name', v_profile.display_name,
+    'avatar_url', v_profile.avatar_url,
+    'biometric_enabled', v_profile.biometric_enabled,
+    'role', v_profile.role,
+    'status', v_profile.status,
+    'created_at', v_profile.created_at,
+    'last_login_at', v_profile.last_login_at,
+    'updated_at', v_profile.updated_at
+  );
+END;
+$func$;
+
+-- ------------------------------------------------------------------
+-- File: supabase/migrations/20260923000002_password_auth.sql
+-- ------------------------------------------------------------------
+-- Migration: 20260923000002_password_auth.sql
+-- Description: Replace numeric PINs with passwords.
+--   * Account passwords are hashed on the server with bcrypt (pgcrypto crypt/gen_salt('bf')).
+--     The client sends the password over HTTPS; no password or reusable hash is computed in the browser.
+--   * Existing accounts keep working: their old PIN is accepted once as their password and
+--     is upgraded to a bcrypt password hash on first successful sign-in.
+--   * The stealth unlock secret becomes a password too, verified by bcrypt.
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
+-- ---------------------------------------------------------------------------
+-- Internal helpers (not callable by clients)
+-- ---------------------------------------------------------------------------
+
+-- Legacy check: the old client hashed sha256("<identifier>:<pin>:vault_pin_salt_v2"),
+-- where <identifier> was whatever the user typed (username or UID, lower-cased).
+CREATE OR REPLACE FUNCTION public._legacy_pin_matches(p_profile public.profiles, p_secret TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public, extensions
+AS $func$
+  SELECT p_profile.pin_hash IS NOT NULL AND p_profile.pin_hash IN (
+    encode(digest(lower(coalesce(p_profile.username, '')) || ':' || p_secret || ':vault_pin_salt_v2', 'sha256'), 'hex'),
+    encode(digest(lower(coalesce(p_profile.uid, ''))      || ':' || p_secret || ':vault_pin_salt_v2', 'sha256'), 'hex')
+  );
+$func$;
+
+-- Returns TRUE when p_password is the account's password. Upgrades legacy PIN hashes to bcrypt.
+CREATE OR REPLACE FUNCTION public._check_account_password(p_user_id UUID, p_password TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $func$
+DECLARE
+  v_profile public.profiles;
+BEGIN
+  SELECT * INTO v_profile FROM public.profiles WHERE id = p_user_id;
+  IF v_profile.id IS NULL OR p_password IS NULL OR p_password = '' THEN
+    RETURN FALSE;
+  END IF;
+
+  IF v_profile.password_hash IS NOT NULL THEN
+    RETURN v_profile.password_hash = crypt(p_password, v_profile.password_hash);
+  END IF;
+
+  IF public._legacy_pin_matches(v_profile, p_password) THEN
+    UPDATE public.profiles
+    SET password_hash = crypt(p_password, gen_salt('bf', 10)),
+        pin_hash = NULL,
+        updated_at = NOW()
+    WHERE id = p_user_id;
+    RETURN TRUE;
+  END IF;
+
+  RETURN FALSE;
+END;
+$func$;
+
+CREATE OR REPLACE FUNCTION public._validate_new_password(p_password TEXT)
+RETURNS VOID
+LANGUAGE plpgsql
+IMMUTABLE
+AS $func$
+BEGIN
+  IF p_password IS NULL OR char_length(p_password) < 8 THEN
+    RAISE EXCEPTION 'Password must be at least 8 characters';
+  END IF;
+  IF octet_length(p_password) > 72 THEN
+    RAISE EXCEPTION 'Password must be at most 72 bytes';
+  END IF;
+END;
+$func$;
+
+CREATE OR REPLACE FUNCTION public._profile_json(p_id UUID)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $func$
+  SELECT jsonb_build_object(
+    'id', p.id,
+    'uid', p.uid,
+    'username', p.username,
+    'display_name', p.display_name,
+    'avatar_url', p.avatar_url,
+    'biometric_enabled', p.biometric_enabled,
+    'role', p.role,
+    'status', p.status,
+    'created_at', p.created_at,
+    'last_login_at', p.last_login_at,
+    'updated_at', p.updated_at
+  )
+  FROM public.profiles p WHERE p.id = p_id;
+$func$;
+
+REVOKE ALL ON FUNCTION public._legacy_pin_matches(public.profiles, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._check_account_password(UUID, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._validate_new_password(TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._profile_json(UUID) FROM PUBLIC, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Replace PIN RPCs (parameter names change, so the old signatures are dropped)
+-- ---------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.register_frictionless_user(TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT);
+DROP FUNCTION IF EXISTS public.login_frictionless_user(TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.reset_user_pin(TEXT, TEXT, TEXT);
+
+-- Register
+CREATE FUNCTION public.register_frictionless_user(
+  p_username TEXT,
+  p_uid TEXT,
+  p_password TEXT,
+  p_recovery_code_hash TEXT,
+  p_biometric_enabled BOOLEAN DEFAULT FALSE,
+  p_avatar_url TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $func$
+DECLARE
+  v_user_id UUID := gen_random_uuid();
+  v_clean_username TEXT := LOWER(TRIM(p_username));
+  v_clean_uid TEXT := UPPER(TRIM(p_uid));
+  v_hash TEXT;
+BEGIN
+  IF char_length(v_clean_username) < 2 THEN
+    RAISE EXCEPTION 'Username must be at least 2 characters long';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE username = v_clean_username) THEN
+    RAISE EXCEPTION 'Username "%" is already taken', v_clean_username;
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE uid = v_clean_uid) THEN
+    RAISE EXCEPTION 'UID "%" is already allocated', v_clean_uid;
+  END IF;
+  PERFORM public._validate_new_password(p_password);
+
+  v_hash := crypt(p_password, gen_salt('bf', 10));
+
+  INSERT INTO public.profiles (
+    id, uid, username, display_name, avatar_url,
+    password_hash, pin_hash, recovery_code_hash, biometric_enabled,
+    role, status, created_at, last_login_at, updated_at
+  ) VALUES (
+    v_user_id, v_clean_uid, v_clean_username, TRIM(p_username), p_avatar_url,
+    v_hash, NULL, p_recovery_code_hash, COALESCE(p_biometric_enabled, FALSE),
+    'user', 'active', NOW(), NOW(), NOW()
+  );
+
+  -- The stealth unlock password starts out equal to the account password (separate bcrypt hash).
+  INSERT INTO public.user_preferences (
+    user_id, custom_app_name, selected_icon, selected_game,
+    unlock_method, unlock_secret_hash, theme_preference, auto_lock_seconds
+  ) VALUES (
+    v_user_id, 'Retro Arcade', 'arcade_gamepad', 'game_2048',
+    'pin', crypt(p_password, gen_salt('bf', 10)), 'dark_modern', 60
+  ) ON CONFLICT (user_id) DO NOTHING;
+
+  INSERT INTO public.game_preferences (user_id, selected_game, sound_enabled, haptics_enabled, difficulty)
+  VALUES (v_user_id, 'game_2048', TRUE, TRUE, 'normal')
+  ON CONFLICT (user_id) DO NOTHING;
+
+  RETURN public._profile_json(v_user_id);
+END;
+$func$;
+
+-- Login
+CREATE FUNCTION public.login_frictionless_user(
+  p_identifier TEXT,
+  p_password TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $func$
+DECLARE
+  v_id UUID;
+  v_clean_ident TEXT := TRIM(p_identifier);
+BEGIN
+  SELECT id INTO v_id
+  FROM public.profiles
+  WHERE (username = LOWER(v_clean_ident) OR uid = UPPER(v_clean_ident))
+    AND status <> 'banned';
+
+  -- Same message for unknown user and wrong password.
+  IF v_id IS NULL OR NOT public._check_account_password(v_id, p_password) THEN
+    RAISE EXCEPTION 'Invalid username or password';
+  END IF;
+
+  UPDATE public.profiles SET last_login_at = NOW() WHERE id = v_id;
+  RETURN public._profile_json(v_id);
+END;
+$func$;
+
+-- Reset password with recovery key
+CREATE FUNCTION public.reset_user_password(
+  p_identifier TEXT,
+  p_recovery_code_hash TEXT,
+  p_new_password TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $func$
+DECLARE
+  v_id UUID;
+  v_stored TEXT;
+  v_clean_ident TEXT := TRIM(p_identifier);
+BEGIN
+  SELECT id, recovery_code_hash INTO v_id, v_stored
+  FROM public.profiles
+  WHERE (username = LOWER(v_clean_ident) OR uid = UPPER(v_clean_ident));
+
+  IF v_id IS NULL OR v_stored IS NULL OR v_stored <> p_recovery_code_hash THEN
+    RAISE EXCEPTION 'Invalid username or recovery key';
+  END IF;
+  PERFORM public._validate_new_password(p_new_password);
+
+  UPDATE public.profiles
+  SET password_hash = crypt(p_new_password, gen_salt('bf', 10)),
+      pin_hash = NULL,
+      updated_at = NOW(),
+      last_login_at = NOW()
+  WHERE id = v_id;
+
+  UPDATE public.user_preferences
+  SET unlock_secret_hash = crypt(p_new_password, gen_salt('bf', 10)),
+      updated_at = NOW()
+  WHERE user_id = v_id;
+
+  RETURN public._profile_json(v_id);
+END;
+$func$;
+
+-- ---------------------------------------------------------------------------
+-- Stealth unlock password
+-- ---------------------------------------------------------------------------
+-- Existing unlock hashes that are not bcrypt (older PIN hashes) accept the account password
+-- once and are then re-hashed with bcrypt.
+CREATE OR REPLACE FUNCTION public._check_unlock_password(p_user_id UUID, p_secret TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $func$
+DECLARE
+  v_hash TEXT;
+BEGIN
+  IF p_secret IS NULL OR p_secret = '' THEN
+    RETURN FALSE;
+  END IF;
+
+  SELECT unlock_secret_hash INTO v_hash FROM public.user_preferences WHERE user_id = p_user_id;
+
+  IF v_hash LIKE '$2%' THEN
+    RETURN v_hash = crypt(p_secret, v_hash);
+  END IF;
+
+  IF public._check_account_password(p_user_id, p_secret) THEN
+    UPDATE public.user_preferences
+    SET unlock_secret_hash = crypt(p_secret, gen_salt('bf', 10)), updated_at = NOW()
+    WHERE user_id = p_user_id;
+    RETURN FOUND;
+  END IF;
+
+  RETURN FALSE;
+END;
+$func$;
+REVOKE ALL ON FUNCTION public._check_unlock_password(UUID, TEXT) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.verify_vault_unlock(p_user_id UUID, p_secret TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $func$
+  SELECT public._check_unlock_password(p_user_id, p_secret);
+$func$;
+
+CREATE OR REPLACE FUNCTION public.update_vault_unlock(p_user_id UUID, p_old_secret TEXT, p_new_secret TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $func$
+BEGIN
+  IF NOT public._check_unlock_password(p_user_id, p_old_secret) THEN
+    RAISE EXCEPTION 'Current unlock password is incorrect';
+  END IF;
+  IF p_new_secret IS NULL OR char_length(p_new_secret) < 4 THEN
+    RAISE EXCEPTION 'Unlock password must be at least 4 characters';
+  END IF;
+  IF octet_length(p_new_secret) > 72 THEN
+    RAISE EXCEPTION 'Unlock password must be at most 72 bytes';
+  END IF;
+
+  UPDATE public.user_preferences
+  SET unlock_secret_hash = crypt(p_new_secret, gen_salt('bf', 10)), updated_at = NOW()
+  WHERE user_id = p_user_id;
+  RETURN TRUE;
+END;
+$func$;
+
+GRANT EXECUTE ON FUNCTION public.register_frictionless_user(TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.login_frictionless_user(TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.reset_user_password(TEXT, TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.verify_vault_unlock(UUID, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.update_vault_unlock(UUID, TEXT, TEXT) TO anon, authenticated;
+
+-- ------------------------------------------------------------------
 -- File: supabase/migrations/20260923000003_session_auth_hardening.sql
+-- ------------------------------------------------------------------
 -- Migration: 20260923000003_session_auth_hardening.sql
 --
 -- Moves authentication onto real Supabase Auth sessions and removes every RPC that trusted a
@@ -1377,8 +2055,9 @@ BEGIN
 END;
 $grants$;
 
-
+-- ------------------------------------------------------------------
 -- File: supabase/migrations/20260923000004_super_admin_tools.sql
+-- ------------------------------------------------------------------
 -- Migration: 20260923000004_super_admin_tools.sql
 --
 -- 1. public.grant_super_admin(username, uid): promotes an existing, normally registered account.
@@ -1541,9 +2220,10 @@ REVOKE ALL ON FUNCTION public.admin_delete_gallery_item(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_set_user_status(UUID, public.account_status, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_delete_gallery_item(UUID) TO authenticated;
 
-
+-- ------------------------------------------------------------------
 -- File: supabase/migrations/20260923000005_super_admin_user_inspector.sql
-﻿-- Migration: 20260923000005_super_admin_user_inspector.sql
+-- ------------------------------------------------------------------
+-- Migration: 20260923000005_super_admin_user_inspector.sql
 -- Description: Super Admin inspection policies, block inspection, and audit logging RPCs
 
 -- 1. Ensure user_blocks SELECT policy allows super admins
@@ -1587,4 +2267,125 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 GRANT EXECUTE ON FUNCTION public.log_admin_action(TEXT, UUID, TEXT, JSONB) TO authenticated;
 
+-- ------------------------------------------------------------------
+-- File: supabase/migrations/20260923000006_security_incident_remediation.sql
+-- ------------------------------------------------------------------
+-- Migration: 20260923000006_security_incident_remediation.sql
+--
+-- Security incident remediation. Safe to run whether or not the unsafe bootstrap script
+-- (supabase/init_schema_and_admin.sql, now replaced) was ever executed. Every statement is idempotent.
+--
+-- 1. Removes the permissive policies that script added (RLS policies are OR-combined, so one
+--    permissive policy silently overrides every stricter one on the same table).
+-- 2. Blocks end users from inserting their own profile rows (profiles are created only by the
+--    vault-auth Edge Function with the service role).
+-- 3. Forces the private gallery bucket back to private.
+-- 4. Restores the audit-log insert check that the acting admin must be the caller.
+-- 5. Pins search_path on log_admin_action (SECURITY DEFINER).
+-- 6. Neutralises super-admin accounts created outside the approved flow (no account_secrets row),
+--    including the account the old bootstrap script created with a password committed to git.
 
+-- ---------------------------------------------------------------------------
+-- 1. Permissive policies from the unsafe bootstrap script
+-- ---------------------------------------------------------------------------
+DROP POLICY IF EXISTS "Profiles are readable by authenticated users" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update own profile or super admin" ON public.profiles;
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Members can view messages" ON public.messages;
+DROP POLICY IF EXISTS "Members can send messages" ON public.messages;
+DROP POLICY IF EXISTS "Users can view own gallery or super admin" ON public.gallery_items;
+DROP POLICY IF EXISTS "Users can insert own gallery" ON public.gallery_items;
+DROP POLICY IF EXISTS "Users can delete own gallery" ON public.gallery_items;
+
+-- ---------------------------------------------------------------------------
+-- 2. Profiles are provisioned only by the server
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.guard_profile_insert()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $func$
+BEGIN
+  IF coalesce(auth.role(), '') IN ('authenticated', 'anon') THEN
+    RAISE EXCEPTION 'Profiles are created by the server during sign-up' USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$func$;
+
+DROP TRIGGER IF EXISTS guard_profile_insert ON public.profiles;
+CREATE TRIGGER guard_profile_insert
+  BEFORE INSERT ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.guard_profile_insert();
+
+REVOKE INSERT ON public.profiles FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.guard_profile_insert() FROM PUBLIC, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3. Private gallery bucket
+-- ---------------------------------------------------------------------------
+UPDATE storage.buckets SET public = FALSE WHERE id = 'gallery' AND public IS DISTINCT FROM FALSE;
+
+-- ---------------------------------------------------------------------------
+-- 4. Audit log: the acting admin recorded in a row must be the caller
+-- ---------------------------------------------------------------------------
+DROP POLICY IF EXISTS "admin_access_log_insert_policy" ON public.admin_access_log;
+DROP POLICY IF EXISTS "admin_log_insert_policy" ON public.admin_access_log;
+CREATE POLICY "admin_log_insert_policy" ON public.admin_access_log
+  FOR INSERT TO authenticated WITH CHECK (public.is_super_admin() AND admin_id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- 5. SECURITY DEFINER hygiene
+-- ---------------------------------------------------------------------------
+ALTER FUNCTION public.log_admin_action(TEXT, UUID, TEXT, JSONB) SET search_path = public;
+ALTER FUNCTION public.is_super_admin() SET search_path = public;
+REVOKE ALL ON FUNCTION public.log_admin_action(TEXT, UUID, TEXT, JSONB) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.log_admin_action(TEXT, UUID, TEXT, JSONB) TO authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 6. Super admins created outside the approved flow
+-- ---------------------------------------------------------------------------
+-- Every account created by the vault-auth Edge Function (or migrated by 20260923000003) has an
+-- account_secrets row. A super admin without one was inserted directly into the database.
+-- It is demoted and suspended (not deleted, so its data remains available for review), and any
+-- password it had is replaced with a random one. Re-promote a legitimate account with
+-- grant_super_admin() after it signs in through the app.
+DO $remediate$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT p.id, p.username, p.uid
+    FROM public.profiles p
+    WHERE p.role = 'super_admin'
+      AND (
+        NOT EXISTS (SELECT 1 FROM public.account_secrets s WHERE s.user_id = p.id)
+        OR EXISTS (SELECT 1 FROM auth.users u WHERE u.id = p.id AND u.email ILIKE '%@vault.local')
+      )
+  LOOP
+    UPDATE public.profiles SET role = 'user', status = 'suspended', updated_at = NOW() WHERE id = r.id;
+    UPDATE auth.users
+    SET encrypted_password = extensions.crypt(encode(extensions.gen_random_bytes(32), 'hex'), extensions.gen_salt('bf', 10))
+    WHERE id = r.id;
+    INSERT INTO public.admin_access_log (admin_id, action_type, target_user_id, metadata)
+    VALUES (NULL, 'REVOKE_SUPER_ADMIN', r.id,
+            jsonb_build_object('reason', 'security_incident_remediation: super admin created outside approved flow',
+                               'username', r.username, 'uid', r.uid));
+  END LOOP;
+END;
+$remediate$;
+
+-- ------------------------------------------------------------------
+-- File: supabase/migrations/20260923000007_definer_trigger_hardening.sql
+-- ------------------------------------------------------------------
+-- Migration: 20260923000007_definer_trigger_hardening.sql
+-- Security hotfix: the two SECURITY DEFINER trigger functions from the initial schema had no pinned
+-- search_path and were executable by anon/authenticated. Trigger functions cannot be invoked as
+-- RPCs, so this is defence in depth: pin search_path and remove the unnecessary EXECUTE grants.
+-- Triggers keep working (EXECUTE is checked when the trigger is created, not when it fires).
+
+ALTER FUNCTION public.handle_connection_accepted() SET search_path = public;
+ALTER FUNCTION public.handle_conversation_created() SET search_path = public;
+REVOKE ALL ON FUNCTION public.handle_connection_accepted() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.handle_conversation_created() FROM PUBLIC, anon, authenticated;
