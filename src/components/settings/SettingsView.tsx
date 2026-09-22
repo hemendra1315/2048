@@ -7,7 +7,7 @@ import { useToast } from '../../context/ToastContext';
 import { CoverGameType } from '../../types';
 
 export const SettingsView: React.FC = () => {
-  const { user, logout, isSuperAdmin } = useAuth();
+  const { user, logout, isSuperAdmin, updateProfile } = useAuth();
   const { preferences, updatePreferences, updateSecret, panicLock } = useVault();
   const { currentGame, setCurrentGame } = useGame();
   const { showToast } = useToast();
@@ -163,6 +163,37 @@ export const SettingsView: React.FC = () => {
             <span>{pinUpdating ? 'Hashing & Updating...' : 'Update PIN'}</span>
           </button>
         </form>
+      </div>
+
+      {/* Biometric Unlock Settings */}
+      <div className="bg-vault-900 border border-vault-800 rounded-3xl p-5 shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Shield className="w-4 h-4 text-arcade-gold" />
+              <span>Biometric / Fingerprint Unlock</span>
+            </h3>
+            <p className="text-xs text-vault-400">
+              Prompt biometric hardware immediately upon launching Vault
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              const nextState = !user?.biometric_enabled;
+              await updateProfile({ biometric_enabled: nextState });
+            }}
+            className={`w-12 h-7 rounded-full transition-colors relative p-0.5 ${
+              user?.biometric_enabled ? 'bg-arcade-gold' : 'bg-vault-800 border border-vault-700'
+            }`}
+          >
+            <div
+              className={`w-6 h-6 rounded-full bg-white transition-transform ${
+                user?.biometric_enabled ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
       </div>
 
       {/* 4. Account Info & Session Actions */}

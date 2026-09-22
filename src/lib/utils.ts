@@ -1,4 +1,4 @@
-import { type ClassValue, clsx } from 'clsx';
+﻿import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 export function cn(...inputs: ClassValue[]) {
@@ -36,9 +36,32 @@ export function formatDetailedDate(isoString: string): string {
   });
 }
 
-// Simple browser-compatible SHA-256 hash for secure client-side check fallback & verification
+// Generate unique, human-readable UID (e.g. CIPHER-4921)
+export function generateUniqueUID(): string {
+  const prefixes = ['CIPHER', 'VAULT', 'NEXUS', 'SHADOW', 'STEALTH', 'PRISM', 'AEGIS', 'PHANTOM'];
+  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+  const num = Math.floor(1000 + Math.random() * 9000);
+  return `${prefix}-${num}`;
+}
+
+// Generate cryptographically secure recovery code (e.g. RC-7F9A-4B2E-89D1)
+export function generateRecoveryCode(): string {
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  const hex = Array.from(bytes).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join('');
+  return `RC-${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}`;
+}
+
+// Secure SHA-256 hash for PIN and Secrets with salt
 export async function hashSecret(secret: string): Promise<string> {
   const msgUint8 = new TextEncoder().encode(secret + '_vault_salt_2026');
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function hashPin(pin: string, usernameOrSalt: string): Promise<string> {
+  const msgUint8 = new TextEncoder().encode(`${usernameOrSalt.toLowerCase().trim()}:${pin}:vault_pin_salt_v2`);
   const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');

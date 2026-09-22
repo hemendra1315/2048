@@ -11,11 +11,14 @@ export * from './database';
 export interface UserProfile {
   id: string;
   uid: string;
+  username?: string;
   display_name: string;
   avatar_url: string | null;
+  biometric_enabled?: boolean;
   role: UserRole;
   status: AccountStatus;
   created_at: string;
+  last_login_at?: string;
   updated_at: string;
 }
 

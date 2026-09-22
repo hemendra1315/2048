@@ -31,8 +31,10 @@ const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr_admin_001',
     uid: 'TITAN-9000',
+    username: 'admin',
     display_name: 'Overwatch (Admin)',
     avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    biometric_enabled: true,
     role: 'super_admin',
     status: 'active',
     created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
@@ -41,8 +43,10 @@ const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr_demo_002',
     uid: 'CIPHER-4921',
+    username: 'alex',
     display_name: 'Alex Mercer',
     avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    biometric_enabled: true,
     role: 'user',
     status: 'active',
     created_at: new Date(Date.now() - 86400000 * 14).toISOString(),
@@ -51,8 +55,10 @@ const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr_friend_003',
     uid: 'SOLAR-8120',
+    username: 'elena',
     display_name: 'Elena Rostova',
     avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
+    biometric_enabled: true,
     role: 'user',
     status: 'active',
     created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
@@ -61,8 +67,10 @@ const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr_friend_004',
     uid: 'VORTEX-3391',
+    username: 'marcus',
     display_name: 'Marcus Vance',
     avatar_url: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&auto=format&fit=crop&q=80',
+    biometric_enabled: false,
     role: 'user',
     status: 'active',
     created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
@@ -273,19 +281,70 @@ class MockBackendService {
     return user;
   }
 
-  async register(displayName: string): Promise<UserProfile> {
+  async loginWithPin(identifier: string, _pin: string): Promise<UserProfile> {
     const profiles = this.getProfiles();
+    const clean = identifier.toLowerCase().trim();
+    const user = profiles.find(
+      p => p.username?.toLowerCase() === clean || p.uid.toLowerCase() === clean
+    );
+    if (!user) {
+      throw new Error(`Identity "${identifier}" not found in Vault.`);
+    }
+    if (user.status === 'banned') {
+      throw new Error('This account has been permanently suspended by administration.');
+    }
+    if (user.status === 'suspended') {
+      throw new Error('This account is temporarily suspended.');
+    }
+    this.setCurrentUser(user);
+    return user;
+  }
+
+  async loginWithBiometrics(identifier?: string): Promise<UserProfile> {
+    const profiles = this.getProfiles();
+    let user: UserProfile | undefined;
+    if (identifier) {
+      const clean = identifier.toLowerCase().trim();
+      user = profiles.find(p => p.username?.toLowerCase() === clean || p.uid.toLowerCase() === clean);
+    } else {
+      const lastUser = this.getCurrentUser();
+      user = lastUser || profiles.find(p => p.biometric_enabled) || profiles[1];
+    }
+    if (!user) {
+      user = profiles[1];
+    }
+    this.setCurrentUser(user);
+    return user;
+  }
+
+  async registerFrictionless(params: {
+    username: string;
+    pin: string;
+    enableBiometrics: boolean;
+    avatarUrl?: string;
+  }): Promise<{ user: UserProfile; recoveryCode: string }> {
+    const profiles = this.getProfiles();
+    const cleanUsername = params.username.toLowerCase().trim();
+
+    if (profiles.some(p => p.username?.toLowerCase() === cleanUsername)) {
+      throw new Error(`Username "${params.username}" is already taken.`);
+    }
+
     const newUid = this.generateUID();
     const newUserId = `usr_${Date.now()}`;
+    const recoveryCode = `RC-${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
     const newUser: UserProfile = {
       id: newUserId,
       uid: newUid,
-      display_name: displayName.trim(),
-      avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${newUid}`,
+      username: cleanUsername,
+      display_name: params.username.trim(),
+      avatar_url: params.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${newUid}`,
+      biometric_enabled: params.enableBiometrics,
       role: 'user',
       status: 'active',
       created_at: new Date().toISOString(),
+      last_login_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
@@ -294,7 +353,7 @@ class MockBackendService {
 
     // Initialize Preferences with hashed secret
     const prefsMap = this.getAllUserPrefs();
-    const defaultSecretHash = await hashSecret('2048');
+    const defaultSecretHash = await hashSecret(params.pin);
     prefsMap[newUserId] = {
       id: `pref_${newUserId}`,
       user_id: newUserId,
@@ -309,7 +368,38 @@ class MockBackendService {
     localStorage.setItem(KEYS.USER_PREFS, JSON.stringify(prefsMap));
 
     this.setCurrentUser(newUser);
-    return newUser;
+    return { user: newUser, recoveryCode };
+  }
+
+  async resetPinWithRecoveryCode(
+    identifier: string,
+    _recoveryCode: string,
+    newPin: string
+  ): Promise<UserProfile> {
+    const profiles = this.getProfiles();
+    const clean = identifier.toLowerCase().trim();
+    const user = profiles.find(
+      p => p.username?.toLowerCase() === clean || p.uid.toLowerCase() === clean
+    );
+    if (!user) {
+      throw new Error(`Identity "${identifier}" not found.`);
+    }
+    const prefsMap = this.getAllUserPrefs();
+    if (prefsMap[user.id]) {
+      prefsMap[user.id].unlock_secret_hash = await hashSecret(newPin);
+      localStorage.setItem(KEYS.USER_PREFS, JSON.stringify(prefsMap));
+    }
+    this.setCurrentUser(user);
+    return user;
+  }
+
+  async register(displayName: string): Promise<UserProfile> {
+    const result = await this.registerFrictionless({
+      username: displayName.toLowerCase().replace(/\s+/g, '_'),
+      pin: '1234',
+      enableBiometrics: false,
+    });
+    return result.user;
   }
 
   // PROFILES & UID LOOKUP

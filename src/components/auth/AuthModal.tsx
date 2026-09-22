@@ -1,168 +1,704 @@
-import React, { useState } from 'react';
-import { Shield, UserPlus, LogIn, Lock, Mail, User, Sparkles, ShieldAlert } from 'lucide-react';
+﻿import React, { useState, useEffect } from 'react';
+import {
+  Shield,
+  Fingerprint,
+  Lock,
+  User,
+  KeyRound,
+  CheckCircle2,
+  Copy,
+  Sparkles,
+  ArrowRight,
+  ArrowLeft,
+  RefreshCw,
+  Check,
+  ShieldAlert,
+  HelpCircle,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useVault } from '../../context/VaultContext';
+import { useToast } from '../../context/ToastContext';
+
+type AuthMode = 'login' | 'onboarding' | 'recovery';
+type OnboardingStep = 'username' | 'pin' | 'biometric' | 'recovery_code';
 
 export const AuthModal: React.FC = () => {
-  const { login, register, loading } = useAuth();
+  const {
+    loginWithPin,
+    loginWithBiometrics,
+    registerFrictionless,
+    resetPinWithRecovery,
+    isBiometricsSupported,
+    loading,
+  } = useAuth();
   const { panicLock } = useVault();
-  const [isRegister, setIsRegister] = useState(false);
-  const [displayName, setDisplayName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const { showToast } = useToast();
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const [mode, setMode] = useState<AuthMode>('login');
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('username');
+
+  // Login form state
+  const [identifier, setIdentifier] = useState('alex');
+  const [pin, setPin] = useState('');
+  const [biometricAttempted, setBiometricAttempted] = useState(false);
+
+  // Onboarding form state
+  const [newUsername, setNewUsername] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [generatedRecoveryCode, setGeneratedRecoveryCode] = useState('');
+  const [hasSavedRecoveryCode, setHasSavedRecoveryCode] = useState(false);
+  const [copiedRecoveryCode, setCopiedRecoveryCode] = useState(false);
+
+  // Recovery form state
+  const [recoveryIdent, setRecoveryIdent] = useState('');
+  const [recoveryCodeInput, setRecoveryCodeInput] = useState('');
+  const [recoveryNewPin, setRecoveryNewPin] = useState('');
+
+  // Automatically prompt biometrics on mount if supported and in login mode
+  useEffect(() => {
+    if (mode === 'login' && isBiometricsSupported && !biometricAttempted) {
+      setBiometricAttempted(true);
+      loginWithBiometrics().catch(() => {
+        // Fall back gracefully to PIN input
+      });
+    }
+  }, [mode, isBiometricsSupported, biometricAttempted, loginWithBiometrics]);
+
+  // Handle Login submission
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isRegister) {
-      if (!displayName.trim()) return;
-      await register(displayName, email, password);
-    } else {
-      if (!email.trim()) return;
-      await login(email, password);
+    if (!identifier.trim() || !pin.trim()) {
+      showToast('Please enter your Username/UID and PIN', 'error');
+      return;
+    }
+    if (pin.length < 4 || pin.length > 6) {
+      showToast('PIN must be 4 to 6 digits', 'error');
+      return;
+    }
+    try {
+      await loginWithPin(identifier, pin);
+    } catch {
+      // Error handled by AuthContext toast
     }
   };
 
+  // Trigger manual biometric authentication
+  const handleBiometricAuth = async () => {
+    try {
+      await loginWithBiometrics(identifier.trim() || undefined);
+    } catch {
+      // Fallback
+    }
+  };
+
+  // Quick Demo Account switcher
   const handleQuickDemo = async (role: 'user' | 'admin' | 'friend') => {
     if (role === 'admin') {
-      await login('admin@vault.app');
+      setIdentifier('admin');
+      setPin('1234');
+      await loginWithPin('admin', '1234');
     } else if (role === 'friend') {
-      await login('elena@vault.app');
+      setIdentifier('elena');
+      setPin('1234');
+      await loginWithPin('elena', '1234');
     } else {
-      await login('user@vault.app');
+      setIdentifier('alex');
+      setPin('1234');
+      await loginWithPin('alex', '1234');
     }
+  };
+
+  // Step 1: Validate Username -> Move to PIN
+  const handleUsernameNext = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newUsername.trim().toLowerCase();
+    if (clean.length < 2) {
+      showToast('Username must be at least 2 characters', 'error');
+      return;
+    }
+    if (!/^[a-z0-9_]+$/.test(clean)) {
+      showToast('Username can only contain letters, numbers, and underscores', 'error');
+      return;
+    }
+    setOnboardingStep('pin');
+  };
+
+  // Step 2: Validate PIN -> Move to Biometrics
+  const handlePinNext = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPin.length < 4 || newPin.length > 6) {
+      showToast('PIN must be 4 to 6 digits', 'error');
+      return;
+    }
+    if (newPin !== confirmPin) {
+      showToast('PIN confirmation does not match', 'error');
+      return;
+    }
+    if (isBiometricsSupported) {
+      setOnboardingStep('biometric');
+    } else {
+      finalizeRegistration(false);
+    }
+  };
+
+  // Step 3: Biometric choice -> Finalize Registration
+  const handleBiometricChoice = (enable: boolean) => {
+    finalizeRegistration(enable);
+  };
+
+  // Finalize Registration & Show Recovery Code
+  const finalizeRegistration = async (biometricPref: boolean) => {
+    try {
+      const res = await registerFrictionless({
+        username: newUsername.trim().toLowerCase(),
+        pin: newPin.trim(),
+        enableBiometrics: biometricPref,
+      });
+      setGeneratedRecoveryCode(res.recoveryCode);
+      setOnboardingStep('recovery_code');
+    } catch {
+      // Error handled by AuthContext
+    }
+  };
+
+  // Copy Recovery Code
+  const copyRecoveryCode = () => {
+    navigator.clipboard.writeText(generatedRecoveryCode);
+    setCopiedRecoveryCode(true);
+    showToast('Recovery code copied to clipboard', 'info');
+    setTimeout(() => setCopiedRecoveryCode(false), 3000);
+  };
+
+  // Handle Recovery Submit
+  const handleRecoverySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!recoveryIdent.trim() || !recoveryCodeInput.trim() || !recoveryNewPin.trim()) {
+      showToast('Please fill all recovery fields', 'error');
+      return;
+    }
+    if (recoveryNewPin.length < 4 || recoveryNewPin.length > 6) {
+      showToast('New PIN must be 4 to 6 digits', 'error');
+      return;
+    }
+    try {
+      await resetPinWithRecovery(recoveryIdent, recoveryCodeInput, recoveryNewPin);
+    } catch {
+      // Handled
+    }
+  };
+
+  const getStepText = () => {
+    if (onboardingStep === 'username') return '1/4';
+    if (onboardingStep === 'pin') return '2/4';
+    if (onboardingStep === 'biometric') return '3/4';
+    return '4/4';
   };
 
   return (
     <div className="min-h-screen bg-vault-950 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-vault-900 border border-vault-700/80 rounded-3xl p-6 shadow-2xl relative">
-        {/* Header */}
-        <div className="flex flex-col items-center text-center mb-6">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-arcade-gold to-amber-600 flex items-center justify-center text-vault-950 font-bold shadow-lg shadow-amber-500/20 mb-3">
-            <Shield className="w-7 h-7" />
-          </div>
-          <h2 className="text-xl font-bold text-white tracking-tight">
-            {isRegister ? 'Create Vault Identity' : 'Vault Access Gate'}
-          </h2>
-          <p className="text-xs text-vault-400 mt-1">
-            {isRegister
-              ? 'Receive an encrypted human-readable UID'
-              : 'Sign in to access private social matrix'}
-          </p>
-        </div>
+      <div className="w-full max-w-sm bg-vault-900 border border-vault-700/80 rounded-3xl p-6 shadow-2xl relative backdrop-blur-xl">
+        {/* ========================================================================= */}
+        {/* 1. LOGIN MODE */}
+        {/* ========================================================================= */}
+        {mode === 'login' && (
+          <div>
+            {/* Header */}
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-arcade-gold to-amber-600 flex items-center justify-center text-vault-950 font-bold shadow-lg shadow-amber-500/20 mb-3">
+                <Shield className="w-7 h-7" />
+              </div>
+              <h2 className="text-xl font-bold text-white tracking-tight">Vault Access Gate</h2>
+              <p className="text-xs text-vault-400 mt-1">Authenticate via Biometrics or PIN</p>
+            </div>
 
-        {/* Quick Demo Credentials Bar */}
-        <div className="bg-vault-950/80 border border-vault-800 rounded-2xl p-2.5 mb-5 text-center">
-          <div className="text-[10px] font-bold text-arcade-gold uppercase tracking-wider mb-2 flex items-center justify-center gap-1">
-            <Sparkles className="w-3 h-3" /> Quick Switch Identity
-          </div>
-          <div className="grid grid-cols-3 gap-1.5">
-            <button
-              type="button"
-              onClick={() => handleQuickDemo('user')}
-              className="py-1.5 px-2 bg-vault-800 hover:bg-vault-700 text-xs font-semibold rounded-xl text-vault-200 border border-vault-700 active:scale-95 transition-all"
-            >
-              Demo User
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickDemo('friend')}
-              className="py-1.5 px-2 bg-vault-800 hover:bg-vault-700 text-xs font-semibold rounded-xl text-vault-200 border border-vault-700 active:scale-95 transition-all"
-            >
-              Elena
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickDemo('admin')}
-              className="py-1.5 px-2 bg-amber-950/80 hover:bg-amber-900 text-xs font-bold rounded-xl text-amber-300 border border-amber-600/50 active:scale-95 transition-all flex items-center justify-center gap-1"
-            >
-              <ShieldAlert className="w-3 h-3" /> Admin
-            </button>
-          </div>
-        </div>
+            {/* Biometric Quick Trigger (if supported) */}
+            {isBiometricsSupported && (
+              <div className="mb-5">
+                <button
+                  type="button"
+                  onClick={handleBiometricAuth}
+                  disabled={loading}
+                  className="w-full bg-vault-800/90 hover:bg-vault-750 border border-arcade-gold/40 hover:border-arcade-gold p-3.5 rounded-2xl flex items-center justify-center gap-3 text-vault-100 transition-all active:scale-98 group shadow-md"
+                >
+                  <div className="w-9 h-9 rounded-xl bg-arcade-gold/20 flex items-center justify-center text-arcade-gold group-hover:scale-110 transition-transform">
+                    <Fingerprint className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-xs font-bold text-white">Unlock with Fingerprint</div>
+                    <div className="text-[10px] text-vault-400">Touch sensor to access Vault</div>
+                  </div>
+                </button>
+              </div>
+            )}
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-3.5">
-          {isRegister && (
-            <div>
-              <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-                Display Name
-              </label>
-              <div className="relative">
-                <User className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            {/* Quick Demo Switcher */}
+            <div className="bg-vault-950/80 border border-vault-800 rounded-2xl p-2.5 mb-5 text-center">
+              <div className="text-[10px] font-bold text-arcade-gold uppercase tracking-wider mb-2 flex items-center justify-center gap-1">
+                <Sparkles className="w-3 h-3" /> Quick Switch Identity
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleQuickDemo('user')}
+                  className="py-1.5 px-2 bg-vault-800 hover:bg-vault-700 text-xs font-semibold rounded-xl text-vault-200 border border-vault-700 active:scale-95 transition-all"
+                >
+                  @alex
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickDemo('friend')}
+                  className="py-1.5 px-2 bg-vault-800 hover:bg-vault-700 text-xs font-semibold rounded-xl text-vault-200 border border-vault-700 active:scale-95 transition-all"
+                >
+                  @elena
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickDemo('admin')}
+                  className="py-1.5 px-2 bg-amber-950/80 hover:bg-amber-900 text-xs font-bold rounded-xl text-amber-300 border border-amber-600/50 active:scale-95 transition-all flex items-center justify-center gap-1"
+                >
+                  <ShieldAlert className="w-3 h-3" /> Admin
+                </button>
+              </div>
+            </div>
+
+            {/* PIN Login Form */}
+            <form onSubmit={handleLoginSubmit} className="space-y-3.5">
+              <div>
+                <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
+                  Username or UID
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    value={identifier}
+                    onChange={e => setIdentifier(e.target.value)}
+                    placeholder="e.g. alex or CIPHER-4921"
+                    className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-white placeholder-vault-600 outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-semibold text-vault-300 uppercase tracking-wider">
+                    4-6 Digit PIN
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setMode('recovery')}
+                    className="text-[11px] text-arcade-gold hover:underline flex items-center gap-1"
+                  >
+                    <HelpCircle className="w-3 h-3" /> Forgot PIN?
+                  </button>
+                </div>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    required
+                    value={pin}
+                    onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
+                    placeholder="••••"
+                    className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-white tracking-widest placeholder-vault-600 outline-none transition-colors text-center font-mono text-base"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-arcade-gold hover:bg-amber-400 active:scale-95 disabled:opacity-50 text-vault-950 font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-2 mt-2"
+              >
+                <Lock className="w-4 h-4" />
+                <span>Authorize & Enter Vault</span>
+              </button>
+            </form>
+
+            {/* Toggle & Panic Exit */}
+            <div className="mt-5 flex flex-col items-center gap-3 pt-4 border-t border-vault-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('onboarding');
+                  setOnboardingStep('username');
+                }}
+                className="text-xs text-vault-400 hover:text-arcade-gold transition-colors"
+              >
+                First time here? <span className="text-arcade-gold font-semibold">Create Frictionless Account</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={panicLock}
+                className="text-[11px] text-rose-400/80 hover:text-rose-300 flex items-center gap-1 transition-colors"
+              >
+                <Lock className="w-3 h-3" /> Return to Cover Game
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* 2. ONBOARDING MODE (Step-by-Step Frictionless Account Creation) */}
+        {/* ========================================================================= */}
+        {mode === 'onboarding' && (
+          <div>
+            {/* Step Progress Bar */}
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-1.5">
+                <div
+                  className={`w-6 h-1.5 rounded-full ${
+                    onboardingStep === 'username' ? 'bg-arcade-gold' : 'bg-vault-700'
+                  }`}
+                />
+                <div
+                  className={`w-6 h-1.5 rounded-full ${
+                    onboardingStep === 'pin' ? 'bg-arcade-gold' : 'bg-vault-700'
+                  }`}
+                />
+                <div
+                  className={`w-6 h-1.5 rounded-full ${
+                    onboardingStep === 'biometric' ? 'bg-arcade-gold' : 'bg-vault-700'
+                  }`}
+                />
+                <div
+                  className={`w-6 h-1.5 rounded-full ${
+                    onboardingStep === 'recovery_code' ? 'bg-arcade-gold' : 'bg-vault-700'
+                  }`}
+                />
+              </div>
+              <span className="text-[10px] font-bold text-vault-400 uppercase tracking-wider">
+                Step {getStepText()}
+              </span>
+            </div>
+
+            {/* STEP 1: USERNAME */}
+            {onboardingStep === 'username' && (
+              <form onSubmit={handleUsernameNext}>
+                <div className="flex flex-col items-center text-center mb-6">
+                  <div className="w-12 h-12 rounded-2xl bg-vault-800 border border-vault-700 flex items-center justify-center text-arcade-gold mb-2">
+                    <User className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white">Choose Your Identity</h3>
+                  <p className="text-xs text-vault-400 mt-1">
+                    No email or password needed. Pick a username.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
+                      Username
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-vault-500 font-mono text-sm">
+                        @
+                      </span>
+                      <input
+                        type="text"
+                        required
+                        autoFocus
+                        value={newUsername}
+                        onChange={e => setNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                        placeholder="cipher_fox"
+                        className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-8 pr-3.5 py-2.5 text-sm text-white placeholder-vault-600 outline-none font-mono"
+                      />
+                    </div>
+                    <p className="text-[10px] text-vault-500 mt-1.5">
+                      A unique UID (e.g. CIPHER-4921) will be generated automatically.
+                    </p>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full bg-arcade-gold hover:bg-amber-400 text-vault-950 font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-2"
+                  >
+                    <span>Continue to PIN Setup</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* STEP 2: PIN */}
+            {onboardingStep === 'pin' && (
+              <form onSubmit={handlePinNext}>
+                <div className="flex flex-col items-center text-center mb-5">
+                  <div className="w-12 h-12 rounded-2xl bg-vault-800 border border-vault-700 flex items-center justify-center text-arcade-gold mb-2">
+                    <KeyRound className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white">Set 4-6 Digit PIN</h3>
+                  <p className="text-xs text-vault-400 mt-1">
+                    Your personal key to unlock the Vault.
+                  </p>
+                </div>
+
+                <div className="space-y-3.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
+                      Create PIN (4-6 digits)
+                    </label>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      required
+                      autoFocus
+                      value={newPin}
+                      onChange={e => setNewPin(e.target.value.replace(/\D/g, ''))}
+                      placeholder="••••"
+                      className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-center font-mono tracking-widest text-lg text-white outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
+                      Confirm PIN
+                    </label>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      required
+                      value={confirmPin}
+                      onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ''))}
+                      placeholder="••••"
+                      className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-center font-mono tracking-widest text-lg text-white outline-none"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setOnboardingStep('username')}
+                      className="w-1/3 bg-vault-800 hover:bg-vault-700 text-vault-300 font-semibold py-3 rounded-xl text-xs transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-2/3 bg-arcade-gold hover:bg-amber-400 text-vault-950 font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <span>Next</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+
+            {/* STEP 3: BIOMETRIC ENROLLMENT */}
+            {onboardingStep === 'biometric' && (
+              <div>
+                <div className="flex flex-col items-center text-center mb-6">
+                  <div className="w-14 h-14 rounded-2xl bg-arcade-gold/20 border border-arcade-gold/50 flex items-center justify-center text-arcade-gold mb-3 shadow-lg shadow-amber-500/10">
+                    <Fingerprint className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white">Enable Biometrics?</h3>
+                  <p className="text-xs text-vault-400 mt-1">
+                    Unlock the Vault instantaneously with your fingerprint or biometric sensor.
+                  </p>
+                </div>
+
+                <div className="bg-vault-950 border border-vault-800 rounded-2xl p-3 mb-5 text-xs text-vault-300 flex items-start gap-2.5">
+                  <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>
+                    Zero biometric data leaves your device hardware. Secured via platform-grade authenticator.
+                  </span>
+                </div>
+
+                <div className="space-y-2.5">
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => handleBiometricChoice(true)}
+                    className="w-full bg-arcade-gold hover:bg-amber-400 active:scale-98 text-vault-950 font-bold py-3.5 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-2"
+                  >
+                    <Fingerprint className="w-4 h-4" />
+                    <span>Enable Fingerprint Unlock</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => handleBiometricChoice(false)}
+                    className="w-full bg-vault-800 hover:bg-vault-700 text-vault-300 font-semibold py-2.5 rounded-xl text-xs transition-colors"
+                  >
+                    Skip for Now (Use PIN Only)
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 4: RECOVERY CODE DISPLAY & ACTIVATION */}
+            {onboardingStep === 'recovery_code' && (
+              <div>
+                <div className="flex flex-col items-center text-center mb-4">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mb-2">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white">Save Account Recovery Key</h3>
+                  <p className="text-xs text-vault-400 mt-1">
+                    Store this key securely. It is the <strong className="text-rose-400">ONLY</strong> way to reset your PIN if forgotten.
+                  </p>
+                </div>
+
+                {/* Code Card */}
+                <div className="bg-vault-950 border-2 border-dashed border-arcade-gold/50 rounded-2xl p-3.5 mb-4 text-center">
+                  <div className="text-[10px] uppercase font-bold text-vault-400 tracking-wider mb-1">
+                    One-Time Recovery Key
+                  </div>
+                  <div className="text-base font-mono font-bold text-arcade-gold tracking-wider select-all py-1">
+                    {generatedRecoveryCode}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={copyRecoveryCode}
+                    className="mt-2 text-xs text-vault-300 hover:text-white bg-vault-800 hover:bg-vault-750 px-3 py-1.5 rounded-lg border border-vault-700 inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    {copiedRecoveryCode ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" /> Copied!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" /> Copy Key
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Confirmation Checkbox */}
+                <label className="flex items-start gap-2.5 p-2 bg-vault-950/60 border border-vault-800 rounded-xl mb-4 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={hasSavedRecoveryCode}
+                    onChange={e => setHasSavedRecoveryCode(e.target.checked)}
+                    className="mt-1 rounded accent-arcade-gold"
+                  />
+                  <span className="text-[11px] text-vault-300 leading-tight">
+                    I have copied and safely stored my recovery key. I understand it cannot be recovered later.
+                  </span>
+                </label>
+
+                {/* Finish Button */}
+                <button
+                  type="button"
+                  disabled={!hasSavedRecoveryCode}
+                  onClick={() => {
+                    // Registration already stored session and logged user in!
+                  }}
+                  className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:pointer-events-none active:scale-98 text-vault-950 font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/20 text-sm transition-all flex items-center justify-center gap-2"
+                >
+                  <span>Enter Retro Vault</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Back to Login Toggle */}
+            {onboardingStep !== 'recovery_code' && (
+              <div className="mt-5 pt-4 border-t border-vault-800 text-center">
+                <button
+                  type="button"
+                  onClick={() => setMode('login')}
+                  className="text-xs text-vault-400 hover:text-arcade-gold transition-colors inline-flex items-center gap-1"
+                >
+                  <ArrowLeft className="w-3 h-3" /> Already have an account? Sign In
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* 3. RECOVERY MODE (Reset PIN via Recovery Code) */}
+        {/* ========================================================================= */}
+        {mode === 'recovery' && (
+          <div>
+            <div className="flex flex-col items-center text-center mb-5">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-arcade-gold mb-2">
+                <RefreshCw className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-bold text-white">Reset Vault PIN</h3>
+              <p className="text-xs text-vault-400 mt-1">Enter your Recovery Key to set a new PIN</p>
+            </div>
+
+            <form onSubmit={handleRecoverySubmit} className="space-y-3.5">
+              <div>
+                <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
+                  Username or UID
+                </label>
                 <input
                   type="text"
                   required
-                  value={displayName}
-                  onChange={e => setDisplayName(e.target.value)}
-                  placeholder="e.g. Cipher One"
-                  className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-white placeholder-vault-600 outline-none transition-colors"
+                  value={recoveryIdent}
+                  onChange={e => setRecoveryIdent(e.target.value)}
+                  placeholder="e.g. alex or CIPHER-4921"
+                  className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-vault-600 outline-none"
                 />
               </div>
-            </div>
-          )}
 
-          <div>
-            <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-              Email
-            </label>
-            <div className="relative">
-              <Mail className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="user@vault.app"
-                className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-white placeholder-vault-600 outline-none transition-colors"
-              />
+              <div>
+                <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
+                  Recovery Key
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={recoveryCodeInput}
+                  onChange={e => setRecoveryCodeInput(e.target.value.toUpperCase())}
+                  placeholder="RC-XXXX-XXXX-XXXX"
+                  className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-sm text-white font-mono placeholder-vault-600 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
+                  New 4-6 Digit PIN
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  required
+                  value={recoveryNewPin}
+                  onChange={e => setRecoveryNewPin(e.target.value.replace(/\D/g, ''))}
+                  placeholder="••••"
+                  className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-center font-mono tracking-widest text-lg text-white outline-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-arcade-gold hover:bg-amber-400 active:scale-95 disabled:opacity-50 text-vault-950 font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-2 mt-2"
+              >
+                <KeyRound className="w-4 h-4" />
+                <span>Reset PIN & Unlock</span>
+              </button>
+            </form>
+
+            <div className="mt-5 pt-4 border-t border-vault-800 text-center">
+              <button
+                type="button"
+                onClick={() => setMode('login')}
+                className="text-xs text-vault-400 hover:text-arcade-gold transition-colors inline-flex items-center gap-1"
+              >
+                <ArrowLeft className="w-3 h-3" /> Back to Sign In
+              </button>
             </div>
           </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-              Password
-            </label>
-            <div className="relative">
-              <Lock className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-white placeholder-vault-600 outline-none transition-colors"
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-arcade-gold hover:bg-amber-400 active:scale-95 disabled:opacity-50 text-vault-950 font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-2 mt-2"
-          >
-            {isRegister ? <UserPlus className="w-4 h-4" /> : <LogIn className="w-4 h-4" />}
-            <span>{isRegister ? 'Generate UID & Join' : 'Authorize Entrance'}</span>
-          </button>
-        </form>
-
-        {/* Toggle & Panic Exit */}
-        <div className="mt-5 flex flex-col items-center gap-3 pt-4 border-t border-vault-800">
-          <button
-            type="button"
-            onClick={() => setIsRegister(!isRegister)}
-            className="text-xs text-vault-400 hover:text-arcade-gold transition-colors"
-          >
-            {isRegister ? 'Already have a Vault UID? Sign In' : "Don't have an identity? Register here"}
-          </button>
-
-          <button
-            type="button"
-            onClick={panicLock}
-            className="text-[11px] text-rose-400/80 hover:text-rose-300 flex items-center gap-1 transition-colors"
-          >
-            <Lock className="w-3 h-3" /> Return to Cover Game
-          </button>
-        </div>
+        )}
       </div>
     </div>
   );
