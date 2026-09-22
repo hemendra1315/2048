@@ -21,17 +21,17 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({ title, onAdminToggle
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-vault-950/90 backdrop-blur-md border-b border-vault-800/80 px-4 py-3 flex items-center justify-between">
+    <header className="sticky top-0 z-30 bg-[#0A0A0A]/95 backdrop-blur-xl border-b border-[#262626] px-4 py-3 flex items-center justify-between select-none">
       <div className="flex items-center gap-2.5">
         <img
           src={user?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.uid || 'vault'}`}
           alt="Avatar"
-          className="w-9 h-9 rounded-full bg-vault-800 border border-vault-700 object-cover"
+          className="w-9 h-9 rounded-xl bg-[#171717] border border-[#262626] object-cover"
         />
         <div>
           <div className="flex items-center gap-1.5">
             <h2 className="text-sm font-bold text-white leading-tight">
-              {title || user?.display_name || 'Vault User'}
+              {title || user?.display_name || 'Sovereign Node'}
             </h2>
             {isSuperAdmin && (
               <span className="px-1.5 py-0.2 bg-amber-950 text-amber-300 border border-amber-600/50 rounded text-[9px] font-bold">
@@ -44,10 +44,10 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({ title, onAdminToggle
           {user?.uid && (
             <button
               onClick={copyUid}
-              className="flex items-center gap-1 text-[11px] font-mono text-arcade-gold/90 hover:text-arcade-gold transition-colors leading-tight mt-0.5"
+              className="flex items-center gap-1 text-[11px] font-mono text-[#10B981] hover:text-emerald-400 transition-colors leading-tight mt-0.5"
               title="Click to copy your UID"
             >
-              <ShieldCheck className="w-3 h-3 text-arcade-gold" />
+              <ShieldCheck className="w-3 h-3 text-[#10B981]" />
               <span>{user.uid}</span>
               <Copy className="w-2.5 h-2.5 opacity-60" />
             </button>
@@ -59,7 +59,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({ title, onAdminToggle
         {isSuperAdmin && onAdminToggle && (
           <button
             onClick={onAdminToggle}
-            className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-950/80 hover:bg-amber-900 border border-amber-600/50 rounded-full text-amber-300 text-xs font-bold transition-all"
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-950/80 hover:bg-amber-900 border border-amber-600/50 rounded-xl text-amber-300 text-xs font-bold transition-all active:scale-95"
             title="Switch between User & Admin Mode"
           >
             <ShieldAlert className="w-3.5 h-3.5" />
