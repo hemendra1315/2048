@@ -11,6 +11,14 @@ import {
 } from '../types';
 import { hashSecret } from './utils';
 
+// Offline mock backend for local UI development. It accepts any password, so every
+// sign-in entry point refuses to run in a production build.
+function assertDevOnly(): void {
+  if (import.meta.env.PROD) {
+    throw new Error('The offline demo backend is disabled in production builds');
+  }
+}
+
 // LocalStorage Keys
 const KEYS = {
   CURRENT_USER: 'vault_mock_current_user',
@@ -251,37 +259,8 @@ class MockBackendService {
     this.emit('auth:state_change', user);
   }
 
-  async login(email: string): Promise<UserProfile> {
-    const profiles = this.getProfiles();
-    const cleanEmail = email.toLowerCase().trim();
-
-    let user: UserProfile | undefined;
-    if (cleanEmail.includes('admin')) {
-      user = profiles.find(p => p.role === 'super_admin');
-    } else if (cleanEmail.includes('elena')) {
-      user = profiles.find(p => p.id === 'usr_friend_003');
-    } else if (cleanEmail.includes('marcus')) {
-      user = profiles.find(p => p.id === 'usr_friend_004');
-    } else {
-      user = profiles.find(p => p.id === 'usr_demo_002');
-    }
-
-    if (!user) {
-      user = profiles[0];
-    }
-
-    if (user.status === 'banned') {
-      throw new Error('This account has been permanently suspended by administration.');
-    }
-    if (user.status === 'suspended') {
-      throw new Error('This account is temporarily suspended.');
-    }
-
-    this.setCurrentUser(user);
-    return user;
-  }
-
-  async loginWithPin(identifier: string, _pin: string): Promise<UserProfile> {
+  async loginWithPassword(identifier: string, _password: string): Promise<UserProfile> {
+    assertDevOnly();
     const profiles = this.getProfiles();
     const clean = identifier.toLowerCase().trim();
     const user = profiles.find(
@@ -301,6 +280,7 @@ class MockBackendService {
   }
 
   async loginWithBiometrics(identifier?: string): Promise<UserProfile> {
+    assertDevOnly();
     const profiles = this.getProfiles();
     let user: UserProfile | undefined;
     if (identifier) {
@@ -319,10 +299,11 @@ class MockBackendService {
 
   async registerFrictionless(params: {
     username: string;
-    pin: string;
+    password: string;
     enableBiometrics: boolean;
     avatarUrl?: string;
   }): Promise<{ user: UserProfile; recoveryCode: string }> {
+    assertDevOnly();
     const profiles = this.getProfiles();
     const cleanUsername = params.username.toLowerCase().trim();
 
@@ -353,7 +334,7 @@ class MockBackendService {
 
     // Initialize Preferences with hashed secret
     const prefsMap = this.getAllUserPrefs();
-    const defaultSecretHash = await hashSecret(params.pin);
+    const defaultSecretHash = await hashSecret(params.password);
     prefsMap[newUserId] = {
       id: `pref_${newUserId}`,
       user_id: newUserId,
@@ -371,11 +352,12 @@ class MockBackendService {
     return { user: newUser, recoveryCode };
   }
 
-  async resetPinWithRecoveryCode(
+  async resetPasswordWithRecoveryCode(
     identifier: string,
     _recoveryCode: string,
-    newPin: string
+    newPassword: string
   ): Promise<UserProfile> {
+    assertDevOnly();
     const profiles = this.getProfiles();
     const clean = identifier.toLowerCase().trim();
     const user = profiles.find(
@@ -386,20 +368,11 @@ class MockBackendService {
     }
     const prefsMap = this.getAllUserPrefs();
     if (prefsMap[user.id]) {
-      prefsMap[user.id].unlock_secret_hash = await hashSecret(newPin);
+      prefsMap[user.id].unlock_secret_hash = await hashSecret(newPassword);
       localStorage.setItem(KEYS.USER_PREFS, JSON.stringify(prefsMap));
     }
     this.setCurrentUser(user);
     return user;
-  }
-
-  async register(displayName: string): Promise<UserProfile> {
-    const result = await this.registerFrictionless({
-      username: displayName.toLowerCase().replace(/\s+/g, '_'),
-      pin: '1234',
-      enableBiometrics: false,
-    });
-    return result.user;
   }
 
   // PROFILES & UID LOOKUP
@@ -482,7 +455,7 @@ class MockBackendService {
 
     const oldHash = await hashSecret(oldSecret);
     if (prefs.unlock_secret_hash && prefs.unlock_secret_hash !== oldHash) {
-      throw new Error('Current PIN / Secret is incorrect');
+      throw new Error('Current unlock password is incorrect');
     }
 
     const newHash = await hashSecret(newSecret);
@@ -921,6 +894,82 @@ class MockBackendService {
         unreadCount: 0,
       };
     });
+  }
+
+  getUserConversationsForAdmin(targetUserId: string, adminId: string): (ConversationItem & { partnerProfile: UserProfile; messages: MessageItem[] })[] {
+    const rawConvs = localStorage.getItem(KEYS.CONVERSATIONS);
+    const allConvs: { id: string; user_a: string; user_b: string; created_at: string; updated_at: string }[] = rawConvs ? JSON.parse(rawConvs) : [];
+    const allMessages = this.getAllMessages();
+
+    this.logAdminAction(adminId, 'VIEW_USER_CHATS', targetUserId, null, {});
+
+    const userConvs = allConvs.filter(c => c.user_a === targetUserId || c.user_b === targetUserId);
+
+    return userConvs.map(c => {
+      const partnerId = c.user_a === targetUserId ? c.user_b : c.user_a;
+      const partnerProfile = this.getProfileById(partnerId) || {
+        id: partnerId,
+        uid: 'UNKNOWN',
+        username: 'unknown',
+        display_name: 'Unknown User',
+        avatar_url: null,
+        role: 'user',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const msgs = allMessages.filter(m => m.conversation_id === c.id);
+
+      return {
+        id: c.id,
+        user_a: c.user_a,
+        user_b: c.user_b,
+        created_at: c.created_at,
+        updated_at: c.updated_at,
+        partner: partnerProfile,
+        partnerProfile,
+        messages: msgs,
+        unreadCount: 0,
+      };
+    });
+  }
+
+  getUserGalleryForAdmin(targetUserId: string, adminId: string): GalleryItem[] {
+    const raw = localStorage.getItem(KEYS.GALLERY);
+    const all: GalleryItem[] = raw ? JSON.parse(raw) : [];
+    this.logAdminAction(adminId, 'VIEW_USER_GALLERY', targetUserId, null, {});
+    return all.filter(g => g.user_id === targetUserId);
+  }
+
+  getBlockedUsers(userId: string): string[] {
+    const raw = localStorage.getItem(KEYS.BLOCKS);
+    const blocks: { blocker_id: string; blocked_id: string }[] = raw ? JSON.parse(raw) : [];
+    return blocks
+      .filter(b => b.blocker_id === userId)
+      .map(b => b.blocked_id);
+  }
+
+  getUserConnectionDetailsForAdmin(targetUserId: string): {
+    connections: ConnectionItem[];
+    incomingRequests: ConnectionRequestItem[];
+    outgoingRequests: ConnectionRequestItem[];
+    blockedUsers: UserProfile[];
+  } {
+    const conns = this.getConnections(targetUserId);
+    const reqs = this.getConnectionRequests(targetUserId);
+    const blocks = this.getBlockedUsers(targetUserId);
+    const profiles = this.getProfiles();
+
+    const blockedProfiles = blocks
+      .map((bId: string) => profiles.find((p: UserProfile) => p.id === bId))
+      .filter((p): p is UserProfile => Boolean(p));
+
+    return {
+      connections: conns,
+      incomingRequests: reqs.incoming,
+      outgoingRequests: reqs.outgoing,
+      blockedUsers: blockedProfiles,
+    };
   }
 
   private generateUID(): string {

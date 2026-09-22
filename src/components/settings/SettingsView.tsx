@@ -7,16 +7,16 @@ import { useToast } from '../../context/ToastContext';
 import { CoverGameType } from '../../types';
 
 export const SettingsView: React.FC = () => {
-  const { user, logout, isSuperAdmin, updateProfile } = useAuth();
+  const { user, logout, isSuperAdmin, enrollBiometrics, disableBiometrics } = useAuth();
   const { preferences, updatePreferences, updateSecret, panicLock } = useVault();
   const { currentGame, setCurrentGame } = useGame();
   const { showToast } = useToast();
 
   const [appName, setAppName] = useState(preferences.custom_app_name || 'Retro Arcade');
-  const [oldPin, setOldPin] = useState('');
-  const [newPin, setNewPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [pinUpdating, setPinUpdating] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordUpdating, setPasswordUpdating] = useState(false);
 
   const handleSaveAppName = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,27 +24,27 @@ export const SettingsView: React.FC = () => {
     await updatePreferences({ custom_app_name: appName.trim() });
   };
 
-  const handleUpdatePin = async (e: React.FormEvent) => {
+  const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPin.length < 4) {
-      showToast('PIN must be at least 4 digits', 'error');
+    if (newPassword.length < 4) {
+      showToast('Password must be at least 4 characters', 'error');
       return;
     }
-    if (newPin !== confirmPin) {
-      showToast('New PINs do not match', 'error');
+    if (newPassword !== confirmPassword) {
+      showToast('New passwords do not match', 'error');
       return;
     }
 
-    setPinUpdating(true);
+    setPasswordUpdating(true);
     try {
-      await updateSecret(oldPin, newPin);
-      setOldPin('');
-      setNewPin('');
-      setConfirmPin('');
+      await updateSecret(oldPassword, newPassword);
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
     } catch {
       // Error toast already triggered in context
     } finally {
-      setPinUpdating(false);
+      setPasswordUpdating(false);
     }
   };
 
@@ -116,51 +116,51 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. Change Vault Security PIN (Hashed) */}
+      {/* 3. Change Vault Unlock Password (Hashed) */}
       <div className="bg-vault-900 border border-vault-800 rounded-3xl p-5 shadow-sm space-y-3">
         <div className="flex items-center gap-2">
           <KeyRound className="w-5 h-5 text-arcade-gold" />
-          <h3 className="text-sm font-bold text-white">Update Security PIN</h3>
+          <h3 className="text-sm font-bold text-white">Update Unlock Password</h3>
         </div>
         <p className="text-xs text-vault-400">
           Stored with cryptographic bcrypt/salted hash. No plaintext is recoverable.
         </p>
 
-        <form onSubmit={handleUpdatePin} className="space-y-2.5">
+        <form onSubmit={handleUpdatePassword} className="space-y-2.5">
           <input
             type="password"
             required
-            value={oldPin}
-            onChange={e => setOldPin(e.target.value)}
-            placeholder="Current PIN (Default: 2048)"
+            value={oldPassword}
+            onChange={e => setOldPassword(e.target.value)}
+            placeholder="Current unlock password"
             className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2 text-xs text-white placeholder-vault-600 outline-none transition-colors"
           />
           <div className="grid grid-cols-2 gap-2">
             <input
               type="password"
               required
-              value={newPin}
-              onChange={e => setNewPin(e.target.value)}
-              placeholder="New PIN (min 4 digits)"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              placeholder="New password (min 4 chars)"
               className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2 text-xs text-white placeholder-vault-600 outline-none transition-colors"
             />
             <input
               type="password"
               required
-              value={confirmPin}
-              onChange={e => setConfirmPin(e.target.value)}
-              placeholder="Confirm New PIN"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              placeholder="Confirm new password"
               className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2 text-xs text-white placeholder-vault-600 outline-none transition-colors"
             />
           </div>
 
           <button
             type="submit"
-            disabled={pinUpdating || !oldPin || !newPin}
+            disabled={passwordUpdating || !oldPassword || !newPassword}
             className="w-full bg-vault-800 hover:bg-vault-700 active:scale-95 disabled:opacity-40 text-vault-100 font-bold py-2 rounded-xl text-xs border border-vault-700 transition-all flex items-center justify-center gap-2"
           >
             <Shield className="w-4 h-4 text-arcade-gold" />
-            <span>{pinUpdating ? 'Hashing & Updating...' : 'Update PIN'}</span>
+            <span>{passwordUpdating ? 'Hashing & Updating...' : 'Update Password'}</span>
           </button>
         </form>
       </div>
@@ -174,14 +174,20 @@ export const SettingsView: React.FC = () => {
               <span>Biometric / Fingerprint Unlock</span>
             </h3>
             <p className="text-xs text-vault-400">
-              Prompt biometric hardware immediately upon launching Vault
+              Sign in with this device's fingerprint, face or Windows Hello
             </p>
           </div>
           <button
             type="button"
+            aria-pressed={Boolean(user?.biometric_enabled)}
             onClick={async () => {
-              const nextState = !user?.biometric_enabled;
-              await updateProfile({ biometric_enabled: nextState });
+              try {
+                // Turning it on runs a WebAuthn enrollment that the server verifies.
+                if (user?.biometric_enabled) await disableBiometrics();
+                else await enrollBiometrics();
+              } catch {
+                // toast shown by AuthContext
+              }
             }}
             className={`w-12 h-7 rounded-full transition-colors relative p-0.5 ${
               user?.biometric_enabled ? 'bg-arcade-gold' : 'bg-vault-800 border border-vault-700'

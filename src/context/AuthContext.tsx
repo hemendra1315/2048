@@ -1,18 +1,25 @@
-﻿import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { UserProfile } from '../types';
 import { mockBackend } from '../lib/mockBackend';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, isMockBackendAllowed, callVaultAuth } from '../lib/supabase';
 import { useToast } from './ToastContext';
-import { BiometricService } from '../lib/biometrics';
-import { hashPin, hashSecret, generateUniqueUID, generateRecoveryCode } from '../lib/utils';
-
-const STORAGE_SESSION_KEY = 'vault_active_session_user';
+import { BiometricService, ServerCreationOptions, ServerRequestOptions } from '../lib/biometrics';
 
 export interface RegisterParams {
   username: string;
-  pin: string;
+  password: string;
   enableBiometrics: boolean;
-  avatarUrl?: string;
+}
+
+interface SessionTokens {
+  access_token: string;
+  refresh_token: string;
+}
+
+interface AuthResult {
+  session: SessionTokens;
+  profile: UserProfile;
+  recoveryCode?: string;
 }
 
 interface AuthContextType {
@@ -20,316 +27,269 @@ interface AuthContextType {
   loading: boolean;
   isSuperAdmin: boolean;
   isBiometricsSupported: boolean;
-  loginWithPin: (identifier: string, pin: string) => Promise<UserProfile>;
+  /** Set after sign-up or a recovery reset until the user confirms they saved the new key. */
+  recoveryCodeToShow: string | null;
+  acknowledgeRecoveryCode: () => void;
+  loginWithPassword: (identifier: string, password: string) => Promise<UserProfile>;
   loginWithBiometrics: (identifier?: string) => Promise<UserProfile>;
   registerFrictionless: (params: RegisterParams) => Promise<{ user: UserProfile; recoveryCode: string }>;
-  resetPinWithRecovery: (identifier: string, recoveryCode: string, newPin: string) => Promise<UserProfile>;
-  login: (emailOrIdent: string, passwordOrPin?: string) => Promise<void>;
-  register: (displayName: string, email?: string, password?: string) => Promise<void>;
+  resetPasswordWithRecovery: (identifier: string, recoveryCode: string, newPassword: string) => Promise<UserProfile>;
+  enrollBiometrics: () => Promise<void>;
+  disableBiometrics: () => Promise<void>;
   logout: () => Promise<void>;
-  updateProfile: (updates: Partial<UserProfile>) => Promise<UserProfile>;
+  updateProfile: (updates: Pick<Partial<UserProfile>, 'display_name' | 'avatar_url'>) => Promise<UserProfile>;
   refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const NOT_CONFIGURED = 'Server is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.';
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isBiometricsSupported, setIsBiometricsSupported] = useState(false);
+  const [recoveryCodeToShow, setRecoveryCodeToShow] = useState<string | null>(null);
   const { showToast } = useToast();
+  const useMock = isMockBackendAllowed();
 
-  // Check biometric support on mount
   useEffect(() => {
-    BiometricService.isAvailable().then(res => {
-      setIsBiometricsSupported(res.available);
-    });
+    BiometricService.isAvailable().then(res => setIsBiometricsSupported(res.available));
   }, []);
 
-  const refreshUser = async () => {
-    try {
-      const savedUserJson = localStorage.getItem(STORAGE_SESSION_KEY);
-      if (savedUserJson) {
-        try {
-          const parsed = JSON.parse(savedUserJson) as UserProfile;
-          if (isSupabaseConfigured() && parsed?.id) {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', parsed.id)
-              .single();
-            if (profile) {
-              setUser(profile as unknown as UserProfile);
-              localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(profile));
-              return;
-            }
-          } else {
-            setUser(parsed);
-            return;
-          }
-        } catch (e) {
-          console.error('Error parsing local user session:', e);
-        }
-      }
+  /** Loads the signed-in user's profile. Identity comes from the Supabase session, never from local storage. */
+  const loadProfile = useCallback(async (userId: string | undefined) => {
+    if (!userId) {
+      setUser(null);
+      return null;
+    }
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    if (error || !data) {
+      setUser(null);
+      return null;
+    }
+    const profile = data as unknown as UserProfile;
+    setUser(profile);
+    return profile;
+  }, []);
 
-      if (!isSupabaseConfigured()) {
-        const currentUser = mockBackend.getCurrentUser();
-        setUser(currentUser);
+  const refreshUser = useCallback(async () => {
+    try {
+      if (isSupabaseConfigured()) {
+        const { data: { session } } = await supabase.auth.getSession();
+        await loadProfile(session?.user.id);
+      } else if (useMock) {
+        setUser(mockBackend.getCurrentUser());
+      } else {
+        setUser(null);
       }
     } catch (err) {
       console.error('Error loading session:', err);
+      setUser(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, [loadProfile, useMock]);
 
   useEffect(() => {
+    // Sessions stored by the old client were plain JSON profiles that anyone could edit.
+    try {
+      localStorage.removeItem('vault_active_session_user');
+    } catch {
+      // storage unavailable
+    }
     refreshUser();
 
-    if (!isSupabaseConfigured()) {
-      const unsub = mockBackend.subscribe('auth:state_change', data => {
-        setUser(data as UserProfile | null);
+    if (isSupabaseConfigured()) {
+      const { data } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_OUT') setUser(null);
+        else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') void loadProfile(session?.user.id);
       });
-      return unsub;
+      return () => data.subscription.unsubscribe();
     }
-  }, []);
-
-  /**
-   * Frictionless PIN Login (Username/UID + PIN)
-   */
-  const loginWithPin = async (identifier: string, pin: string): Promise<UserProfile> => {
-    setLoading(true);
-    try {
-      const cleanIdent = identifier.trim();
-      const pinHash = await hashPin(pin.trim(), cleanIdent);
-
-      if (isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('login_frictionless_user', {
-          p_identifier: cleanIdent,
-          p_pin_hash: pinHash,
-        });
-        if (error) throw error;
-        const profile = data as unknown as UserProfile;
-        setUser(profile);
-        localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(profile));
-        showToast(`Welcome back, @${profile.username}`, 'success');
-        return profile;
-      } else {
-        const profile = await mockBackend.loginWithPin(cleanIdent, pin.trim());
-        setUser(profile);
-        localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(profile));
-        showToast(`Welcome back, @${profile.username}`, 'success');
-        return profile;
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Invalid credentials or PIN';
-      showToast(msg, 'error');
-      throw err;
-    } finally {
-      setLoading(false);
+    if (useMock) {
+      return mockBackend.subscribe('auth:state_change', data => setUser(data as UserProfile | null));
     }
-  };
+  }, [refreshUser, loadProfile, useMock]);
 
-  /**
-   * Frictionless Biometric Login
-   */
-  const loginWithBiometrics = async (identifier?: string): Promise<UserProfile> => {
-    setLoading(true);
-    try {
-      const authResult = await BiometricService.authenticate();
-      if (!authResult.success) {
-        throw new Error(authResult.error || 'Biometric verification failed');
-      }
-
-      const targetIdent = identifier || user?.username || user?.uid || 'alex';
-
-      if (isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('biometric_login_user', {
-          p_identifier: targetIdent,
-        });
-        if (error) throw error;
-        const profile = data as unknown as UserProfile;
-        setUser(profile);
-        localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(profile));
-        showToast('Biometric verified: Vault unlocked', 'success');
-        return profile;
-      } else {
-        const profile = await mockBackend.loginWithBiometrics(targetIdent);
-        setUser(profile);
-        localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(profile));
-        showToast('Biometric verified: Vault unlocked', 'success');
-        return profile;
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Biometric authentication failed';
-      showToast(msg, 'error');
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Frictionless Registration (Username -> PIN -> Biometrics -> Recovery Code)
-   */
-  const registerFrictionless = async (
-    params: RegisterParams
-  ): Promise<{ user: UserProfile; recoveryCode: string }> => {
-    setLoading(true);
-    try {
-      const cleanUsername = params.username.toLowerCase().trim();
-      const generatedUid = generateUniqueUID();
-      const recoveryCode = generateRecoveryCode();
-
-      const pinHash = await hashPin(params.pin.trim(), cleanUsername);
-      const recoveryCodeHash = await hashSecret(recoveryCode);
-
-      if (params.enableBiometrics) {
-        await BiometricService.registerBiometric(cleanUsername);
-      }
-
-      if (isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('register_frictionless_user', {
-          p_username: cleanUsername,
-          p_uid: generatedUid,
-          p_pin_hash: pinHash,
-          p_recovery_code_hash: recoveryCodeHash,
-          p_biometric_enabled: params.enableBiometrics,
-          p_avatar_url: params.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${generatedUid}`,
-        });
-        if (error) throw error;
-        const profile = data as unknown as UserProfile;
-        setUser(profile);
-        localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(profile));
-        showToast('Vault identity activated successfully', 'success');
-        return { user: profile, recoveryCode };
-      } else {
-        const res = await mockBackend.registerFrictionless(params);
-        setUser(res.user);
-        localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(res.user));
-        showToast('Vault identity activated successfully', 'success');
-        return res;
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Registration failed';
-      showToast(msg, 'error');
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Reset PIN using Recovery Code
-   */
-  const resetPinWithRecovery = async (
-    identifier: string,
-    recoveryCode: string,
-    newPin: string
-  ): Promise<UserProfile> => {
-    setLoading(true);
-    try {
-      const cleanIdent = identifier.trim();
-      const recoveryCodeHash = await hashSecret(recoveryCode.trim());
-      const newPinHash = await hashPin(newPin.trim(), cleanIdent);
-
-      if (isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('reset_user_pin', {
-          p_identifier: cleanIdent,
-          p_recovery_code_hash: recoveryCodeHash,
-          p_new_pin_hash: newPinHash,
-        });
-        if (error) throw error;
-        const profile = data as unknown as UserProfile;
-        setUser(profile);
-        localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(profile));
-        showToast('PIN reset successfully. Vault unlocked.', 'success');
-        return profile;
-      } else {
-        const profile = await mockBackend.resetPinWithRecoveryCode(cleanIdent, recoveryCode, newPin);
-        setUser(profile);
-        localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(profile));
-        showToast('PIN reset successfully. Vault unlocked.', 'success');
-        return profile;
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'PIN reset failed';
-      showToast(msg, 'error');
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Backward-compatible login helper
-   */
-  const login = async (emailOrIdent: string, passwordOrPin?: string) => {
-    const ident = emailOrIdent.split('@')[0];
-    const pin = passwordOrPin || '1234';
-    await loginWithPin(ident, pin);
-  };
-
-  /**
-   * Backward-compatible register helper
-   */
-  const register = async (displayName: string) => {
-    await registerFrictionless({
-      username: displayName.toLowerCase().replace(/\s+/g, '_'),
-      pin: '1234',
-      enableBiometrics: false,
+  const adoptSession = async (result: AuthResult): Promise<UserProfile> => {
+    const { error } = await supabase.auth.setSession({
+      access_token: result.session.access_token,
+      refresh_token: result.session.refresh_token,
     });
+    if (error) throw error;
+    const profile = (await loadProfile(result.profile.id)) ?? result.profile;
+    return profile;
   };
+
+  const withErrors = async <T,>(fallback: string, fn: () => Promise<T>): Promise<T> => {
+    setLoading(true);
+    try {
+      return await fn();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : fallback, 'error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginWithPassword = (identifier: string, password: string) =>
+    withErrors('Invalid username or password', async () => {
+      let profile: UserProfile;
+      if (isSupabaseConfigured()) {
+        profile = await adoptSession(await callVaultAuth<AuthResult>('login', { identifier: identifier.trim(), password }));
+      } else if (useMock) {
+        profile = await mockBackend.loginWithPassword(identifier.trim(), password);
+        setUser(profile);
+      } else {
+        throw new Error(NOT_CONFIGURED);
+      }
+      showToast(`Welcome back, @${profile.username}`, 'success');
+      return profile;
+    });
+
+  const loginWithBiometrics = (identifier?: string) =>
+    withErrors('Fingerprint login failed', async () => {
+      let profile: UserProfile;
+      if (isSupabaseConfigured()) {
+        const options = await callVaultAuth<{ publicKey: ServerRequestOptions }>('webauthn-login-options', {
+          identifier: identifier?.trim() || undefined,
+        });
+        const credential = await BiometricService.getAssertion(options.publicKey);
+        profile = await adoptSession(await callVaultAuth<AuthResult>('webauthn-login-verify', { credential }));
+      } else if (useMock) {
+        profile = await mockBackend.loginWithBiometrics(identifier);
+        setUser(profile);
+      } else {
+        throw new Error(NOT_CONFIGURED);
+      }
+      showToast('Fingerprint verified: Vault unlocked', 'success');
+      return profile;
+    });
+
+  const enrollBiometrics = () =>
+    withErrors('Fingerprint enrollment failed', async () => {
+      if (!isSupabaseConfigured()) {
+        if (!useMock || !user) throw new Error(NOT_CONFIGURED);
+        setUser(mockBackend.updateProfile(user.id, { biometric_enabled: true }));
+        return;
+      }
+      const options = await callVaultAuth<{ publicKey: ServerCreationOptions }>('webauthn-register-options');
+      const credential = await BiometricService.createCredential(options.publicKey);
+      const res = await callVaultAuth<{ profile: UserProfile }>('webauthn-register-verify', { credential });
+      BiometricService.setLocalEnrollment(true);
+      setUser(res.profile);
+      showToast('Fingerprint unlock enabled', 'success');
+    });
+
+  const disableBiometrics = () =>
+    withErrors('Could not turn off fingerprint unlock', async () => {
+      if (!isSupabaseConfigured()) {
+        if (!useMock || !user) throw new Error(NOT_CONFIGURED);
+        setUser(mockBackend.updateProfile(user.id, { biometric_enabled: false }));
+        return;
+      }
+      const { data, error } = await supabase.rpc('update_my_profile', { p_disable_biometrics: true });
+      if (error) throw error;
+      BiometricService.setLocalEnrollment(false);
+      setUser(data as unknown as UserProfile);
+      showToast('Fingerprint unlock turned off', 'info');
+    });
+
+  const registerFrictionless = (params: RegisterParams) =>
+    withErrors('Registration failed', async () => {
+      if (isSupabaseConfigured()) {
+        const result = await callVaultAuth<AuthResult>('register', {
+          username: params.username.toLowerCase().trim(),
+          password: params.password,
+        });
+        // Show the recovery key before the vault opens.
+        setRecoveryCodeToShow(result.recoveryCode ?? null);
+        const profile = await adoptSession(result);
+        if (params.enableBiometrics) {
+          try {
+            const options = await callVaultAuth<{ publicKey: ServerCreationOptions }>('webauthn-register-options');
+            const credential = await BiometricService.createCredential(options.publicKey);
+            const res = await callVaultAuth<{ profile: UserProfile }>('webauthn-register-verify', { credential });
+            BiometricService.setLocalEnrollment(true);
+            setUser(res.profile);
+          } catch (err) {
+            showToast(`Fingerprint not enabled: ${err instanceof Error ? err.message : 'cancelled'}`, 'info');
+          }
+        }
+        showToast('Vault identity activated', 'success');
+        return { user: profile, recoveryCode: result.recoveryCode ?? '' };
+      }
+      if (!useMock) throw new Error(NOT_CONFIGURED);
+      const res = await mockBackend.registerFrictionless(params);
+      setRecoveryCodeToShow(res.recoveryCode);
+      setUser(res.user);
+      return res;
+    });
+
+  const resetPasswordWithRecovery = (identifier: string, recoveryCode: string, newPassword: string) =>
+    withErrors('Password reset failed', async () => {
+      let profile: UserProfile;
+      if (isSupabaseConfigured()) {
+        const result = await callVaultAuth<AuthResult>('reset', {
+          identifier: identifier.trim(),
+          recoveryCode: recoveryCode.trim(),
+          newPassword,
+        });
+        setRecoveryCodeToShow(result.recoveryCode ?? null);
+        profile = await adoptSession(result);
+      } else if (useMock) {
+        profile = await mockBackend.resetPasswordWithRecoveryCode(identifier.trim(), recoveryCode, newPassword);
+        setUser(profile);
+      } else {
+        throw new Error(NOT_CONFIGURED);
+      }
+      showToast('Password reset. Save your new recovery key.', 'success');
+      return profile;
+    });
 
   const logout = async () => {
     try {
-      localStorage.removeItem(STORAGE_SESSION_KEY);
       if (isSupabaseConfigured()) {
-        try {
-          await supabase.auth.signOut();
-        } catch {
-          // ignore
-        }
-      } else {
+        await supabase.auth.signOut();
+      } else if (useMock) {
         mockBackend.setCurrentUser(null);
       }
       setUser(null);
+      setRecoveryCodeToShow(null);
       showToast('Vault locked & session cleared', 'info');
     } catch (err) {
       console.error('Logout error:', err);
     }
   };
 
-  const updateProfile = async (updates: Partial<UserProfile>): Promise<UserProfile> => {
+  const updateProfile = async (updates: Pick<Partial<UserProfile>, 'display_name' | 'avatar_url'>): Promise<UserProfile> => {
     if (!user) throw new Error('Not authenticated');
     try {
+      let updated: UserProfile;
       if (isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('update_profile_frictionless', {
-          p_user_id: user.id,
-          p_display_name: updates.display_name,
-          p_avatar_url: updates.avatar_url,
-          p_biometric_enabled: updates.biometric_enabled,
+        const { data, error } = await supabase.rpc('update_my_profile', {
+          p_display_name: updates.display_name ?? null,
+          p_avatar_url: updates.avatar_url ?? null,
         });
         if (error) throw error;
-        const updated = data as unknown as UserProfile;
-        setUser(updated);
-        localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(updated));
-        showToast('Profile updated', 'success');
-        return updated;
+        updated = data as unknown as UserProfile;
+      } else if (useMock) {
+        updated = mockBackend.updateProfile(user.id, updates);
       } else {
-        const updated = mockBackend.updateProfile(user.id, updates);
-        setUser(updated);
-        localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(updated));
-        showToast('Profile updated', 'success');
-        return updated;
+        throw new Error(NOT_CONFIGURED);
       }
+      setUser(updated);
+      showToast('Profile updated', 'success');
+      return updated;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Update failed';
-      showToast(msg, 'error');
+      showToast(err instanceof Error ? err.message : 'Update failed', 'error');
       throw err;
     }
   };
 
+  // Display only: every admin capability is enforced server-side by is_super_admin() in RLS.
   const isSuperAdmin = user?.role === 'super_admin';
 
   return (
@@ -339,12 +299,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         loading,
         isSuperAdmin,
         isBiometricsSupported,
-        loginWithPin,
+        recoveryCodeToShow,
+        acknowledgeRecoveryCode: () => setRecoveryCodeToShow(null),
+        loginWithPassword,
         loginWithBiometrics,
         registerFrictionless,
-        resetPinWithRecovery,
-        login,
-        register,
+        resetPasswordWithRecovery,
+        enrollBiometrics,
+        disableBiometrics,
         logout,
         updateProfile,
         refreshUser,

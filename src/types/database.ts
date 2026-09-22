@@ -367,13 +367,25 @@ export interface Database {
         Args: Record<string, never>;
         Returns: boolean;
       };
-      verify_unlock_secret: {
-        Args: { input_secret: string };
-        Returns: boolean;
+      verify_vault_unlock: {
+        Args: { p_secret: string };
+        Returns: Json;
       };
-      update_unlock_secret: {
-        Args: { old_secret: string; new_secret: string };
-        Returns: boolean;
+      update_vault_unlock: {
+        Args: { p_old_secret: string; p_new_secret: string };
+        Returns: Json;
+      };
+      update_my_profile: {
+        Args: { p_display_name?: string | null; p_avatar_url?: string | null; p_disable_biometrics?: boolean };
+        Returns: Database['public']['Tables']['profiles']['Row'];
+      };
+      admin_set_user_status: {
+        Args: { p_target: string; p_status: AccountStatus; p_reason?: string | null };
+        Returns: Database['public']['Tables']['profiles']['Row'];
+      };
+      admin_delete_gallery_item: {
+        Args: { p_item_id: string };
+        Returns: string;
       };
       lookup_profile_by_uid: {
         Args: { lookup_uid: string };

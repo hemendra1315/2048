@@ -1,23 +1,34 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Ban, ShieldAlert, Shield, RefreshCw } from 'lucide-react';
+import { Search, Ban, ShieldAlert, Shield, RefreshCw, Eye } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { mockBackend } from '../../lib/mockBackend';
+import { listProfiles, getConnectionCounts, setUserStatus } from '../../lib/adminApi';
 import { UserProfile } from '../../types';
 import { formatDetailedDate } from '../../lib/utils';
+import { UserDetailView } from './UserDetailView';
 
 export const UserManagement: React.FC = () => {
   const { user } = useAuth();
   const { showToast } = useToast();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED' | 'BANNED'>('ALL');
+  const [selectedUserForDetail, setSelectedUserForDetail] = useState<UserProfile | null>(null);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [actionReason, setActionReason] = useState('');
   const [modalMode, setModalMode] = useState<'suspend' | 'ban' | 'unban' | null>(null);
+  const [connectionCounts, setConnectionCounts] = useState<Record<string, number>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const loadUsers = useCallback(() => {
-    if (user) {
-      setUsers(mockBackend.getProfiles());
+  const loadUsers = useCallback(async () => {
+    if (!user) return;
+    try {
+      const [profiles, counts] = await Promise.all([listProfiles(), getConnectionCounts()]);
+      setUsers(profiles);
+      setConnectionCounts(counts);
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not load users');
     }
   }, [user]);
 
@@ -25,143 +36,220 @@ export const UserManagement: React.FC = () => {
     loadUsers();
   }, [loadUsers]);
 
-  const handleApplyStatus = (status: 'active' | 'suspended' | 'banned') => {
+  const handleApplyStatus = async (status: 'active' | 'suspended' | 'banned') => {
     if (!user || !selectedUser) return;
     try {
-      mockBackend.adminSetUserStatus(user.id, selectedUser.id, status, actionReason.trim());
+      await setUserStatus(user.id, selectedUser.id, status, actionReason.trim());
       showToast(`User ${selectedUser.display_name} updated to ${status.toUpperCase()}`, 'success');
       setModalMode(null);
       setSelectedUser(null);
       setActionReason('');
-      loadUsers();
+      await loadUsers();
     } catch (err) {
       console.error('Moderation error:', err);
-      showToast('Action failed', 'error');
+      showToast(err instanceof Error ? err.message : 'Action failed', 'error');
     }
   };
 
-  const filteredUsers = users.filter(u =>
-    u.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.uid.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredUsers = users.filter(u => {
+    const matchesSearch =
+      u.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      Boolean(u.username?.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      u.uid.toLowerCase().includes(searchQuery.toLowerCase());
+
+    const matchesStatus =
+      statusFilter === 'ALL' || u.status.toUpperCase() === statusFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  // If a user detail is selected, render the 5-tab inspector
+  if (selectedUserForDetail) {
+    return (
+      <UserDetailView
+        user={selectedUserForDetail}
+        onBack={() => {
+          setSelectedUserForDetail(null);
+          loadUsers();
+        }}
+        onUserUpdated={loadUsers}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4 pb-20 animate-fade-in">
       {/* Header */}
       <div>
-        <h2 className="text-base font-bold text-white">User Moderation & Registry</h2>
-        <p className="text-xs text-vault-400">Search by UID, audit connections, and enforce restrictions</p>
+        <h2 className="text-base font-bold text-white">Super Admin → Users Registry</h2>
+        <p className="text-xs text-vault-400">
+          Inspect full user matrix: profiles, private chats, media galleries, and connections
+        </p>
       </div>
 
-      {/* Search Filter */}
-      <div className="relative">
-        <Search className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
-          placeholder="Filter by UID or Name..."
-          className="w-full bg-vault-900 border border-vault-800 focus:border-amber-500 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-vault-600 outline-none transition-colors"
-        />
+      {/* Search & Status Filters */}
+      <div className="space-y-2">
+        <div className="relative">
+          <Search className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search by Username, UID, or Display Name..."
+            className="w-full bg-vault-900 border border-vault-800 focus:border-amber-500 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-vault-600 outline-none transition-colors"
+          />
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          {(['ALL', 'ACTIVE', 'SUSPENDED', 'BANNED'] as const).map(filter => (
+            <button
+              key={filter}
+              onClick={() => setStatusFilter(filter)}
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                statusFilter === filter
+                  ? 'bg-arcade-gold text-vault-950 shadow-sm'
+                  : 'bg-vault-900 text-vault-400 border border-vault-800 hover:text-white'
+              }`}
+            >
+              {filter}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {loadError && (
+        <div className="bg-rose-950/40 border border-rose-800/60 rounded-2xl p-3 text-xs text-rose-200">
+          {loadError}
+        </div>
+      )}
 
       {/* User Table / Cards */}
       <div className="space-y-2.5">
-        {filteredUsers.map(u => {
-          const isSelf = u.id === user?.id;
-          const connections = mockBackend.getConnections(u.id);
+        {filteredUsers.length === 0 ? (
+          <div className="bg-vault-900 border border-vault-800 rounded-2xl p-8 text-center text-xs text-vault-500">
+            No users match the search and filter criteria.
+          </div>
+        ) : (
+          filteredUsers.map(u => {
+            const isSelf = u.id === user?.id;
+            const connectionCount = connectionCounts[u.id] ?? 0;
 
-          return (
-            <div
-              key={u.id}
-              className="bg-vault-900 border border-vault-800 rounded-2xl p-4 flex flex-col gap-3 shadow-sm"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <img
-                    src={u.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${u.uid}`}
-                    alt="Avatar"
-                    className="w-12 h-12 rounded-xl bg-vault-800 border border-vault-700 object-cover"
-                  />
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <h4 className="text-sm font-bold text-white leading-tight">{u.display_name}</h4>
-                      {u.role === 'super_admin' && (
-                        <span className="px-1.5 py-0.2 bg-amber-950 border border-amber-600/50 text-amber-300 rounded text-[9px] font-bold">
-                          ADMIN
+            return (
+              <div
+                key={u.id}
+                className="bg-vault-900 border border-vault-800 hover:border-vault-700/80 rounded-2xl p-4 flex flex-col gap-3 shadow-sm transition-all cursor-pointer"
+                onClick={() => setSelectedUserForDetail(u)}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={u.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${u.uid}`}
+                      alt="Avatar"
+                      className="w-12 h-12 rounded-xl bg-vault-800 border border-vault-700 object-cover"
+                    />
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="text-sm font-bold text-white leading-tight">{u.display_name}</h4>
+                        {u.role === 'super_admin' && (
+                          <span className="px-1.5 py-0.2 bg-amber-950 border border-amber-600/50 text-amber-300 rounded text-[9px] font-bold">
+                            SUPER ADMIN
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] font-mono mt-0.5">
+                        <span className="text-vault-400">@{u.username || 'none'}</span>
+                        <span className="text-vault-600">•</span>
+                        <div className="flex items-center gap-1 text-arcade-gold font-bold">
+                          <Shield className="w-3 h-3" />
+                          <span>{u.uid}</span>
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-vault-500 mt-0.5 flex items-center gap-2">
+                        <span>Created: {formatDetailedDate(u.created_at)}</span>
+                        <span>•</span>
+                        <span>
+                          Last Active:{' '}
+                          {u.last_login_at
+                            ? formatDetailedDate(u.last_login_at)
+                            : formatDetailedDate(u.updated_at)}
                         </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 text-[11px] font-mono text-arcade-gold mt-0.5">
-                      <Shield className="w-3 h-3" />
-                      <span>{u.uid}</span>
-                    </div>
-                    <div className="text-[10px] text-vault-500 mt-0.5">
-                      Joined: {formatDetailedDate(u.created_at)}
+                      </div>
                     </div>
                   </div>
+
+                  {/* Status Badge */}
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase ${
+                      u.status === 'active'
+                        ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/50'
+                        : u.status === 'suspended'
+                        ? 'bg-amber-950/80 text-amber-300 border-amber-700/50'
+                        : 'bg-rose-950/80 text-rose-300 border-rose-700/50'
+                    }`}
+                  >
+                    {u.status}
+                  </span>
                 </div>
 
-                {/* Status Badge */}
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase ${
-                    u.status === 'active'
-                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/50'
-                      : u.status === 'suspended'
-                      ? 'bg-amber-950/80 text-amber-300 border-amber-700/50'
-                      : 'bg-rose-950/80 text-rose-300 border-rose-700/50'
-                  }`}
+                {/* Stats & Actions Bar */}
+                <div
+                  className="flex items-center justify-between pt-2 border-t border-vault-800/80 text-xs"
+                  onClick={e => e.stopPropagation()}
                 >
-                  {u.status}
-                </span>
-              </div>
+                  <span className="text-[11px] text-vault-400">
+                    Connections: <strong className="text-vault-200">{connectionCount}</strong>
+                  </span>
 
-              {/* Stats & Actions */}
-              <div className="flex items-center justify-between pt-2 border-t border-vault-800/80 text-xs">
-                <span className="text-[11px] text-vault-400">
-                  Connections: <strong>{connections.length}</strong>
-                </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setSelectedUserForDetail(u)}
+                      className="px-2.5 py-1 bg-vault-800 hover:bg-vault-700 text-arcade-gold rounded-lg text-[11px] font-bold transition-all flex items-center gap-1"
+                    >
+                      <Eye className="w-3 h-3" /> Inspect Details
+                    </button>
 
-                {!isSelf && (
-                  <div className="flex items-center gap-1.5">
-                    {u.status !== 'active' ? (
-                      <button
-                        onClick={() => {
-                          setSelectedUser(u);
-                          setModalMode('unban');
-                        }}
-                        className="px-2.5 py-1 bg-emerald-950 hover:bg-emerald-900 border border-emerald-600/50 text-emerald-300 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1"
-                      >
-                        <RefreshCw className="w-3 h-3" /> Restore
-                      </button>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => {
-                            setSelectedUser(u);
-                            setModalMode('suspend');
-                          }}
-                          className="px-2.5 py-1 bg-amber-950 hover:bg-amber-900 border border-amber-600/50 text-amber-300 rounded-lg text-[11px] font-bold transition-all"
-                        >
-                          Suspend
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSelectedUser(u);
-                            setModalMode('ban');
-                          }}
-                          className="px-2.5 py-1 bg-rose-950 hover:bg-rose-900 border border-rose-600/50 text-rose-300 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1"
-                        >
-                          <Ban className="w-3 h-3" /> Ban
-                        </button>
-                      </>
+                    {!isSelf && u.role !== 'super_admin' && (
+                      <div className="flex items-center gap-1.5">
+                        {u.status !== 'active' ? (
+                          <button
+                            onClick={() => {
+                              setSelectedUser(u);
+                              setModalMode('unban');
+                            }}
+                            className="px-2.5 py-1 bg-emerald-950 hover:bg-emerald-900 border border-emerald-600/50 text-emerald-300 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1"
+                          >
+                            <RefreshCw className="w-3 h-3" /> Restore
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => {
+                                setSelectedUser(u);
+                                setModalMode('suspend');
+                              }}
+                              className="px-2.5 py-1 bg-amber-950 hover:bg-amber-900 border border-amber-600/50 text-amber-300 rounded-lg text-[11px] font-bold transition-all"
+                            >
+                              Suspend
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedUser(u);
+                                setModalMode('ban');
+                              }}
+                              className="px-2.5 py-1 bg-rose-950 hover:bg-rose-900 border border-rose-600/50 text-rose-300 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1"
+                            >
+                              <Ban className="w-3 h-3" /> Ban
+                            </button>
+                          </>
+                        )}
+                      </div>
                     )}
                   </div>
-                )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
 
       {/* Moderation Confirmation Modal */}

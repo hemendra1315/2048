@@ -1,139 +1,161 @@
-﻿// Platform Biometric Authentication Service
-// Supports WebAuthn Platform Authenticator (Android Fingerprint / Biometrics, Windows Hello, TouchID/FaceID)
-// with graceful fallback when hardware is unavailable.
+// Platform biometric authentication (fingerprint / Face ID / Windows Hello) via WebAuthn.
+//
+// The browser only runs the ceremony. Challenges come from the vault-auth Edge Function, and the
+// signed results go back to it for verification. Nothing here decides whether a login succeeded.
 
 export interface BiometricAvailability {
   available: boolean;
-  platform: 'webauthn' | 'capacitor' | 'none';
+  platform: 'webauthn' | 'none';
   error?: string;
 }
 
-export class BiometricService {
-  private static STORAGE_KEY = 'vault_biometric_credential_id';
+export interface RegistrationCredential {
+  id: string;
+  clientDataJSON: string;
+  authenticatorData: string;
+  publicKey: string;
+  publicKeyAlgorithm: number;
+}
 
-  /**
-   * Check if platform biometrics (fingerprint / face / secure authenticator) are available
-   */
+export interface AssertionCredential {
+  id: string;
+  clientDataJSON: string;
+  authenticatorData: string;
+  signature: string;
+  userHandle: string | null;
+}
+
+interface ServerDescriptor {
+  type: 'public-key';
+  id: string;
+}
+
+export interface ServerCreationOptions {
+  challenge: string;
+  rp: { id: string; name: string };
+  user: { id: string; name: string; displayName: string };
+  pubKeyCredParams: { type: 'public-key'; alg: number }[];
+  authenticatorSelection?: AuthenticatorSelectionCriteria;
+  attestation?: AttestationConveyancePreference;
+  timeout?: number;
+  excludeCredentials?: ServerDescriptor[];
+}
+
+export interface ServerRequestOptions {
+  challenge: string;
+  rpId: string;
+  userVerification?: UserVerificationRequirement;
+  timeout?: number;
+  allowCredentials?: ServerDescriptor[];
+}
+
+const ENROLLED_KEY = 'vault_biometric_enrolled';
+
+function toB64url(buf: ArrayBuffer | null): string {
+  if (!buf) return '';
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function fromB64url(value: string): ArrayBuffer {
+  const b64 = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4);
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+
+const toDescriptors = (list?: ServerDescriptor[]): PublicKeyCredentialDescriptor[] | undefined =>
+  list?.map(d => ({ type: 'public-key', id: fromB64url(d.id) }));
+
+export class BiometricService {
   static async isAvailable(): Promise<BiometricAvailability> {
     try {
-      if (typeof window === 'undefined') {
-        return { available: false, platform: 'none' };
-      }
-
       if (
+        typeof window !== 'undefined' &&
         window.PublicKeyCredential &&
-        typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function'
+        typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function' &&
+        (await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable())
       ) {
-        const isSupported = await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-        if (isSupported) {
-          return { available: true, platform: 'webauthn' };
-        }
+        return { available: true, platform: 'webauthn' };
       }
-
       return { available: false, platform: 'none', error: 'No biometric hardware detected' };
     } catch (err) {
-      return {
-        available: false,
-        platform: 'none',
-        error: err instanceof Error ? err.message : 'Biometric check failed',
-      };
+      return { available: false, platform: 'none', error: err instanceof Error ? err.message : 'Biometric check failed' };
     }
   }
 
-  /**
-   * Register biometric credential during onboarding / setup
-   */
-  static async registerBiometric(username: string): Promise<boolean> {
+  /** Whether this browser has enrolled a fingerprint credential (used only to decide whether to auto-prompt). */
+  static hasLocalEnrollment(): boolean {
     try {
-      const avail = await this.isAvailable();
-      if (!avail.available) return false;
-
-      const challenge = crypto.getRandomValues(new Uint8Array(32));
-      const userId = new TextEncoder().encode(username);
-
-      const credential = (await navigator.credentials.create({
-        publicKey: {
-          challenge,
-          rp: {
-            name: 'Retro Arcade Vault',
-            id: window.location.hostname || 'localhost',
-          },
-          user: {
-            id: userId,
-            name: username,
-            displayName: username,
-          },
-          pubKeyCredParams: [
-            { alg: -7, type: 'public-key' }, // ES256
-            { alg: -257, type: 'public-key' }, // RS256
-          ],
-          authenticatorSelection: {
-            authenticatorAttachment: 'platform',
-            userVerification: 'required',
-            requireResidentKey: false,
-          },
-          timeout: 60000,
-          attestation: 'none',
-        },
-      })) as PublicKeyCredential | null;
-
-      if (credential) {
-        localStorage.setItem(this.STORAGE_KEY, credential.id);
-        return true;
-      }
-      return false;
-    } catch (err) {
-      console.warn('Biometric registration skipped or failed:', err);
+      return localStorage.getItem(ENROLLED_KEY) === '1';
+    } catch {
       return false;
     }
   }
 
-  /**
-   * Authenticate user with platform biometric sensor
-   */
-  static async authenticate(): Promise<{ success: boolean; error?: string }> {
+  static setLocalEnrollment(enrolled: boolean): void {
     try {
-      const avail = await this.isAvailable();
-      if (!avail.available) {
-        return { success: false, error: 'Biometric authentication not supported on this device' };
-      }
-
-      const challenge = crypto.getRandomValues(new Uint8Array(32));
-      const credId = localStorage.getItem(this.STORAGE_KEY);
-
-      const allowCredentials: PublicKeyCredentialDescriptor[] = credId
-        ? [
-            {
-              id: new TextEncoder().encode(credId),
-              type: 'public-key',
-              transports: ['internal'],
-            },
-          ]
-        : [];
-
-      const assertion = await navigator.credentials.get({
-        publicKey: {
-          challenge,
-          allowCredentials: allowCredentials.length > 0 ? allowCredentials : undefined,
-          userVerification: 'required',
-          timeout: 60000,
-        },
-      });
-
-      if (assertion) {
-        return { success: true };
-      }
-      return { success: false, error: 'Authentication could not be verified' };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Biometric verification failed';
-      return { success: false, error: msg };
+      if (enrolled) localStorage.setItem(ENROLLED_KEY, '1');
+      else localStorage.removeItem(ENROLLED_KEY);
+    } catch {
+      // storage unavailable
     }
   }
 
-  /**
-   * Remove biometric credential
-   */
-  static clearCredential(): void {
-    localStorage.removeItem(this.STORAGE_KEY);
+  /** Runs the enrollment ceremony for server-issued options. */
+  static async createCredential(options: ServerCreationOptions): Promise<RegistrationCredential> {
+    const credential = (await navigator.credentials.create({
+      publicKey: {
+        challenge: fromB64url(options.challenge),
+        rp: options.rp,
+        user: { ...options.user, id: fromB64url(options.user.id) },
+        pubKeyCredParams: options.pubKeyCredParams,
+        authenticatorSelection: options.authenticatorSelection,
+        attestation: options.attestation ?? 'none',
+        timeout: options.timeout,
+        excludeCredentials: toDescriptors(options.excludeCredentials),
+      },
+    })) as PublicKeyCredential | null;
+    if (!credential) throw new Error('Fingerprint enrollment was cancelled');
+
+    const response = credential.response as AuthenticatorAttestationResponse;
+    const publicKey = response.getPublicKey?.();
+    const algorithm = response.getPublicKeyAlgorithm?.();
+    if (!publicKey || typeof algorithm !== 'number') {
+      throw new Error('This browser cannot enroll fingerprint unlock');
+    }
+    return {
+      id: toB64url(credential.rawId),
+      clientDataJSON: toB64url(response.clientDataJSON),
+      authenticatorData: toB64url(response.getAuthenticatorData()),
+      publicKey: toB64url(publicKey),
+      publicKeyAlgorithm: algorithm,
+    };
+  }
+
+  /** Runs the login ceremony for a server-issued challenge and returns the signed assertion. */
+  static async getAssertion(options: ServerRequestOptions): Promise<AssertionCredential> {
+    const credential = (await navigator.credentials.get({
+      publicKey: {
+        challenge: fromB64url(options.challenge),
+        rpId: options.rpId,
+        userVerification: options.userVerification ?? 'required',
+        timeout: options.timeout,
+        allowCredentials: options.allowCredentials?.length ? toDescriptors(options.allowCredentials) : undefined,
+      },
+    })) as PublicKeyCredential | null;
+    if (!credential) throw new Error('Fingerprint check was cancelled');
+
+    const response = credential.response as AuthenticatorAssertionResponse;
+    return {
+      id: toB64url(credential.rawId),
+      clientDataJSON: toB64url(response.clientDataJSON),
+      authenticatorData: toB64url(response.authenticatorData),
+      signature: toB64url(response.signature),
+      userHandle: response.userHandle ? toB64url(response.userHandle) : null,
+    };
   }
 }

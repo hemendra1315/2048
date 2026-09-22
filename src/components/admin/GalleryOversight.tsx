@@ -2,20 +2,21 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Trash2, Shield } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { mockBackend } from '../../lib/mockBackend';
+import { AdminGalleryItem, deleteGalleryItem, listGalleryItems } from '../../lib/adminApi';
 import { formatDetailedDate } from '../../lib/utils';
-import { GalleryItem, UserProfile } from '../../types';
 
 export const GalleryOversight: React.FC = () => {
   const { user } = useAuth();
   const { showToast } = useToast();
-  const [items, setItems] = useState<(GalleryItem & { user?: UserProfile })[]>([]);
+  const [items, setItems] = useState<AdminGalleryItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const loadMedia = useCallback(() => {
-    if (user) {
-      const list = mockBackend.getAllGalleryItemsForAdmin(user.id);
-      setItems(list);
+  const loadMedia = useCallback(async () => {
+    if (!user) return;
+    try {
+      setItems(await listGalleryItems(user.id));
+    } catch (err) {
+      console.error('Gallery oversight load failed:', err);
     }
   }, [user]);
 
@@ -23,11 +24,16 @@ export const GalleryOversight: React.FC = () => {
     loadMedia();
   }, [loadMedia]);
 
-  const handleDelete = (item: GalleryItem) => {
+  const handleDelete = async (item: AdminGalleryItem) => {
     if (!user) return;
-    mockBackend.deleteGalleryItem(item.id, user.id, true);
-    showToast('Media item removed by administrator', 'info');
-    loadMedia();
+    try {
+      // Checked and audited on the server (admin_delete_gallery_item).
+      await deleteGalleryItem(user.id, item);
+      showToast('Media item removed by administrator', 'info');
+      await loadMedia();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Delete failed', 'error');
+    }
   };
 
   const filtered = items.filter(item =>
@@ -62,7 +68,7 @@ export const GalleryOversight: React.FC = () => {
           >
             <div className="relative aspect-square bg-vault-950">
               <img
-                src={item.image_url}
+                src={item.previewUrl}
                 alt="Audit media"
                 className="w-full h-full object-cover"
               />

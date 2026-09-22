@@ -1,26 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { MessageSquare, Search, Eye, Calendar } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { mockBackend } from '../../lib/mockBackend';
+import { AdminConversation, getProfileMap, listConversations, logConversationView } from '../../lib/adminApi';
 import { formatDetailedDate } from '../../lib/utils';
-import { ConversationItem, MessageItem } from '../../types';
+import { UserProfile } from '../../types';
 
 export const MessageOversight: React.FC = () => {
   const { user } = useAuth();
-  const [conversations, setConversations] = useState<(ConversationItem & { messages: MessageItem[] })[]>([]);
-  const [selectedConv, setSelectedConv] = useState<(ConversationItem & { messages: MessageItem[] }) | null>(null);
+  const [conversations, setConversations] = useState<AdminConversation[]>([]);
+  const [profiles, setProfiles] = useState<Record<string, UserProfile>>({});
+  const [selectedConv, setSelectedConv] = useState<AdminConversation | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    if (user) {
-      const convs = mockBackend.getAllConversationsForAdmin(user.id);
-      setConversations(convs);
-    }
+    if (!user) return;
+    let cancelled = false;
+    Promise.all([listConversations(user.id), getProfileMap()])
+      .then(([convs, map]) => {
+        if (cancelled) return;
+        setConversations(convs);
+        setProfiles(map);
+      })
+      .catch(err => console.error('Conversation oversight load failed:', err));
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
+  const inspect = (conv: AdminConversation) => {
+    setSelectedConv(conv);
+    // Opening a private conversation is recorded in the audit log.
+    logConversationView(conv).catch(err => console.error('Audit log write failed:', err));
+  };
+
   const filtered = conversations.filter(c => {
-    const p1 = mockBackend.getProfileById(c.user_a);
-    const p2 = mockBackend.getProfileById(c.user_b);
+    const p1 = profiles[c.user_a];
+    const p2 = profiles[c.user_b];
     return (
       Boolean(p1?.uid.toLowerCase().includes(searchQuery.toLowerCase())) ||
       Boolean(p2?.uid.toLowerCase().includes(searchQuery.toLowerCase())) ||
@@ -49,8 +64,8 @@ export const MessageOversight: React.FC = () => {
 
       <div className="space-y-2.5">
         {filtered.map(conv => {
-          const uA = mockBackend.getProfileById(conv.user_a);
-          const uB = mockBackend.getProfileById(conv.user_b);
+          const uA = profiles[conv.user_a];
+          const uB = profiles[conv.user_b];
 
           return (
             <div
@@ -76,7 +91,7 @@ export const MessageOversight: React.FC = () => {
                 </div>
 
                 <button
-                  onClick={() => setSelectedConv(conv)}
+                  onClick={() => inspect(conv)}
                   className="px-3 py-1 bg-vault-800 hover:bg-vault-700 text-arcade-gold rounded-lg font-bold text-xs flex items-center gap-1 border border-vault-700 transition-all"
                 >
                   <Eye className="w-3.5 h-3.5" /> Inspect
@@ -107,7 +122,7 @@ export const MessageOversight: React.FC = () => {
             {/* Message Stream */}
             <div className="flex-1 overflow-y-auto space-y-2.5 p-1">
               {selectedConv.messages.map(m => {
-                const author = mockBackend.getProfileById(m.sender_id);
+                const author = profiles[m.sender_id];
                 return (
                   <div key={m.id} className="bg-vault-950 p-3 rounded-xl border border-vault-800 text-xs">
                     <div className="flex items-center justify-between mb-1">

@@ -52,7 +52,7 @@ export function generateRecoveryCode(): string {
   return `RC-${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}`;
 }
 
-// Secure SHA-256 hash for PIN and Secrets with salt
+// SHA-256 hash with salt (used for high-entropy recovery keys and the offline mock backend)
 export async function hashSecret(secret: string): Promise<string> {
   const msgUint8 = new TextEncoder().encode(secret + '_vault_salt_2026');
   const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
@@ -60,9 +60,4 @@ export async function hashSecret(secret: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function hashPin(pin: string, usernameOrSalt: string): Promise<string> {
-  const msgUint8 = new TextEncoder().encode(`${usernameOrSalt.toLowerCase().trim()}:${pin}:vault_pin_salt_v2`);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
+// Passwords are never hashed in the browser: they are sent over HTTPS and hashed with bcrypt on the server.

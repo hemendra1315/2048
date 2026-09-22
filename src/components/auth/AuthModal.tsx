@@ -18,18 +18,27 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useVault } from '../../context/VaultContext';
 import { useToast } from '../../context/ToastContext';
+import { BiometricService } from '../../lib/biometrics';
+import { isSupabaseConfigured } from '../../lib/supabase';
+
+// Demo identities exist only in the offline mock backend used for local UI development.
+// They are never rendered in a production build or when a real backend is configured.
+// `import.meta.env.DEV` is replaced with `false` at build time, so this UI is stripped from production bundles.
+const SHOW_DEMO_ACCOUNTS = import.meta.env.DEV && !isSupabaseConfigured();
 
 type AuthMode = 'login' | 'onboarding' | 'recovery';
-type OnboardingStep = 'username' | 'pin' | 'biometric' | 'recovery_code';
+type OnboardingStep = 'username' | 'password' | 'biometric' | 'recovery_code';
 
 export const AuthModal: React.FC = () => {
   const {
-    loginWithPin,
+    loginWithPassword,
     loginWithBiometrics,
     registerFrictionless,
-    resetPinWithRecovery,
+    resetPasswordWithRecovery,
     isBiometricsSupported,
     loading,
+    recoveryCodeToShow,
+    acknowledgeRecoveryCode,
   } = useAuth();
   const { panicLock } = useVault();
   const { showToast } = useToast();
@@ -38,29 +47,38 @@ export const AuthModal: React.FC = () => {
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('username');
 
   // Login form state
-  const [identifier, setIdentifier] = useState('alex');
-  const [pin, setPin] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [biometricAttempted, setBiometricAttempted] = useState(false);
 
   // Onboarding form state
   const [newUsername, setNewUsername] = useState('');
-  const [newPin, setNewPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [generatedRecoveryCode, setGeneratedRecoveryCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [hasSavedRecoveryCode, setHasSavedRecoveryCode] = useState(false);
   const [copiedRecoveryCode, setCopiedRecoveryCode] = useState(false);
 
   // Recovery form state
   const [recoveryIdent, setRecoveryIdent] = useState('');
   const [recoveryCodeInput, setRecoveryCodeInput] = useState('');
-  const [recoveryNewPin, setRecoveryNewPin] = useState('');
+  const [recoveryNewPassword, setRecoveryNewPassword] = useState('');
 
-  // Automatically prompt biometrics on mount if supported and in login mode
+  // A new recovery key (after sign-up or a reset) is shown before the vault opens.
+  const generatedRecoveryCode = recoveryCodeToShow ?? '';
   useEffect(() => {
-    if (mode === 'login' && isBiometricsSupported && !biometricAttempted) {
+    if (recoveryCodeToShow) {
+      setMode('onboarding');
+      setOnboardingStep('recovery_code');
+    }
+  }, [recoveryCodeToShow]);
+
+  // Prompt for the fingerprint automatically only if this browser enrolled one.
+  // The server verifies the signed assertion; a cancelled or failed prompt falls back to the password.
+  useEffect(() => {
+    if (mode === 'login' && isBiometricsSupported && !biometricAttempted && BiometricService.hasLocalEnrollment()) {
       setBiometricAttempted(true);
       loginWithBiometrics().catch(() => {
-        // Fall back gracefully to PIN input
+        // Fall back gracefully to password input
       });
     }
   }, [mode, isBiometricsSupported, biometricAttempted, loginWithBiometrics]);
@@ -68,16 +86,12 @@ export const AuthModal: React.FC = () => {
   // Handle Login submission
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!identifier.trim() || !pin.trim()) {
-      showToast('Please enter your Username/UID and PIN', 'error');
-      return;
-    }
-    if (pin.length < 4 || pin.length > 6) {
-      showToast('PIN must be 4 to 6 digits', 'error');
+    if (!identifier.trim() || !password) {
+      showToast('Please enter your Username/UID and password', 'error');
       return;
     }
     try {
-      await loginWithPin(identifier, pin);
+      await loginWithPassword(identifier, password);
     } catch {
       // Error handled by AuthContext toast
     }
@@ -94,22 +108,18 @@ export const AuthModal: React.FC = () => {
 
   // Quick Demo Account switcher
   const handleQuickDemo = async (role: 'user' | 'admin' | 'friend') => {
-    if (role === 'admin') {
-      setIdentifier('admin');
-      setPin('1234');
-      await loginWithPin('admin', '1234');
-    } else if (role === 'friend') {
-      setIdentifier('elena');
-      setPin('1234');
-      await loginWithPin('elena', '1234');
-    } else {
-      setIdentifier('alex');
-      setPin('1234');
-      await loginWithPin('alex', '1234');
+    // The mock backend ignores passwords; this path does not exist outside local development.
+    if (!SHOW_DEMO_ACCOUNTS) return;
+    const demoUser = role === 'admin' ? 'admin' : role === 'friend' ? 'elena' : 'alex';
+    setIdentifier(demoUser);
+    try {
+      await loginWithPassword(demoUser, '');
+    } catch {
+      // toast shown by AuthContext
     }
   };
 
-  // Step 1: Validate Username -> Move to PIN
+  // Step 1: Validate Username -> Move to Password
   const handleUsernameNext = (e: React.FormEvent) => {
     e.preventDefault();
     const clean = newUsername.trim().toLowerCase();
@@ -121,18 +131,18 @@ export const AuthModal: React.FC = () => {
       showToast('Username can only contain letters, numbers, and underscores', 'error');
       return;
     }
-    setOnboardingStep('pin');
+    setOnboardingStep('password');
   };
 
-  // Step 2: Validate PIN -> Move to Biometrics
-  const handlePinNext = (e: React.FormEvent) => {
+  // Step 2: Validate Password -> Move to Biometrics
+  const handlePasswordNext = (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPin.length < 4 || newPin.length > 6) {
-      showToast('PIN must be 4 to 6 digits', 'error');
+    if (newPassword.length < 8) {
+      showToast('Password must be at least 8 characters', 'error');
       return;
     }
-    if (newPin !== confirmPin) {
-      showToast('PIN confirmation does not match', 'error');
+    if (newPassword !== confirmPassword) {
+      showToast('Passwords do not match', 'error');
       return;
     }
     if (isBiometricsSupported) {
@@ -152,11 +162,10 @@ export const AuthModal: React.FC = () => {
     try {
       const res = await registerFrictionless({
         username: newUsername.trim().toLowerCase(),
-        pin: newPin.trim(),
+        password: newPassword,
         enableBiometrics: biometricPref,
       });
-      setGeneratedRecoveryCode(res.recoveryCode);
-      setOnboardingStep('recovery_code');
+      if (res.recoveryCode) setOnboardingStep('recovery_code');
     } catch {
       // Error handled by AuthContext
     }
@@ -173,16 +182,16 @@ export const AuthModal: React.FC = () => {
   // Handle Recovery Submit
   const handleRecoverySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!recoveryIdent.trim() || !recoveryCodeInput.trim() || !recoveryNewPin.trim()) {
+    if (!recoveryIdent.trim() || !recoveryCodeInput.trim() || !recoveryNewPassword) {
       showToast('Please fill all recovery fields', 'error');
       return;
     }
-    if (recoveryNewPin.length < 4 || recoveryNewPin.length > 6) {
-      showToast('New PIN must be 4 to 6 digits', 'error');
+    if (recoveryNewPassword.length < 8) {
+      showToast('New password must be at least 8 characters', 'error');
       return;
     }
     try {
-      await resetPinWithRecovery(recoveryIdent, recoveryCodeInput, recoveryNewPin);
+      await resetPasswordWithRecovery(recoveryIdent, recoveryCodeInput, recoveryNewPassword);
     } catch {
       // Handled
     }
@@ -190,7 +199,7 @@ export const AuthModal: React.FC = () => {
 
   const getStepText = () => {
     if (onboardingStep === 'username') return '1/4';
-    if (onboardingStep === 'pin') return '2/4';
+    if (onboardingStep === 'password') return '2/4';
     if (onboardingStep === 'biometric') return '3/4';
     return '4/4';
   };
@@ -209,7 +218,7 @@ export const AuthModal: React.FC = () => {
                 <Shield className="w-7 h-7" />
               </div>
               <h2 className="text-xl font-bold text-white tracking-tight">Vault Access Gate</h2>
-              <p className="text-xs text-vault-400 mt-1">Authenticate via Biometrics or PIN</p>
+              <p className="text-xs text-vault-400 mt-1">Authenticate via Biometrics or Password</p>
             </div>
 
             {/* Biometric Quick Trigger (if supported) */}
@@ -232,7 +241,8 @@ export const AuthModal: React.FC = () => {
               </div>
             )}
 
-            {/* Quick Demo Switcher */}
+            {/* Quick Demo Switcher (local development with the mock backend only) */}
+            {import.meta.env.DEV && SHOW_DEMO_ACCOUNTS && (
             <div className="bg-vault-950/80 border border-vault-800 rounded-2xl p-2.5 mb-5 text-center">
               <div className="text-[10px] font-bold text-arcade-gold uppercase tracking-wider mb-2 flex items-center justify-center gap-1">
                 <Sparkles className="w-3 h-3" /> Quick Switch Identity
@@ -261,8 +271,9 @@ export const AuthModal: React.FC = () => {
                 </button>
               </div>
             </div>
+            )}
 
-            {/* PIN Login Form */}
+            {/* Password Login Form */}
             <form onSubmit={handleLoginSubmit} className="space-y-3.5">
               <div>
                 <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
@@ -284,28 +295,27 @@ export const AuthModal: React.FC = () => {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[11px] font-semibold text-vault-300 uppercase tracking-wider">
-                    4-6 Digit PIN
+                    Password
                   </label>
                   <button
                     type="button"
                     onClick={() => setMode('recovery')}
                     className="text-[11px] text-arcade-gold hover:underline flex items-center gap-1"
                   >
-                    <HelpCircle className="w-3 h-3" /> Forgot PIN?
+                    <HelpCircle className="w-3 h-3" /> Forgot password?
                   </button>
                 </div>
                 <div className="relative">
                   <KeyRound className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="password"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
+                    maxLength={72}
                     required
-                    value={pin}
-                    onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
-                    placeholder="••••"
-                    className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-white tracking-widest placeholder-vault-600 outline-none transition-colors text-center font-mono text-base"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-white placeholder-vault-600 outline-none transition-colors"
                   />
                 </div>
               </div>
@@ -359,7 +369,7 @@ export const AuthModal: React.FC = () => {
                 />
                 <div
                   className={`w-6 h-1.5 rounded-full ${
-                    onboardingStep === 'pin' ? 'bg-arcade-gold' : 'bg-vault-700'
+                    onboardingStep === 'password' ? 'bg-arcade-gold' : 'bg-vault-700'
                   }`}
                 />
                 <div
@@ -387,7 +397,7 @@ export const AuthModal: React.FC = () => {
                   </div>
                   <h3 className="text-lg font-bold text-white">Choose Your Identity</h3>
                   <p className="text-xs text-vault-400 mt-1">
-                    No email or password needed. Pick a username.
+                    No email needed. Pick a username.
                   </p>
                 </div>
 
@@ -419,21 +429,21 @@ export const AuthModal: React.FC = () => {
                     type="submit"
                     className="w-full bg-arcade-gold hover:bg-amber-400 text-vault-950 font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-2"
                   >
-                    <span>Continue to PIN Setup</span>
+                    <span>Continue to Password Setup</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
               </form>
             )}
 
-            {/* STEP 2: PIN */}
-            {onboardingStep === 'pin' && (
-              <form onSubmit={handlePinNext}>
+            {/* STEP 2: PASSWORD */}
+            {onboardingStep === 'password' && (
+              <form onSubmit={handlePasswordNext}>
                 <div className="flex flex-col items-center text-center mb-5">
                   <div className="w-12 h-12 rounded-2xl bg-vault-800 border border-vault-700 flex items-center justify-center text-arcade-gold mb-2">
                     <KeyRound className="w-6 h-6" />
                   </div>
-                  <h3 className="text-lg font-bold text-white">Set 4-6 Digit PIN</h3>
+                  <h3 className="text-lg font-bold text-white">Create a Password</h3>
                   <p className="text-xs text-vault-400 mt-1">
                     Your personal key to unlock the Vault.
                   </p>
@@ -442,36 +452,34 @@ export const AuthModal: React.FC = () => {
                 <div className="space-y-3.5">
                   <div>
                     <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-                      Create PIN (4-6 digits)
+                      Password (min 8 characters)
                     </label>
                     <input
                       type="password"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      maxLength={6}
+                      maxLength={72}
                       required
                       autoFocus
-                      value={newPin}
-                      onChange={e => setNewPin(e.target.value.replace(/\D/g, ''))}
-                      placeholder="••••"
-                      className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-center font-mono tracking-widest text-lg text-white outline-none"
+                      autoComplete="new-password"
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-sm text-white outline-none"
                     />
                   </div>
 
                   <div>
                     <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-                      Confirm PIN
+                      Confirm Password
                     </label>
                     <input
                       type="password"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      maxLength={6}
+                      maxLength={72}
                       required
-                      value={confirmPin}
-                      onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ''))}
-                      placeholder="••••"
-                      className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-center font-mono tracking-widest text-lg text-white outline-none"
+                      autoComplete="new-password"
+                      value={confirmPassword}
+                      onChange={e => setConfirmPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-sm text-white outline-none"
                     />
                   </div>
 
@@ -532,7 +540,7 @@ export const AuthModal: React.FC = () => {
                     onClick={() => handleBiometricChoice(false)}
                     className="w-full bg-vault-800 hover:bg-vault-700 text-vault-300 font-semibold py-2.5 rounded-xl text-xs transition-colors"
                   >
-                    Skip for Now (Use PIN Only)
+                    Skip for Now (Use Password Only)
                   </button>
                 </div>
               </div>
@@ -547,7 +555,7 @@ export const AuthModal: React.FC = () => {
                   </div>
                   <h3 className="text-lg font-bold text-white">Save Account Recovery Key</h3>
                   <p className="text-xs text-vault-400 mt-1">
-                    Store this key securely. It is the <strong className="text-rose-400">ONLY</strong> way to reset your PIN if forgotten.
+                    Store this key securely. It is the <strong className="text-rose-400">ONLY</strong> way to reset your password if forgotten.
                   </p>
                 </div>
 
@@ -594,7 +602,8 @@ export const AuthModal: React.FC = () => {
                   type="button"
                   disabled={!hasSavedRecoveryCode}
                   onClick={() => {
-                    // Registration already stored session and logged user in!
+                    setHasSavedRecoveryCode(false);
+                    acknowledgeRecoveryCode();
                   }}
                   className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:pointer-events-none active:scale-98 text-vault-950 font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/20 text-sm transition-all flex items-center justify-center gap-2"
                 >
@@ -620,7 +629,7 @@ export const AuthModal: React.FC = () => {
         )}
 
         {/* ========================================================================= */}
-        {/* 3. RECOVERY MODE (Reset PIN via Recovery Code) */}
+        {/* 3. RECOVERY MODE (Reset Password via Recovery Code) */}
         {/* ========================================================================= */}
         {mode === 'recovery' && (
           <div>
@@ -628,8 +637,8 @@ export const AuthModal: React.FC = () => {
               <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-arcade-gold mb-2">
                 <RefreshCw className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-bold text-white">Reset Vault PIN</h3>
-              <p className="text-xs text-vault-400 mt-1">Enter your Recovery Key to set a new PIN</p>
+              <h3 className="text-lg font-bold text-white">Reset Vault Password</h3>
+              <p className="text-xs text-vault-400 mt-1">Enter your Recovery Key to set a new password</p>
             </div>
 
             <form onSubmit={handleRecoverySubmit} className="space-y-3.5">
@@ -663,18 +672,17 @@ export const AuthModal: React.FC = () => {
 
               <div>
                 <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-                  New 4-6 Digit PIN
+                  New Password (min 8 characters)
                 </label>
                 <input
                   type="password"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={6}
+                  maxLength={72}
                   required
-                  value={recoveryNewPin}
-                  onChange={e => setRecoveryNewPin(e.target.value.replace(/\D/g, ''))}
-                  placeholder="••••"
-                  className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-center font-mono tracking-widest text-lg text-white outline-none"
+                  autoComplete="new-password"
+                      value={recoveryNewPassword}
+                  onChange={e => setRecoveryNewPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-sm text-white outline-none"
                 />
               </div>
 
@@ -684,7 +692,7 @@ export const AuthModal: React.FC = () => {
                 className="w-full bg-arcade-gold hover:bg-amber-400 active:scale-95 disabled:opacity-50 text-vault-950 font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-2 mt-2"
               >
                 <KeyRound className="w-4 h-4" />
-                <span>Reset PIN & Unlock</span>
+                <span>Reset Password & Unlock</span>
               </button>
             </form>
 

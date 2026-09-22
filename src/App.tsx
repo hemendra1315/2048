@@ -9,7 +9,7 @@ import { SocialLayout } from './components/layout/SocialLayout';
 import { AdminLayout } from './components/admin/AdminLayout';
 
 const MainNavigator: React.FC = () => {
-  const { user, isSuperAdmin } = useAuth();
+  const { user, isSuperAdmin, recoveryCodeToShow } = useAuth();
   const { isUnlocked } = useVault();
   const [adminMode, setAdminMode] = useState(false);
 
@@ -18,12 +18,12 @@ const MainNavigator: React.FC = () => {
     return <LauncherCoverView />;
   }
 
-  // 2. If Vault is unlocked but user is not authenticated, show the Access Gate
-  if (!user) {
+  // 2. If Vault is unlocked but user is not authenticated (or must first save a new recovery key), show the Access Gate
+  if (!user || recoveryCodeToShow) {
     return <AuthModal />;
   }
 
-  // 3. If Super Admin Hub is active
+  // 3. If Super Admin Hub is active (display only; admin data access is enforced by RLS on the server)
   if (isSuperAdmin && adminMode) {
     return <AdminLayout onReturnToUserMode={() => setAdminMode(false)} />;
   }

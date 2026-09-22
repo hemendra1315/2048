@@ -2,7 +2,32 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import { UserPreferences } from '../types';
 import { useAuth } from './AuthContext';
 import { mockBackend } from '../lib/mockBackend';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, isMockBackendAllowed } from '../lib/supabase';
+
+interface UnlockResult {
+  ok: boolean;
+  error?: 'invalid' | 'locked' | 'not_authenticated' | 'too_short' | 'too_long';
+  locked_until?: string | null;
+}
+
+function unlockErrorMessage(result: UnlockResult | null): string {
+  switch (result?.error) {
+    case 'locked': {
+      const mins = result.locked_until
+        ? Math.max(1, Math.ceil((new Date(result.locked_until).getTime() - Date.now()) / 60000))
+        : 15;
+      return `Too many wrong passwords. Try again in ${mins} minute(s).`;
+    }
+    case 'too_short':
+      return 'Unlock password must be at least 4 characters';
+    case 'too_long':
+      return 'Unlock password is too long';
+    case 'not_authenticated':
+      return 'Session expired. Sign in again.';
+    default:
+      return 'Incorrect password';
+  }
+}
 import { useToast } from './ToastContext';
 
 interface VaultContextType {
@@ -73,23 +98,28 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const verifyAndUnlock = async (secret: string): Promise<boolean> => {
     try {
       if (isSupabaseConfigured() && user) {
-        const { data, error } = await supabase.rpc('verify_unlock_secret', {
-          input_secret: secret.trim(),
-        } as unknown as { input_secret: string });
-        if (error || !data) {
-          showToast('Invalid security code', 'error');
+        // The server identifies the vault owner from the session (auth.uid()), counts failures
+        // and locks unlocking after 5 wrong passwords.
+        const { data, error } = await supabase.rpc('verify_vault_unlock', { p_secret: secret });
+        const result = data as UnlockResult | null;
+        if (error || !result?.ok) {
+          showToast(unlockErrorMessage(result), 'error');
+          return false;
+        }
+      } else if (user && isMockBackendAllowed()) {
+        const ok = await mockBackend.verifyUnlockSecret(user.id, secret);
+        if (!ok) {
+          showToast('Incorrect password', 'error');
           return false;
         }
       } else if (user) {
-        const ok = await mockBackend.verifyUnlockSecret(user.id, secret.trim());
-        if (!ok) {
-          showToast('Invalid security code', 'error');
-          return false;
-        }
+        showToast('Server is not configured', 'error');
+        return false;
       } else {
-        // Guest mode fallback code
-        if (secret.trim() !== '2048') {
-          showToast('Invalid security code (Default: 2048)', 'error');
+        // Signed-out: this only reveals the sign-in screen, not any vault data. It is part of the
+        // disguise, not a security control; the account password protects the data.
+        if (secret !== '2048') {
+          showToast('Incorrect password (Default: 2048)', 'error');
           return false;
         }
       }
@@ -129,17 +159,21 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     if (!user) return;
     try {
       if (isSupabaseConfigured()) {
-        const { error } = await supabase.rpc('update_unlock_secret', {
-          old_secret: oldSecret.trim(),
-          new_secret: newSecret.trim(),
-        } as unknown as { old_secret: string; new_secret: string });
+        const { data, error } = await supabase.rpc('update_vault_unlock', {
+          p_old_secret: oldSecret,
+          p_new_secret: newSecret,
+        });
         if (error) throw error;
+        const result = data as UnlockResult | null;
+        if (!result?.ok) throw new Error(unlockErrorMessage(result));
+      } else if (isMockBackendAllowed()) {
+        await mockBackend.updateUnlockSecret(user.id, oldSecret, newSecret);
       } else {
-        await mockBackend.updateUnlockSecret(user.id, oldSecret.trim(), newSecret.trim());
+        throw new Error('Server is not configured');
       }
-      showToast('Unlock PIN updated securely', 'success');
+      showToast('Unlock password updated securely', 'success');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to update PIN';
+      const msg = err instanceof Error ? err.message : 'Failed to update password';
       showToast(msg, 'error');
       throw err;
     }

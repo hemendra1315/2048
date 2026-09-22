@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Users, MessageSquare, Image, ShieldAlert, Activity, Ban, CheckCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { mockBackend } from '../../lib/mockBackend';
-import { AdminTab, UserProfile } from '../../types';
+import { listProfiles, listAuditLogs } from '../../lib/adminApi';
+import { AdminAccessLogItem, AdminTab, UserProfile } from '../../types';
 
 interface AdminDashboardProps {
   onSelectTab: (tab: AdminTab) => void;
@@ -11,13 +11,21 @@ interface AdminDashboardProps {
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onSelectTab }) => {
   const { user } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [recentLogs, setRecentLogs] = useState<ReturnType<typeof mockBackend.getAdminAuditLogs>>([]);
+  const [recentLogs, setRecentLogs] = useState<AdminAccessLogItem[]>([]);
 
   useEffect(() => {
-    if (user) {
-      setUsers(mockBackend.getProfiles());
-      setRecentLogs(mockBackend.getAdminAuditLogs().slice(0, 5));
-    }
+    if (!user) return;
+    let cancelled = false;
+    Promise.all([listProfiles(), listAuditLogs(5)])
+      .then(([profiles, logs]) => {
+        if (cancelled) return;
+        setUsers(profiles);
+        setRecentLogs(logs);
+      })
+      .catch(err => console.error('Admin dashboard load failed:', err));
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   const activeUsers = users.filter(u => u.status === 'active').length;

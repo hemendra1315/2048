@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Search } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { mockBackend } from '../../lib/mockBackend';
+import { listAuditLogs } from '../../lib/adminApi';
 import { AdminAccessLogItem } from '../../types';
 import { formatDetailedDate } from '../../lib/utils';
 
@@ -11,9 +11,15 @@ export const AuditLogViewer: React.FC = () => {
   const [filterAction, setFilterAction] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const loadLogs = useCallback(() => {
-    if (user) {
-      setLogs(mockBackend.getAdminAuditLogs());
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadLogs = useCallback(async () => {
+    if (!user) return;
+    try {
+      setLogs(await listAuditLogs());
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not load the audit log');
     }
   }, [user]);
 
@@ -26,8 +32,8 @@ export const AuditLogViewer: React.FC = () => {
     const matchesSearch =
       searchQuery === '' ||
       l.action_type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      Boolean(l.admin?.uid.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      Boolean(l.targetUser?.uid.toLowerCase().includes(searchQuery.toLowerCase()));
+      Boolean(l.admin?.uid?.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      Boolean(l.targetUser?.uid?.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesAction && matchesSearch;
   });
 
@@ -40,6 +46,7 @@ export const AuditLogViewer: React.FC = () => {
     'BAN_USER',
     'UNBAN_USER',
     'DELETE_GALLERY_ITEM',
+    'GRANT_SUPER_ADMIN',
   ];
 
   return (
@@ -80,6 +87,10 @@ export const AuditLogViewer: React.FC = () => {
         ))}
       </div>
 
+      {loadError && (
+        <div className="bg-rose-950/40 border border-rose-800/60 rounded-2xl p-3 text-xs text-rose-200">{loadError}</div>
+      )}
+
       {/* Log Feed */}
       <div className="space-y-2">
         {filtered.length === 0 ? (
@@ -104,7 +115,7 @@ export const AuditLogViewer: React.FC = () => {
               <div className="grid grid-cols-2 gap-2 text-[11px] bg-vault-950/80 p-2.5 rounded-xl border border-vault-800/80">
                 <div>
                   <span className="text-vault-500 block">Acting Admin</span>
-                  <span className="font-mono text-vault-200 font-semibold">{l.admin?.uid || 'SUPER_ADMIN'}</span>
+                  <span className="font-mono text-vault-200 font-semibold">{l.admin?.uid || (l.admin_id ? 'SUPER_ADMIN' : 'DATABASE CONSOLE')}</span>
                 </div>
                 <div>
                   <span className="text-vault-500 block">Target Identity</span>
