@@ -12,6 +12,7 @@ import { SocialTab, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { MobileHeader } from './MobileHeader';
 import { MobileNavbar } from './MobileNavbar';
 import { MessagesView } from '../messages/MessagesView';
@@ -38,20 +39,43 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
     galleryCount: 0,
   });
 
-  const refreshStats = useCallback(() => {
+  const refreshStats = useCallback(async () => {
     if (!user) return;
-    const convs = mockBackend.getConversations(user.id);
-    const gallery = mockBackend.getGallery(user.id);
-    const totalUnread = convs.reduce((acc, c) => acc + c.unreadCount, 0);
+    try {
+      if (isSupabaseConfigured()) {
+        const [{ count: unreadCount }, { count: galleryCount }] = await Promise.all([
+          supabase
+            .from('messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('is_read', false)
+            .neq('sender_id', user.id),
+          supabase
+            .from('gallery_items')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', user.id),
+        ]);
 
-    setStats({
-      unreadCount: totalUnread,
-      galleryCount: gallery.length,
-    });
+        setStats({
+          unreadCount: unreadCount ?? 0,
+          galleryCount: galleryCount ?? 0,
+        });
+      } else {
+        const convs = mockBackend.getConversations(user.id);
+        const gallery = mockBackend.getGallery(user.id);
+        const totalUnread = convs.reduce((acc, c) => acc + c.unreadCount, 0);
+
+        setStats({
+          unreadCount: totalUnread,
+          galleryCount: gallery.length,
+        });
+      }
+    } catch (err) {
+      console.warn('Error refreshing stats:', err);
+    }
   }, [user]);
 
   useEffect(() => {
-    refreshStats();
+    void refreshStats();
   }, [refreshStats, currentTab]);
 
   const copyUid = () => {

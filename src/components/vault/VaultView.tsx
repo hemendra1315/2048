@@ -15,6 +15,7 @@ import {
 import { GalleryItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { useVault } from '../../context/VaultContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { mockBackend } from '../../lib/mockBackend';
 import { BiometricService } from '../../lib/biometrics';
@@ -24,6 +25,7 @@ type VaultCategory = 'all' | 'photos' | 'videos' | 'documents' | 'notes';
 export const VaultView: React.FC = () => {
   const { user } = useAuth();
   const { showToast } = useToast();
+  const { preferences, verifyAndUnlock } = useVault();
 
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [pinInput, setPinInput] = useState('');
@@ -33,7 +35,7 @@ export const VaultView: React.FC = () => {
   const [vaultItems, setVaultItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
-  const [autoLockSeconds, setAutoLockSeconds] = useState(60);
+  const [autoLockSeconds, setAutoLockSeconds] = useState(preferences.auto_lock_seconds || 60);
 
   // Auto-lock countdown timer when unlocked
   useEffect(() => {
@@ -43,14 +45,14 @@ export const VaultView: React.FC = () => {
         if (prev <= 1) {
           setIsUnlocked(false);
           showToast('Vault auto-locked due to inactivity', 'info');
-          return 60;
+          return preferences.auto_lock_seconds || 60;
         }
         return prev - 1;
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isUnlocked, showToast]);
+  }, [isUnlocked, preferences.auto_lock_seconds, showToast]);
 
   const loadVaultItems = useCallback(async () => {
     if (!user) return;
@@ -88,9 +90,8 @@ export const VaultView: React.FC = () => {
     try {
       const avail = await BiometricService.isAvailable();
       if (avail.available) {
-        // Platform biometrics verified
         setIsUnlocked(true);
-        setAutoLockSeconds(60);
+        setAutoLockSeconds(preferences.auto_lock_seconds || 60);
         showToast('Secondary Biometric Clearance Granted', 'success');
       } else {
         showToast('Biometric hardware not detected. Enter PIN.', 'info');
@@ -102,24 +103,24 @@ export const VaultView: React.FC = () => {
     }
   };
 
-  const handlePinSubmit = (e: React.FormEvent) => {
+  const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pinInput === '2048' || pinInput.length >= 4) {
+    if (!pinInput) return;
+    const ok = await verifyAndUnlock(pinInput);
+    if (ok) {
       setIsUnlocked(true);
-      setAutoLockSeconds(60);
+      setAutoLockSeconds(preferences.auto_lock_seconds || 60);
       setPinInput('');
       setPinError(false);
-      showToast('Vault Decrypted', 'success');
     } else {
       setPinError(true);
-      showToast('Invalid Security Clearance PIN', 'error');
     }
   };
 
   const handleLockVault = () => {
     setIsUnlocked(false);
     setSelectedItem(null);
-    setAutoLockSeconds(60);
+    setAutoLockSeconds(preferences.auto_lock_seconds || 60);
     showToast('Vault Locked & Memory Wiped', 'info');
   };
 

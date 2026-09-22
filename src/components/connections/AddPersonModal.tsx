@@ -44,12 +44,15 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
     try {
       if (isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('lookup_profile_by_uid', {
-          lookup_uid: cleanUid,
-        });
+        const { data: rawProfile, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .or(`uid.eq.${cleanUid},username.eq.${cleanUid.toLowerCase()}`)
+          .maybeSingle();
+
         if (error) throw error;
-        if (data && (data as unknown as UserProfile[]).length > 0) {
-          setTargetProfile((data as unknown as UserProfile[])[0]);
+        if (rawProfile) {
+          setTargetProfile(rawProfile as unknown as UserProfile);
         } else {
           setTargetProfile(null);
         }

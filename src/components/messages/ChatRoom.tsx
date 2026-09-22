@@ -99,7 +99,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
           payload => {
-            setMessages(prev => [...prev, payload.new as unknown as MessageItem]);
+            const newMsg = payload.new as unknown as MessageItem;
+            setMessages(prev => {
+              if (prev.some(m => m.id === newMsg.id)) return prev;
+              return [...prev, newMsg];
+            });
             scrollToBottom();
           }
         )

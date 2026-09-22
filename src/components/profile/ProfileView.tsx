@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck,
   Fingerprint,
@@ -17,19 +17,37 @@ import { useVault } from '../../context/VaultContext';
 import { CoverGameType } from '../../types';
 
 export const ProfileView: React.FC = () => {
-  const { user, isSuperAdmin, logout } = useAuth();
+  const { user, isSuperAdmin, logout, enrollBiometrics, disableBiometrics } = useAuth();
   const { showToast } = useToast();
-  const { panicLock } = useVault();
+  const { preferences, updatePreferences, panicLock } = useVault();
 
-  const [biometricsEnabled, setBiometricsEnabled] = useState(user?.biometric_enabled ?? true);
-  const [autoLockSeconds, setAutoLockSeconds] = useState(60);
+  const [biometricsEnabled, setBiometricsEnabled] = useState(user?.biometric_enabled ?? false);
   const [readReceipts, setReadReceipts] = useState(true);
-  const [selectedGame, setSelectedGame] = useState<CoverGameType>('game_2048');
+
+  useEffect(() => {
+    if (user?.biometric_enabled !== undefined) {
+      setBiometricsEnabled(user.biometric_enabled);
+    }
+  }, [user]);
 
   const copyUid = () => {
     if (user?.uid) {
       navigator.clipboard.writeText(user.uid);
       showToast(`UID ${user.uid} copied to clipboard`, 'success');
+    }
+  };
+
+  const handleToggleBiometrics = async () => {
+    try {
+      if (!biometricsEnabled) {
+        await enrollBiometrics();
+        setBiometricsEnabled(true);
+      } else {
+        await disableBiometrics();
+        setBiometricsEnabled(false);
+      }
+    } catch {
+      // Toast shown by AuthContext
     }
   };
 
@@ -103,10 +121,7 @@ export const ProfileView: React.FC = () => {
             </div>
           </div>
           <button
-            onClick={() => {
-              setBiometricsEnabled(!biometricsEnabled);
-              showToast(`Biometrics ${!biometricsEnabled ? 'enabled' : 'disabled'}`, 'info');
-            }}
+            onClick={handleToggleBiometrics}
             className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
               biometricsEnabled ? 'bg-[#10B981]' : 'bg-[#262626]'
             }`}
@@ -131,16 +146,16 @@ export const ProfileView: React.FC = () => {
             </div>
           </div>
           <select
-            value={selectedGame}
+            value={preferences.selected_game || 'game_2048'}
             onChange={e => {
-              setSelectedGame(e.target.value as CoverGameType);
-              showToast(`Stealth cover set to ${e.target.value}`, 'success');
+              const game = e.target.value as CoverGameType;
+              updatePreferences({ selected_game: game });
             }}
             className="bg-[#222222] text-xs font-semibold text-white px-2.5 py-1.5 rounded-lg border border-[#262626] focus:outline-none focus:border-[#10B981]"
           >
             <option value="game_2048">2048 Game</option>
-            <option value="game_snake">Snake Retro</option>
-            <option value="game_tictactoe">Tic Tac Toe</option>
+            <option value="snake">Snake Retro</option>
+            <option value="tic_tac_toe">Tic Tac Toe</option>
           </select>
         </div>
 
@@ -156,17 +171,16 @@ export const ProfileView: React.FC = () => {
             </div>
           </div>
           <select
-            value={autoLockSeconds}
+            value={preferences.auto_lock_seconds ?? 60}
             onChange={e => {
-              setAutoLockSeconds(Number(e.target.value));
-              showToast(`Auto-lock set to ${e.target.value}s`, 'info');
+              const secs = Number(e.target.value);
+              updatePreferences({ auto_lock_seconds: secs });
             }}
             className="bg-[#222222] text-xs font-semibold text-white px-2.5 py-1.5 rounded-lg border border-[#262626] focus:outline-none focus:border-[#10B981]"
           >
             <option value={30}>30 seconds</option>
             <option value={60}>1 minute</option>
             <option value={300}>5 minutes</option>
-            <option value={0}>Instant on blur</option>
           </select>
         </div>
       </div>

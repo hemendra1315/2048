@@ -33,15 +33,21 @@ export const CameraView: React.FC<CameraViewProps> = ({
   // Initialize camera stream
   useEffect(() => {
     let stream: MediaStream | null = null;
+    let isCancelled = false;
 
     const startCamera = async () => {
       try {
         setCameraError(null);
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          stream = await navigator.mediaDevices.getUserMedia({
+          const mediaStream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode },
             audio: false,
           });
+          if (isCancelled) {
+            mediaStream.getTracks().forEach(track => track.stop());
+            return;
+          }
+          stream = mediaStream;
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
             setStreamActive(true);
@@ -50,14 +56,17 @@ export const CameraView: React.FC<CameraViewProps> = ({
           setCameraError('Camera API not accessible in this environment.');
         }
       } catch (err) {
-        console.warn('Camera access denied or unavailable:', err);
-        setCameraError('Camera unavailable or permission denied. Using high-speed canvas simulator.');
+        if (!isCancelled) {
+          console.warn('Camera access denied or unavailable:', err);
+          setCameraError('Camera unavailable or permission denied. Using high-speed canvas simulator.');
+        }
       }
     };
 
     startCamera();
 
     return () => {
+      isCancelled = true;
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
       }
@@ -126,11 +135,13 @@ export const CameraView: React.FC<CameraViewProps> = ({
     setIsProcessing(true);
     try {
       if (isSupabaseConfigured()) {
+        const filePath = `${user.id}/cam_${Date.now()}.jpg`;
         await supabase.from('gallery_items').insert({
           user_id: user.id,
           image_url: capturedMedia,
+          storage_path: filePath,
           caption: 'Captured via Camera',
-        });
+        } as unknown as { user_id: string; image_url: string; storage_path: string; caption: string });
       } else {
         mockBackend.uploadGalleryItem(
           user.id,
@@ -154,11 +165,13 @@ export const CameraView: React.FC<CameraViewProps> = ({
     setIsProcessing(true);
     try {
       if (isSupabaseConfigured()) {
+        const filePath = `${user.id}/vault_${Date.now()}.jpg`;
         await supabase.from('gallery_items').insert({
           user_id: user.id,
           image_url: capturedMedia,
+          storage_path: filePath,
           caption: '[ENCRYPTED_VAULT_ITEM]',
-        });
+        } as unknown as { user_id: string; image_url: string; storage_path: string; caption: string });
       } else {
         mockBackend.uploadGalleryItem(
           user.id,

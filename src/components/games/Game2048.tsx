@@ -181,6 +181,13 @@ export const Game2048: React.FC = () => {
   // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
       if (['ArrowUp', 'KeyW'].includes(e.code)) {
         e.preventDefault();
         move(0);

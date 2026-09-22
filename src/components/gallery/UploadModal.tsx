@@ -48,26 +48,38 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
     setUploading(true);
     try {
-      if (isSupabaseConfigured() && imageFile) {
-        const fileExt = imageFile.name.split('.').pop();
-        const filePath = `${user.id}/${Date.now()}.${fileExt}`;
+      if (isSupabaseConfigured()) {
+        if (imageFile) {
+          const fileExt = imageFile.name.split('.').pop();
+          const filePath = `${user.id}/${Date.now()}.${fileExt}`;
 
-        // 1. Upload to Supabase Storage Private Bucket
-        const { error: storageError } = await supabase.storage
-          .from('gallery')
-          .upload(filePath, imageFile);
-        if (storageError) throw storageError;
+          // 1. Upload to Supabase Storage Bucket
+          const { error: storageError } = await supabase.storage
+            .from('gallery')
+            .upload(filePath, imageFile);
+          if (storageError) throw storageError;
 
-        // 2. Insert into gallery_items table
-        const { data: { publicUrl } } = supabase.storage.from('gallery').getPublicUrl(filePath);
+          // 2. Insert into gallery_items table
+          const { data: { publicUrl } } = supabase.storage.from('gallery').getPublicUrl(filePath);
 
-        const { error: dbError } = await supabase.from('gallery_items').insert({
-          user_id: user.id,
-          image_url: publicUrl,
-          storage_path: filePath,
-          caption: caption.trim() || null,
-        } as unknown as { user_id: string; image_url: string; storage_path: string; caption: string | null });
-        if (dbError) throw dbError;
+          const { error: dbError } = await supabase.from('gallery_items').insert({
+            user_id: user.id,
+            image_url: publicUrl,
+            storage_path: filePath,
+            caption: caption.trim() || null,
+          } as unknown as { user_id: string; image_url: string; storage_path: string; caption: string | null });
+          if (dbError) throw dbError;
+        } else {
+          // Direct URL or sample image
+          const filePath = `${user.id}/sample_${Date.now()}.jpg`;
+          const { error: dbError } = await supabase.from('gallery_items').insert({
+            user_id: user.id,
+            image_url: previewUrl,
+            storage_path: filePath,
+            caption: caption.trim() || null,
+          } as unknown as { user_id: string; image_url: string; storage_path: string; caption: string | null });
+          if (dbError) throw dbError;
+        }
       } else {
         // Fallback store in local mock
         mockBackend.uploadGalleryItem(user.id, previewUrl, caption.trim() || undefined);

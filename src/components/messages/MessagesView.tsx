@@ -53,12 +53,15 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
         if (convs.length > 0) {
           const partnerIds = convs.map(c => (c.user_a === user.id ? c.user_b : c.user_a));
-          const { data: rawProfiles } = await supabase
-            .from('profiles')
-            .select('*')
-            .in('id', partnerIds);
+          const convIds = convs.map(c => c.id);
+
+          const [{ data: rawProfiles }, { data: rawMessages }] = await Promise.all([
+            supabase.from('profiles').select('*').in('id', partnerIds),
+            supabase.from('messages').select('*').in('conversation_id', convIds).order('created_at', { ascending: false }),
+          ]);
 
           const profiles = (rawProfiles || []) as unknown as UserProfile[];
+          const messages = (rawMessages || []) as unknown as { id: string; conversation_id: string; sender_id: string; content: string; is_read: boolean; created_at: string }[];
 
           const formatted: ConversationItem[] = convs.map(c => {
             const pId = c.user_a === user.id ? c.user_b : c.user_a;
@@ -72,6 +75,11 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               created_at: '',
               updated_at: '',
             };
+
+            const convMessages = messages.filter(m => m.conversation_id === c.id);
+            const lastMsg = convMessages[0] as ConversationItem['lastMessage'];
+            const unreadCount = convMessages.filter(m => !m.is_read && m.sender_id !== user.id).length;
+
             return {
               id: c.id,
               user_a: c.user_a,
@@ -79,7 +87,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               created_at: c.created_at,
               updated_at: c.updated_at,
               partner: partner as ConversationItem['partner'],
-              unreadCount: 0,
+              lastMessage: lastMsg,
+              unreadCount,
             };
           });
           setConversations(formatted);
@@ -121,6 +130,16 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     if (!isSupabaseConfigured()) {
       const unsub = mockBackend.subscribe('messages:updated', () => loadConversations());
       return unsub;
+    } else {
+      const channel = supabase
+        .channel('public:conversations_messages')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+          loadConversations();
+        })
+        .subscribe();
+      return () => {
+        supabase.removeChannel(channel);
+      };
     }
   }, [loadConversations]);
 
@@ -132,11 +151,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         setActiveConversation({ id: existing.id, partner: existing.partner });
         if (onSelectConversationForDesktop) onSelectConversationForDesktop(existing.partner, existing.id);
       } else {
-        const partner = mockBackend.getProfileById(initialPartnerId);
-        if (partner) {
-          const convId = mockBackend.getOrCreateConversation(user.id, partner.id);
-          setActiveConversation({ id: convId, partner });
-          if (onSelectConversationForDesktop) onSelectConversationForDesktop(partner, convId);
+        if (!isSupabaseConfigured()) {
+          const partner = mockBackend.getProfileById(initialPartnerId);
+          if (partner) {
+            const convId = mockBackend.getOrCreateConversation(user.id, partner.id);
+            setActiveConversation({ id: convId, partner });
+            if (onSelectConversationForDesktop) onSelectConversationForDesktop(partner, convId);
+          }
         }
       }
       if (onClearInitialPartner) onClearInitialPartner();
@@ -150,24 +171,76 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
   };
 
-  const handleCreateChatByUid = (e: React.FormEvent) => {
+  const handleCreateChatByUid = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newChatUidInput.trim() || !user) return;
     const cleanUid = newChatUidInput.trim().toUpperCase();
 
-    const allProfiles = mockBackend.getProfiles();
-    const targetUser = allProfiles.find(
-      p => p.uid.toUpperCase() === cleanUid || (p.username && p.username.toUpperCase() === cleanUid)
-    );
+    if (user.uid === cleanUid) {
+      alert('You cannot start a direct chat with your own UID.');
+      return;
+    }
 
-    if (targetUser) {
-      const convId = mockBackend.getOrCreateConversation(user.id, targetUser.id);
-      setActiveConversation({ id: convId, partner: targetUser });
-      if (onSelectConversationForDesktop) onSelectConversationForDesktop(targetUser, convId);
-      setNewChatModalOpen(false);
-      setNewChatUidInput('');
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: rawProfile, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .or(`uid.eq.${cleanUid},username.eq.${cleanUid.toLowerCase()}`)
+          .maybeSingle();
+
+        if (error || !rawProfile) {
+          alert(`No sovereign user node found with UID/Username "${cleanUid}"`);
+          return;
+        }
+
+        const targetUser = rawProfile as unknown as UserProfile;
+        const userA = user.id < targetUser.id ? user.id : targetUser.id;
+        const userB = user.id < targetUser.id ? targetUser.id : user.id;
+
+        let { data: existingConv } = await supabase
+          .from('conversations')
+          .select('*')
+          .eq('user_a', userA)
+          .eq('user_b', userB)
+          .maybeSingle();
+
+        if (!existingConv) {
+          const { data: newConv, error: createErr } = await supabase
+            .from('conversations')
+            .insert({ user_a: userA, user_b: userB })
+            .select('*')
+            .single();
+          if (createErr) throw createErr;
+          existingConv = newConv;
+        }
+
+        if (existingConv) {
+          await loadConversations();
+          setActiveConversation({ id: existingConv.id, partner: targetUser });
+          if (onSelectConversationForDesktop) onSelectConversationForDesktop(targetUser, existingConv.id);
+          setNewChatModalOpen(false);
+          setNewChatUidInput('');
+        }
+      } catch (err) {
+        console.error('Error initiating conversation:', err);
+        alert('Failed to initialize encrypted channel with peer');
+      }
     } else {
-      alert(`No sovereign user node found with UID "${cleanUid}"`);
+      const allProfiles = mockBackend.getProfiles();
+      const targetUser = allProfiles.find(
+        p => p.uid.toUpperCase() === cleanUid || (p.username && p.username.toUpperCase() === cleanUid)
+      );
+
+      if (targetUser) {
+        const convId = mockBackend.getOrCreateConversation(user.id, targetUser.id);
+        setActiveConversation({ id: convId, partner: targetUser });
+        if (onSelectConversationForDesktop) onSelectConversationForDesktop(targetUser, convId);
+        setNewChatModalOpen(false);
+        setNewChatUidInput('');
+      } else {
+        alert(`No sovereign user node found with UID "${cleanUid}"`);
+      }
     }
   };
 

@@ -110,11 +110,18 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
   const handleRespond = async (requestId: string, accept: boolean) => {
     try {
       if (isSupabaseConfigured()) {
+        const req = incomingReqs.find(r => r.id === requestId);
         const { error } = await supabase
           .from('connection_requests')
           .update({ status: accept ? 'accepted' : 'rejected' } as unknown as { status: 'accepted' | 'rejected' })
           .eq('id', requestId);
         if (error) throw error;
+
+        if (accept && req) {
+          const userA = req.sender_id < req.receiver_id ? req.sender_id : req.receiver_id;
+          const userB = req.sender_id < req.receiver_id ? req.receiver_id : req.sender_id;
+          await supabase.from('connections').upsert({ user_a: userA, user_b: userB });
+        }
       } else {
         mockBackend.respondToRequest(requestId, accept);
       }
