@@ -332,56 +332,54 @@ export const AuthModal: React.FC = () => {
         {/* 2. ONBOARDING MODE (Step-by-Step Frictionless Account Creation) */}
         {/* ========================================================================= */}
         {mode === 'onboarding' && (
-          <div>
+          <div className="flex flex-col flex-1">
             {/* Step Progress Bar */}
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center justify-between mb-5 mt-2">
               <div className="flex items-center gap-1.5">
                 <div
                   className={`w-6 h-1.5 rounded-full ${
-                    onboardingStep === 'username' ? 'bg-arcade-gold' : 'bg-vault-700'
+                    onboardingStep === 'username' ? 'bg-gold' : 'bg-[#1E2024]'
                   }`}
                 />
                 <div
                   className={`w-6 h-1.5 rounded-full ${
-                    onboardingStep === 'password' ? 'bg-arcade-gold' : 'bg-vault-700'
+                    onboardingStep === 'password' ? 'bg-gold' : 'bg-[#1E2024]'
                   }`}
                 />
                 <div
                   className={`w-6 h-1.5 rounded-full ${
-                    onboardingStep === 'biometric' ? 'bg-arcade-gold' : 'bg-vault-700'
+                    onboardingStep === 'biometric' ? 'bg-gold' : 'bg-[#1E2024]'
                   }`}
                 />
                 <div
                   className={`w-6 h-1.5 rounded-full ${
-                    onboardingStep === 'recovery_code' ? 'bg-arcade-gold' : 'bg-vault-700'
+                    onboardingStep === 'recovery_code' ? 'bg-gold' : 'bg-[#1E2024]'
                   }`}
                 />
               </div>
-              <span className="text-[10px] font-bold text-vault-400 uppercase tracking-wider">
+              <span className="t-over font-mono">
                 Step {getStepText()}
               </span>
             </div>
 
             {/* STEP 1: USERNAME */}
             {onboardingStep === 'username' && (
-              <form onSubmit={handleUsernameNext}>
+              <form onSubmit={handleUsernameNext} className="flex flex-col flex-1">
                 <div className="flex flex-col items-center text-center mb-6">
-                  <div className="w-12 h-12 rounded-2xl bg-vault-800 border border-vault-700 flex items-center justify-center text-arcade-gold mb-2">
+                  <div className="w-12 h-12 rounded-[14px] bg-[#111214] border border-vault-700 flex items-center justify-center text-gold mb-3">
                     <User className="w-6 h-6" />
                   </div>
-                  <h3 className="text-lg font-bold text-white">Choose Your Identity</h3>
-                  <p className="text-xs text-vault-400 mt-1">
-                    No email needed. Pick a username.
+                  <h3 className="t-h2 text-white">Choose Your Identity</h3>
+                  <p className="t-sm c2 mt-1">
+                    No email or phone required. Pick a handle.
                   </p>
                 </div>
 
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-                      Username
-                    </label>
+                  <label className="field">
+                    <span className="lab">Username</span>
                     <div className="relative">
-                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-vault-500 font-mono text-sm">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-vault-400 font-mono text-sm">
                         @
                       </span>
                       <input
@@ -391,20 +389,20 @@ export const AuthModal: React.FC = () => {
                         value={newUsername}
                         onChange={e => setNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
                         placeholder="cipher_fox"
-                        className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-8 pr-3.5 py-2.5 text-sm text-white placeholder-vault-600 outline-none font-mono"
+                        className="inp pl-8 font-mono outline-none focus:border-cy"
                       />
                     </div>
-                    <p className="text-[10px] text-vault-500 mt-1.5">
+                    <p className="t-cap mt-1">
                       A unique UID (e.g. CIPHER-4921) will be generated automatically.
                     </p>
-                  </div>
+                  </label>
 
                   <button
                     type="submit"
-                    className="w-full bg-arcade-gold hover:bg-amber-400 text-vault-950 font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-2"
+                    className="btn btn-p btn-block gap-2"
                   >
-                    <span>Continue to Password Setup</span>
-                    <ArrowRight className="w-4 h-4" />
+                    <span>Continue to Password</span>
+                    <ArrowRight className="i" />
                   </button>
                 </div>
               </form>
@@ -412,22 +410,20 @@ export const AuthModal: React.FC = () => {
 
             {/* STEP 2: PASSWORD */}
             {onboardingStep === 'password' && (
-              <form onSubmit={handlePasswordNext}>
+              <form onSubmit={handlePasswordNext} className="flex flex-col flex-1">
                 <div className="flex flex-col items-center text-center mb-5">
-                  <div className="w-12 h-12 rounded-2xl bg-vault-800 border border-vault-700 flex items-center justify-center text-arcade-gold mb-2">
+                  <div className="w-12 h-12 rounded-[14px] bg-[#111214] border border-vault-700 flex items-center justify-center text-gold mb-3">
                     <KeyRound className="w-6 h-6" />
                   </div>
-                  <h3 className="text-lg font-bold text-white">Create a Password</h3>
-                  <p className="text-xs text-vault-400 mt-1">
-                    Your personal key to unlock the Vault.
+                  <h3 className="t-h2 text-white">Create a Password</h3>
+                  <p className="t-sm c2 mt-1">
+                    Your master key to access your private messages.
                   </p>
                 </div>
 
                 <div className="space-y-3.5">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-                      Password (min 8 characters)
-                    </label>
+                  <label className="field">
+                    <span className="lab">Password (min 8 characters)</span>
                     <input
                       type="password"
                       maxLength={72}
@@ -437,14 +433,12 @@ export const AuthModal: React.FC = () => {
                       value={newPassword}
                       onChange={e => setNewPassword(e.target.value)}
                       placeholder="••••••••"
-                      className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-sm text-white outline-none"
+                      className="inp outline-none focus:border-cy"
                     />
-                  </div>
+                  </label>
 
-                  <div>
-                    <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-                      Confirm Password
-                    </label>
+                  <label className="field">
+                    <span className="lab">Confirm Password</span>
                     <input
                       type="password"
                       maxLength={72}
@@ -453,24 +447,24 @@ export const AuthModal: React.FC = () => {
                       value={confirmPassword}
                       onChange={e => setConfirmPassword(e.target.value)}
                       placeholder="••••••••"
-                      className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-sm text-white outline-none"
+                      className="inp outline-none focus:border-cy"
                     />
-                  </div>
+                  </label>
 
                   <div className="flex gap-2 pt-2">
                     <button
                       type="button"
                       onClick={() => setOnboardingStep('username')}
-                      className="w-1/3 bg-vault-800 hover:bg-vault-700 text-vault-300 font-semibold py-3 rounded-xl text-xs transition-colors"
+                      className="btn btn-s w-1/3"
                     >
                       Back
                     </button>
                     <button
                       type="submit"
-                      className="w-2/3 bg-arcade-gold hover:bg-amber-400 text-vault-950 font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-1.5"
+                      className="btn btn-p w-2/3 gap-1.5"
                     >
                       <span>Next</span>
-                      <ArrowRight className="w-4 h-4" />
+                      <ArrowRight className="i" />
                     </button>
                   </div>
                 </div>
@@ -479,40 +473,40 @@ export const AuthModal: React.FC = () => {
 
             {/* STEP 3: BIOMETRIC ENROLLMENT */}
             {onboardingStep === 'biometric' && (
-              <div>
+              <div className="flex flex-col flex-1">
                 <div className="flex flex-col items-center text-center mb-6">
-                  <div className="w-14 h-14 rounded-2xl bg-arcade-gold/20 border border-arcade-gold/50 flex items-center justify-center text-arcade-gold mb-3 shadow-lg shadow-amber-500/10">
+                  <div className="w-14 h-14 rounded-[14px] bg-[#111214] border border-vault-700 flex items-center justify-center text-gold mb-3">
                     <Fingerprint className="w-7 h-7" />
                   </div>
-                  <h3 className="text-lg font-bold text-white">Enable Biometrics?</h3>
-                  <p className="text-xs text-vault-400 mt-1">
-                    Unlock the Vault instantaneously with your fingerprint or biometric sensor.
+                  <h3 className="t-h2 text-white">Enable Passkey / Biometrics?</h3>
+                  <p className="t-sm c2 mt-1">
+                    Unlock instantaneously with your device sensor.
                   </p>
                 </div>
 
-                <div className="bg-vault-950 border border-vault-800 rounded-2xl p-3 mb-5 text-xs text-vault-300 flex items-start gap-2.5">
+                <div className="card p-3.5 mb-5 text-xs text-vault-300 flex items-start gap-2.5">
                   <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                   <span>
-                    Zero biometric data leaves your device hardware. Secured via platform-grade authenticator.
+                    Zero biometric data leaves your device hardware. Secured via WebAuthn hardware enclave.
                   </span>
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="space-y-2.5 mt-auto">
                   <button
                     type="button"
                     disabled={loading}
                     onClick={() => handleBiometricChoice(true)}
-                    className="w-full bg-arcade-gold hover:bg-amber-400 active:scale-98 text-vault-950 font-bold py-3.5 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-2"
+                    className="btn btn-p btn-block gap-2"
                   >
-                    <Fingerprint className="w-4 h-4" />
-                    <span>Enable Fingerprint Unlock</span>
+                    <Fingerprint className="i" />
+                    <span>Enable Biometric Unlock</span>
                   </button>
 
                   <button
                     type="button"
                     disabled={loading}
                     onClick={() => handleBiometricChoice(false)}
-                    className="w-full bg-vault-800 hover:bg-vault-700 text-vault-300 font-semibold py-2.5 rounded-xl text-xs transition-colors"
+                    className="btn btn-s btn-block text-xs"
                   >
                     Skip for Now (Use Password Only)
                   </button>
@@ -522,29 +516,29 @@ export const AuthModal: React.FC = () => {
 
             {/* STEP 4: RECOVERY CODE DISPLAY & ACTIVATION */}
             {onboardingStep === 'recovery_code' && (
-              <div>
+              <div className="flex flex-col flex-1">
                 <div className="flex flex-col items-center text-center mb-4">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mb-2">
+                  <div className="w-12 h-12 rounded-[14px] bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-2">
                     <CheckCircle2 className="w-6 h-6" />
                   </div>
-                  <h3 className="text-lg font-bold text-white">Save Account Recovery Key</h3>
-                  <p className="text-xs text-vault-400 mt-1">
-                    Store this key securely. It is the <strong className="text-rose-400">ONLY</strong> way to reset your password if forgotten.
+                  <h3 className="t-h2 text-white">Save Account Recovery Key</h3>
+                  <p className="t-sm c2 mt-1">
+                    Store this key securely. It is the <strong className="text-rose-400 font-semibold">ONLY</strong> way to reset your password if forgotten.
                   </p>
                 </div>
 
                 {/* Code Card */}
-                <div className="bg-vault-950 border-2 border-dashed border-arcade-gold/50 rounded-2xl p-3.5 mb-4 text-center">
-                  <div className="text-[10px] uppercase font-bold text-vault-400 tracking-wider mb-1">
+                <div className="card border-dashed border-gold/40 p-4 mb-4 text-center">
+                  <div className="t-over mb-1">
                     One-Time Recovery Key
                   </div>
-                  <div className="text-base font-mono font-bold text-arcade-gold tracking-wider select-all py-1">
+                  <div className="text-base font-mono font-bold text-gold tracking-wider select-all py-1">
                     {generatedRecoveryCode}
                   </div>
                   <button
                     type="button"
                     onClick={copyRecoveryCode}
-                    className="mt-2 text-xs text-vault-300 hover:text-white bg-vault-800 hover:bg-vault-750 px-3 py-1.5 rounded-lg border border-vault-700 inline-flex items-center gap-1.5 transition-colors"
+                    className="btn btn-s btn-sm mt-2 mx-auto gap-1.5"
                   >
                     {copiedRecoveryCode ? (
                       <>
@@ -559,14 +553,14 @@ export const AuthModal: React.FC = () => {
                 </div>
 
                 {/* Confirmation Checkbox */}
-                <label className="flex items-start gap-2.5 p-2 bg-vault-950/60 border border-vault-800 rounded-xl mb-4 cursor-pointer select-none">
+                <label className="card p-3 mb-4 flex items-start gap-2.5 cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={hasSavedRecoveryCode}
                     onChange={e => setHasSavedRecoveryCode(e.target.checked)}
-                    className="mt-1 rounded accent-arcade-gold"
+                    className="mt-0.5 rounded accent-gold"
                   />
-                  <span className="text-[11px] text-vault-300 leading-tight">
+                  <span className="text-[12px] text-vault-300 leading-tight">
                     I have copied and safely stored my recovery key. I understand it cannot be recovered later.
                   </span>
                 </label>
@@ -579,10 +573,10 @@ export const AuthModal: React.FC = () => {
                     setHasSavedRecoveryCode(false);
                     acknowledgeRecoveryCode();
                   }}
-                  className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:pointer-events-none active:scale-98 text-vault-950 font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/20 text-sm transition-all flex items-center justify-center gap-2"
+                  className="btn btn-p btn-block gap-2 mt-auto"
                 >
-                  <span>Enter Retro Vault</span>
-                  <ArrowRight className="w-4 h-4" />
+                  <span>Launch Application</span>
+                  <ArrowRight className="i" />
                 </button>
               </div>
             )}
@@ -593,7 +587,7 @@ export const AuthModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setMode('login')}
-                  className="text-xs text-vault-400 hover:text-arcade-gold transition-colors inline-flex items-center gap-1"
+                  className="text-xs text-vault-400 hover:text-white transition-colors inline-flex items-center gap-1 min-h-[44px]"
                 >
                   <ArrowLeft className="w-3 h-3" /> Already have an account? Sign In
                 </button>
@@ -606,75 +600,69 @@ export const AuthModal: React.FC = () => {
         {/* 3. RECOVERY MODE (Reset Password via Recovery Code) */}
         {/* ========================================================================= */}
         {mode === 'recovery' && (
-          <div>
-            <div className="flex flex-col items-center text-center mb-5">
-              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-arcade-gold mb-2">
+          <div className="flex flex-col flex-1">
+            <div className="flex flex-col items-center text-center mb-5 mt-2">
+              <div className="w-12 h-12 rounded-[14px] bg-[#111214] border border-vault-700 flex items-center justify-center text-gold mb-2">
                 <RefreshCw className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-bold text-white">Reset Vault Password</h3>
-              <p className="text-xs text-vault-400 mt-1">Enter your Recovery Key to set a new password</p>
+              <h3 className="t-h2 text-white">Reset Vault Password</h3>
+              <p className="t-sm c2 mt-1">Enter your Recovery Key to set a new password</p>
             </div>
 
-            <form onSubmit={handleRecoverySubmit} className="space-y-3.5">
-              <div>
-                <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-                  Username or UID
-                </label>
+            <form onSubmit={handleRecoverySubmit} className="flex flex-col gap-3.5">
+              <label className="field">
+                <span className="lab">Username or UID</span>
                 <input
                   type="text"
                   required
                   value={recoveryIdent}
                   onChange={e => setRecoveryIdent(e.target.value)}
                   placeholder="e.g. alex or CIPHER-4921"
-                  className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-vault-600 outline-none"
+                  className="inp outline-none focus:border-cy"
                 />
-              </div>
+              </label>
 
-              <div>
-                <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-                  Recovery Key
-                </label>
+              <label className="field">
+                <span className="lab">Recovery Key</span>
                 <input
                   type="text"
                   required
                   value={recoveryCodeInput}
                   onChange={e => setRecoveryCodeInput(e.target.value.toUpperCase())}
                   placeholder="RC-XXXX-XXXX-XXXX"
-                  className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-sm text-white font-mono placeholder-vault-600 outline-none"
+                  className="inp font-mono outline-none focus:border-cy"
                 />
-              </div>
+              </label>
 
-              <div>
-                <label className="block text-[11px] font-semibold text-vault-300 uppercase tracking-wider mb-1">
-                  New Password (min 8 characters)
-                </label>
+              <label className="field">
+                <span className="lab">New Password (min 8 characters)</span>
                 <input
                   type="password"
                   maxLength={72}
                   required
                   autoComplete="new-password"
-                      value={recoveryNewPassword}
+                  value={recoveryNewPassword}
                   onChange={e => setRecoveryNewPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2.5 text-sm text-white outline-none"
+                  className="inp outline-none focus:border-cy"
                 />
-              </div>
+              </label>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-arcade-gold hover:bg-amber-400 active:scale-95 disabled:opacity-50 text-vault-950 font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all flex items-center justify-center gap-2 mt-2"
+                className="btn btn-p btn-block gap-2 mt-3"
               >
-                <KeyRound className="w-4 h-4" />
+                <KeyRound className="i" />
                 <span>Reset Password & Unlock</span>
               </button>
             </form>
 
-            <div className="mt-5 pt-4 border-t border-vault-800 text-center">
+            <div className="mt-auto pt-5 border-t border-vault-800 text-center">
               <button
                 type="button"
                 onClick={() => setMode('login')}
-                className="text-xs text-vault-400 hover:text-arcade-gold transition-colors inline-flex items-center gap-1"
+                className="text-xs text-vault-400 hover:text-white transition-colors inline-flex items-center gap-1 min-h-[44px]"
               >
                 <ArrowLeft className="w-3 h-3" /> Back to Sign In
               </button>

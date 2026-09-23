@@ -369,15 +369,13 @@ export const LauncherCoverView: React.FC = () => {
                 </div>
 
                 {/* Metric Strip */}
-                <div className="flex items-center gap-3 py-1 text-xs">
+                <div className="flex flex-wrap items-center gap-2 py-1 text-xs">
                   <div className="flex items-center gap-1.5 font-mono text-gold font-bold bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-600/30">
                     <Trophy className="w-3.5 h-3.5" aria-hidden />
                     <span>Best Score: {featuredHighScore}</span>
                   </div>
-                  <span className="text-vault-700">•</span>
-                  <span className="t-cap c3 font-mono">Strategy & Numbers</span>
-                  <span className="text-vault-700">•</span>
-                  <span className="t-cap cem font-mono flex items-center gap-1">
+                  <span className="tag mono text-vault-300">Strategy & Numbers</span>
+                  <span className="tag tag-em mono flex items-center gap-1">
                     <Zap className="w-3 h-3" />
                     Instant Play
                   </span>
@@ -464,17 +462,19 @@ export const LauncherCoverView: React.FC = () => {
                         className="w-full cursor-pointer relative group-hover:brightness-105 transition-all"
                       >
                         {renderGameThumbnail(game.id)}
-                        {game.badge && (
-                          <span className="absolute top-2 right-2 tag tag-em !text-[10px] !h-5 !px-2 shadow-md">
-                            {game.badge}
-                          </span>
-                        )}
                       </div>
 
                       {/* Card Content & Metadata */}
                       <div className="flex flex-col gap-1.5 min-h-[72px]">
                         <div className="flex items-center justify-between">
-                          <span className="t-over text-[10px] text-vault-400">{game.category}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="t-over text-[10px] text-vault-400">{game.category}</span>
+                            {game.badge && (
+                              <span className="tag tag-em !text-[9px] !h-4 !px-1.5 font-mono">
+                                {game.badge}
+                              </span>
+                            )}
+                          </div>
                           {highScore > 0 && (
                             <span className="t-cap mono text-gold font-bold flex items-center gap-1">
                               <Trophy className="w-3 h-3" aria-hidden />
