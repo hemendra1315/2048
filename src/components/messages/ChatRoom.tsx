@@ -10,7 +10,7 @@ import {
   Play,
   Pause,
   Lock,
-  Loader2,
+  RotateCcw,
 } from 'lucide-react';
 import { MessageItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -20,6 +20,7 @@ import { uploadChatMedia } from '../../lib/storageHelper';
 import { uniqueChannelName } from '../../lib/realtime';
 import { formatTimestamp } from '../../lib/utils';
 import { useToast } from '../../context/ToastContext';
+import { Avatar } from '../common/Avatar';
 
 interface ChatRoomProps {
   conversationId: string;
@@ -43,6 +44,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [inputContent, setInputContent] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -117,9 +119,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         .on(
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
-          payload => {
-            const updatedMsg = payload.new as unknown as MessageItem;
-            setMessages(prev => prev.map(m => (m.id === updatedMsg.id ? updatedMsg : m)));
+          () => {
+            loadMessages();
           }
         )
         .subscribe();
@@ -129,44 +130,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       };
     }
   }, [conversationId, loadMessages, user]);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
-
-  useEffect(() => {
-    if (initialAttachment) {
-      const sendInitialMedia = async () => {
-        setIsUploadingMedia(true);
-        try {
-          const mediaUrl = await uploadChatMedia(initialAttachment, conversationId, 'jpg');
-          await handleSend(`[IMAGE]${mediaUrl}`);
-          showToast('Camera snapshot sent to chat', 'success');
-        } catch (err) {
-          console.error('Failed to send initial attachment:', err);
-          showToast('Failed to send camera snapshot', 'error');
-        } finally {
-          setIsUploadingMedia(false);
-          if (onClearInitialAttachment) onClearInitialAttachment();
-        }
-      };
-      sendInitialMedia();
-    }
-  }, [initialAttachment]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    return () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        try {
-          mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
-        } catch {
-          // stream already closed
-        }
-      }
-    };
-  }, []);
 
   const handleSend = async (contentToSend?: string) => {
     const content = (contentToSend || inputContent).trim();
@@ -211,13 +174,38 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     }
   };
 
+  // Process initial media attachment from camera
+  useEffect(() => {
+    if (initialAttachment && user) {
+      const sendInitialMedia = async () => {
+        setIsUploadingMedia(true);
+        try {
+          let mediaUrl = initialAttachment;
+          if (initialAttachment.startsWith('data:')) {
+            const res = await fetch(initialAttachment);
+            const blob = await res.blob();
+            const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+            mediaUrl = await uploadChatMedia(file, conversationId);
+          }
+          await handleSend(`[IMAGE]${mediaUrl}`);
+          showToast('Photo sent to chat', 'success');
+        } catch (err) {
+          console.error('Error sending initial photo:', err);
+          showToast('Failed to attach photo', 'error');
+        } finally {
+          setIsUploadingMedia(false);
+          if (onClearInitialAttachment) onClearInitialAttachment();
+        }
+      };
+      sendInitialMedia();
+    }
+  }, [initialAttachment]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
 
-    // Reset input so re-selecting same file triggers change
     e.target.value = '';
-
     setIsUploadingMedia(true);
     try {
       const mediaUrl = await uploadChatMedia(file, conversationId);
@@ -237,7 +225,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const audioChunksRef = useRef<Blob[]>([]);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
 
-  // Audio recording timer
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isRecordingAudio) {
@@ -264,38 +251,39 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       };
 
       recorder.onstop = async () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        stream.getTracks().forEach(t => t.stop());
-        setIsUploadingMedia(true);
-        try {
-          const mediaUrl = await uploadChatMedia(blob, conversationId, 'webm');
-          await handleSend(`[VOICE_NOTE:${audioSeconds || 1}s]${mediaUrl}`);
-          showToast('Voice note transmitted securely', 'success');
-        } catch (err) {
-          console.error('Voice upload failed:', err);
-          showToast('Voice note failed to send', 'error');
-        } finally {
-          setIsUploadingMedia(false);
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const dur = `${Math.floor(audioSeconds / 60)}:${(audioSeconds % 60).toString().padStart(2, '0')}`;
+
+        if (audioSeconds >= 1) {
+          try {
+            setIsUploadingMedia(true);
+            const audioFile = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
+            const mediaUrl = await uploadChatMedia(audioFile, conversationId);
+            await handleSend(`[VOICE_NOTE:${dur}]${mediaUrl}`);
+            showToast('Voice note shared', 'success');
+          } catch (err) {
+            console.error('Voice note upload error:', err);
+            showToast('Voice note upload failed', 'error');
+          } finally {
+            setIsUploadingMedia(false);
+          }
         }
       };
 
       recorder.start();
       setIsRecordingAudio(true);
     } catch (err) {
-      console.warn('Microphone error:', err);
-      showToast('Microphone access denied or unavailable', 'info');
+      console.error('Voice record error:', err);
+      showToast('Microphone access denied', 'error');
     }
   };
 
   const handleStopVoiceRecord = (send: boolean) => {
     if (mediaRecorderRef.current && isRecordingAudio) {
-      if (!send) {
-        mediaRecorderRef.current.ondataavailable = null;
-        mediaRecorderRef.current.onstop = null;
-        mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
-        showToast('Voice note discarded', 'info');
-      } else {
+      if (send) {
         mediaRecorderRef.current.stop();
+      } else {
+        mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
       }
       setIsRecordingAudio(false);
     }
@@ -303,78 +291,73 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
   const playAudio = (audioUrl: string, msgId: string) => {
     if (playingAudioId === msgId) {
-      if (audioElementRef.current) {
-        audioElementRef.current.pause();
-      }
+      if (audioElementRef.current) audioElementRef.current.pause();
       setPlayingAudioId(null);
       return;
     }
 
-    if (audioElementRef.current) {
-      audioElementRef.current.pause();
-    }
+    if (audioElementRef.current) audioElementRef.current.pause();
 
     const audio = new Audio(audioUrl);
     audioElementRef.current = audio;
     setPlayingAudioId(msgId);
 
-    audio.onended = () => {
-      setPlayingAudioId(null);
-    };
-
-    audio.onerror = () => {
-      setPlayingAudioId(null);
-    };
-
+    audio.onended = () => setPlayingAudioId(null);
+    audio.onerror = () => setPlayingAudioId(null);
     audio.play().catch(() => setPlayingAudioId(null));
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-140px)] md:h-[680px] bg-[#050505] border border-[#1E2025] rounded-2xl overflow-hidden select-none animate-fade-in">
-      {/* Header */}
-      <header className="bg-[#0C0D0F] border-b border-[#1E2025] px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+    <div className="flex flex-col h-full bg-vault-950 border border-vault-800 rounded-2xl overflow-hidden select-none animate-fade-in">
+      {/* 1. CHAT WORKSPACE HEADER */}
+      <header className="h-16 px-4 sm:px-5 bg-vault-900 border-b border-vault-800 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
           <button
+            type="button"
             onClick={onBack}
-            className="p-1.5 rounded-xl bg-[#131417] hover:bg-[#1B1D21] text-vault-300 hover:text-white transition-colors"
+            className="ib ib-s lg:hidden"
+            aria-label="Back to conversations"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="i" aria-hidden />
           </button>
 
-          <img
-            src={partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${partner.uid}`}
-            alt="Partner"
-            className="w-10 h-10 rounded-xl bg-[#131417] border border-[#1E2025] object-cover"
+          <Avatar
+            name={partner.display_name}
+            seed={partner.uid}
+            src={partner.avatar_url}
+            size={40}
+            online={true}
           />
 
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <h3 className="text-sm font-bold text-white leading-tight">{partner.display_name}</h3>
-              <span className="w-2 h-2 rounded-full bg-[#10B981]" />
+              <h2 className="t-h3 font-bold text-white leading-tight truncate m-0">
+                {partner.display_name}
+              </h2>
             </div>
-            <div className="flex items-center gap-1 text-[11px] font-mono text-[#10B981]">
-              <ShieldCheck className="w-3 h-3" />
+            <div className="flex items-center gap-1.5 text-[11px] font-mono text-emerald leading-tight mt-0.5">
+              <ShieldCheck className="w-3.5 h-3.5" aria-hidden />
               <span>{partner.uid}</span>
-              <span className="text-vault-500 font-sans ml-1 text-[10px]">• E2E Encrypted</span>
+              <span className="text-vault-500 font-sans hidden sm:inline">• E2E Encrypted</span>
             </div>
           </div>
         </div>
       </header>
 
-      {/* Messages Thread */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#050505]">
+      {/* 2. MESSAGE STREAM (High Readability 15px/22px, 70% Max Width, Grouped) */}
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2 bg-vault-950 min-h-0">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center p-6 text-xs text-vault-500">
-            <div className="w-14 h-14 rounded-2xl bg-[#0C0D0F] border border-[#1E2025] flex items-center justify-center text-[#10B981] mb-3">
-              <Lock className="w-7 h-7" />
+          <div className="h-full flex flex-col items-center justify-center text-center p-6 text-xs text-vault-500 gap-2">
+            <div className="w-14 h-14 rounded-2xl bg-vault-900 border border-vault-750 flex items-center justify-center text-emerald mb-2 shadow-sm">
+              <Lock className="w-7 h-7" aria-hidden />
             </div>
-            <span className="font-bold text-white text-sm mb-1">Direct Encrypted Channel</span>
-            <p className="max-w-xs text-[11px] text-vault-400">
+            <span className="font-bold text-white text-base">Direct Encrypted Stream</span>
+            <p className="max-w-xs text-xs text-vault-400 m-0">
               Only you and {partner.display_name} have cryptographic clearance to this stream.
             </p>
           </div>
         ) : (
-          messages.map(msg => {
+          messages.map((msg, index) => {
             const isMe = msg.sender_id === user?.id;
             const isImage = msg.content.startsWith('[IMAGE]');
             const isVoice = msg.content.startsWith('[VOICE_NOTE');
@@ -382,48 +365,63 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             const voiceDuration = voiceMatch ? voiceMatch[1] : '0:14';
             const voiceDataUrl = voiceMatch ? voiceMatch[2] : '';
 
+            // Group consecutive messages from same sender
+            const prevMsg = messages[index - 1];
+            const nextMsg = messages[index + 1];
+            const isFirstInGroup = !prevMsg || prevMsg.sender_id !== msg.sender_id;
+            const isLastInGroup = !nextMsg || nextMsg.sender_id !== msg.sender_id;
+
             return (
               <div
                 key={msg.id}
-                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-fade-in`}
+                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} ${
+                  isFirstInGroup ? 'mt-3' : 'mt-0.5'
+                }`}
               >
                 <div
-                  className={`max-w-[85%] sm:max-w-[70%] p-3 rounded-2xl text-sm leading-relaxed ${
+                  className={`max-w-[70%] p-3 text-[15px] leading-[22px] break-words shadow-sm ${
                     isMe
-                      ? 'bg-[#10B981] text-black font-medium rounded-br-xs shadow-md'
-                      : 'bg-[#131417] border border-[#1E2025] text-white rounded-bl-xs shadow-sm'
+                      ? `bg-[#10B981] text-[#04120C] font-medium ${
+                          isLastInGroup ? 'rounded-2xl rounded-br-xs' : 'rounded-2xl'
+                        }`
+                      : `bg-[#1B1D21] border border-[#1E2025] text-[#F4F5F6] ${
+                          isLastInGroup ? 'rounded-2xl rounded-bl-xs' : 'rounded-2xl'
+                        }`
                   }`}
                 >
                   {isImage ? (
                     <div
-                      onClick={() => onOpenMedia && onOpenMedia(msg.content.replace('[IMAGE]', ''))}
-                      className="cursor-pointer rounded-xl overflow-hidden border border-black/20"
+                      onClick={() => onOpenMedia?.(msg.content.replace('[IMAGE]', ''))}
+                      className="cursor-pointer rounded-xl overflow-hidden border border-black/10"
                     >
                       <img
                         src={msg.content.replace('[IMAGE]', '')}
                         alt="Encrypted attachment"
-                        className="max-h-60 w-full object-cover rounded-lg"
+                        className="max-h-72 w-full object-cover rounded-lg"
+                        loading="lazy"
                       />
                     </div>
                   ) : isVoice ? (
-                    <div className="flex items-center gap-3 min-w-[180px] py-1">
+                    <div className="flex items-center gap-3 min-w-[200px] py-1">
                       <button
+                        type="button"
                         onClick={() => voiceDataUrl ? playAudio(voiceDataUrl, msg.id) : setPlayingAudioId(playingAudioId === msg.id ? null : msg.id)}
-                        className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                          isMe ? 'bg-black text-[#10B981]' : 'bg-[#10B981] text-black'
+                        className={`w-9 h-9 rounded-full flex items-center justify-center ${
+                          isMe ? 'bg-[#04120C] text-[#10B981]' : 'bg-[#10B981] text-[#04120C]'
                         } active:scale-90 transition-transform`}
+                        aria-label={playingAudioId === msg.id ? 'Pause voice message' : 'Play voice message'}
                       >
                         {playingAudioId === msg.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
                       </button>
                       <div className="flex-1 space-y-1">
                         <div className="h-2 rounded-full bg-black/20 overflow-hidden">
                           <div
-                            className={`h-full ${isMe ? 'bg-black' : 'bg-[#10B981]'} ${
+                            className={`h-full ${isMe ? 'bg-[#04120C]' : 'bg-[#10B981]'} ${
                               playingAudioId === msg.id ? 'w-3/4 animate-pulse' : 'w-1/4'
                             }`}
                           />
                         </div>
-                        <span className={`text-[10px] font-mono ${isMe ? 'text-black/70' : 'text-vault-400'}`}>
+                        <span className={`text-[11px] font-mono ${isMe ? 'text-[#04120C]/75' : 'text-vault-400'}`}>
                           Voice Note ({voiceDuration})
                         </span>
                       </div>
@@ -433,14 +431,14 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                   )}
                 </div>
 
-                {/* Meta info / Read receipt */}
-                <div className="flex items-center gap-1 text-[10px] text-vault-500 mt-1 px-1">
+                {/* Timestamp & Read Receipts */}
+                <div className={`flex items-center gap-1.5 text-[11px] text-vault-500 font-mono mt-1 px-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
                   <span>{formatTimestamp(msg.created_at)}</span>
                   {isMe && (
                     msg.is_read ? (
-                      <CheckCheck className="w-3.5 h-3.5 text-[#10B981]" />
+                      <CheckCheck className="w-3.5 h-3.5 text-emerald" aria-label="Read" />
                     ) : (
-                      <Check className="w-3.5 h-3.5 text-vault-500" />
+                      <Check className="w-3.5 h-3.5 text-vault-500" aria-label="Sent" />
                     )
                   )}
                 </div>
@@ -450,89 +448,103 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         )}
 
         {isTyping && (
-          <div className="flex items-center gap-1.5 bg-[#131417] border border-[#1E2025] px-3 py-1.5 rounded-full w-20 text-[#10B981] animate-pulse">
-            <div className="w-1.5 h-1.5 bg-[#10B981] rounded-full animate-bounce" />
-            <div className="w-1.5 h-1.5 bg-[#10B981] rounded-full animate-bounce [animation-delay:0.2s]" />
-            <div className="w-1.5 h-1.5 bg-[#10B981] rounded-full animate-bounce [animation-delay:0.4s]" />
+          <div className="flex items-center gap-1.5 bg-vault-900 border border-vault-800 px-3.5 py-2 rounded-full w-20 text-emerald animate-pulse">
+            <div className="w-1.5 h-1.5 bg-emerald rounded-full animate-bounce" />
+            <div className="w-1.5 h-1.5 bg-emerald rounded-full animate-bounce [animation-delay:0.2s]" />
+            <div className="w-1.5 h-1.5 bg-emerald rounded-full animate-bounce [animation-delay:0.4s]" />
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Bar */}
-      <div className="bg-[#0C0D0F] border-t border-[#1E2025] p-3 flex items-center gap-2">
+      {/* 3. ALWAYS VISIBLE COMPOSER BAR */}
+      <footer className="bg-vault-900 border-t border-vault-800 p-3 shrink-0">
         <input
           type="file"
           ref={fileInputRef}
           onChange={handleFileUpload}
           accept="image/*"
           className="hidden"
+          aria-label="File upload"
         />
 
         {isRecordingAudio ? (
-          <div className="flex-1 flex items-center justify-between bg-red-950/80 border border-red-600/50 rounded-xl px-4 py-2 text-red-300 animate-pulse">
+          <div className="flex items-center justify-between bg-red-950/80 border border-red-600/50 rounded-xl px-4 py-2.5 text-red-300 animate-pulse">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
               <span className="text-xs font-mono font-bold">RECORDING {audioSeconds}s</span>
             </div>
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={() => handleStopVoiceRecord(false)}
-                className="px-2.5 py-1 bg-[#131417] hover:bg-[#1B1D21] text-xs font-semibold rounded-lg text-vault-300"
+                className="btn btn-g btn-sm text-vault-300"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={() => handleStopVoiceRecord(true)}
-                className="px-3 py-1 bg-[#10B981] hover:bg-emerald-400 text-black text-xs font-bold rounded-lg shadow-md"
+                className="btn btn-p btn-sm"
               >
                 Send
               </button>
             </div>
           </div>
         ) : (
-          <>
+          <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploadingMedia}
-              className="p-2.5 rounded-xl bg-[#131417] hover:bg-[#1B1D21] disabled:opacity-50 text-vault-400 hover:text-white transition-all active:scale-95"
-              title="Attach Photo"
+              className="ib ib-s rounded-xl"
+              aria-label="Attach photo"
+              title="Attach photo"
             >
               {isUploadingMedia ? (
-                <Loader2 className="w-5 h-5 text-emerald-400 animate-spin" />
+                <RotateCcw className="w-5 h-5 text-emerald animate-spin" />
               ) : (
                 <ImageIcon className="w-5 h-5 text-vault-300" />
               )}
             </button>
 
             <button
+              type="button"
               onClick={handleStartVoiceRecord}
-              className="p-2.5 rounded-xl bg-[#131417] hover:bg-[#1B1D21] text-vault-400 hover:text-white transition-all active:scale-95"
-              title="Record Voice Note"
+              className="ib ib-s rounded-xl"
+              aria-label="Record voice message"
+              title="Record voice note"
             >
-              <Mic className="w-5 h-5 text-[#10B981]" />
+              <Mic className="w-5 h-5 text-emerald" />
             </button>
 
-            <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex-1 flex items-center gap-2">
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                handleSend();
+              }}
+              className="flex-1 flex items-center gap-2"
+            >
               <input
                 type="text"
                 value={inputContent}
                 onChange={e => setInputContent(e.target.value)}
                 placeholder={`Message ${partner.display_name}...`}
-                className="flex-1 bg-[#131417] border border-[#1E2025] focus:border-[#10B981] rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition-colors"
+                className="inp flex-1 text-sm h-11"
               />
               <button
                 type="submit"
                 disabled={!inputContent.trim()}
-                className="bg-[#10B981] hover:bg-emerald-400 disabled:opacity-40 active:scale-95 text-black p-2.5 rounded-xl flex items-center justify-center font-bold shadow-md transition-all"
+                className="btn btn-p btn-sm !w-11 !h-11 !p-0 rounded-xl"
+                aria-label="Send message"
               >
                 <Send className="w-4 h-4 fill-current" />
               </button>
             </form>
-          </>
+          </div>
         )}
-      </div>
+      </footer>
     </div>
   );
 };

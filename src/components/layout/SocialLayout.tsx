@@ -6,9 +6,8 @@ import {
   Shield,
   User,
   ShieldAlert,
-  ShieldCheck,
 } from 'lucide-react';
-import { SocialTab, UserProfile } from '../../types';
+import { SocialTab } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
@@ -34,7 +33,6 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
   const [currentTab, setCurrentTab] = useState<SocialTab>('chats');
   const [chatPartnerId, setChatPartnerId] = useState<string | null>(null);
   const [pendingMediaAttachment, setPendingMediaAttachment] = useState<string | null>(null);
-  const [selectedDesktopPartner, setSelectedDesktopPartner] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState({
     unreadCount: 0,
     galleryCount: 0,
@@ -189,98 +187,31 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
         </aside>
 
         {/* Center Main Workspace */}
-        <main className="flex-1 min-w-0 px-3 pt-3 pb-24 sm:px-5 lg:pb-5 max-w-2xl lg:max-w-none mx-auto w-full">
+        <main className="flex-1 min-w-0 p-3 lg:p-4 max-w-full mx-auto w-full flex flex-col h-[calc(100vh)] overflow-hidden">
           {currentTab === 'chats' && (
             <MessagesView
               initialPartnerId={chatPartnerId}
               initialAttachment={pendingMediaAttachment}
               onClearInitialPartner={() => setChatPartnerId(null)}
               onClearInitialAttachment={() => setPendingMediaAttachment(null)}
-              onSelectConversationForDesktop={partner => setSelectedDesktopPartner(partner)}
             />
           )}
           {currentTab === 'camera' && (
-            <CameraView
-              onSendToChat={media => {
-                setPendingMediaAttachment(media);
-                setCurrentTab('chats');
-              }}
-              onSavedToGallery={() => setCurrentTab('gallery')}
-              onSavedToVault={() => setCurrentTab('vault')}
-            />
+            <div className="max-w-2xl mx-auto w-full">
+              <CameraView
+                onSendToChat={media => {
+                  setPendingMediaAttachment(media);
+                  setCurrentTab('chats');
+                }}
+                onSavedToGallery={() => setCurrentTab('gallery')}
+                onSavedToVault={() => setCurrentTab('vault')}
+              />
+            </div>
           )}
-          {currentTab === 'gallery' && <GalleryView />}
-          {currentTab === 'vault' && <VaultView />}
-          {currentTab === 'profile' && <ProfileView />}
+          {currentTab === 'gallery' && <div className="max-w-4xl mx-auto w-full overflow-y-auto"><GalleryView /></div>}
+          {currentTab === 'vault' && <div className="max-w-4xl mx-auto w-full overflow-y-auto"><VaultView /></div>}
+          {currentTab === 'profile' && <div className="max-w-2xl mx-auto w-full overflow-y-auto"><ProfileView /></div>}
         </main>
-
-        {/* Desktop Right Inspector Panel (>= 1280px) */}
-        <aside className="hidden xl:flex flex-col w-72 p-5 bg-[#050505] border-l border-[#1E2025] select-none space-y-5">
-          <div className="p-4 bg-[#0C0D0F] border border-[#1E2025] rounded-2xl text-center space-y-2">
-            <ShieldCheck className="w-8 h-8 text-[#10B981] mx-auto" />
-            <h4 className="text-xs font-bold text-white uppercase tracking-wider">Zero-Knowledge Node</h4>
-            <p className="text-[11px] text-[#A7ABB3]">
-              All communication and media storage are hardware-sealed and isolated.
-            </p>
-          </div>
-
-          {selectedDesktopPartner ? (
-            <div className="p-4 bg-[#0C0D0F] border border-[#1E2025] rounded-2xl space-y-3">
-              <h4 className="text-xs font-bold text-vault-400 uppercase tracking-wider">Active Contact</h4>
-              <div className="flex items-center gap-3">
-                <img
-                  src={selectedDesktopPartner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${selectedDesktopPartner.uid}`}
-                  alt="Partner"
-                  className="w-10 h-10 rounded-xl bg-[#131417] object-cover"
-                />
-                <div>
-                  <p className="text-xs font-bold text-white">{selectedDesktopPartner.display_name}</p>
-                  <p className="text-[11px] font-mono text-[#10B981]">{selectedDesktopPartner.uid}</p>
-                </div>
-              </div>
-              <div className="text-[11px] text-vault-500 font-mono space-y-1 pt-2 border-t border-[#1E2025]">
-                <p>Status: Verified Peer 🟢</p>
-                <p>Channel: 1-to-1 Direct</p>
-              </div>
-            </div>
-          ) : (
-            <div className="p-4 bg-[#0C0D0F] border border-[#1E2025] rounded-2xl space-y-3">
-              <h4 className="text-xs font-bold text-vault-400 uppercase tracking-wider">System Status</h4>
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between text-vault-400">
-                  <span>Vault Mode:</span>
-                  <span className="text-[#10B981] font-mono font-semibold">Decrypted</span>
-                </div>
-                <div className="flex justify-between text-vault-400">
-                  <span>Cover Camouflage:</span>
-                  <span className="text-white font-mono">2048 Game</span>
-                </div>
-                <div className="flex justify-between text-vault-400">
-                  <span>Auto-Lock:</span>
-                  <span className="text-white font-mono">Active (60s)</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="p-4 bg-[#0C0D0F] border border-[#1E2025] rounded-2xl space-y-2">
-            <h4 className="text-xs font-bold text-vault-400 uppercase tracking-wider">Quick Actions</h4>
-            <button
-              onClick={() => setCurrentTab('camera')}
-              className="w-full py-2 px-3 bg-[#131417] hover:bg-[#1B1D21] border border-[#1E2025] rounded-xl text-xs font-semibold text-white flex items-center justify-between transition-all"
-            >
-              <span>Instant Capture</span>
-              <Camera className="w-3.5 h-3.5 text-[#10B981]" />
-            </button>
-            <button
-              onClick={() => setCurrentTab('vault')}
-              className="w-full py-2 px-3 bg-[#131417] hover:bg-[#1B1D21] border border-[#1E2025] rounded-xl text-xs font-semibold text-white flex items-center justify-between transition-all"
-            >
-              <span>Open Vault</span>
-              <Shield className="w-3.5 h-3.5 text-amber-400" />
-            </button>
-          </div>
-        </aside>
       </div>
 
       {/* Mobile Bottom 5-Tab Navigation (< 1024px) */}

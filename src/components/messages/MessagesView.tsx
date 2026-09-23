@@ -6,6 +6,7 @@ import {
   Mic,
   UserPlus,
   ShieldCheck,
+  X,
 } from 'lucide-react';
 import { ConversationItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -14,6 +15,7 @@ import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { uniqueChannelName } from '../../lib/realtime';
 import { formatTimestamp } from '../../lib/utils';
 import { ChatRoom } from './ChatRoom';
+import { ContactDossier } from './ContactDossier';
 import { Avatar } from '../common/Avatar';
 import { useMediaQuery, DESKTOP_QUERY } from '../../lib/useMediaQuery';
 
@@ -291,7 +293,6 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     );
   });
 
-  // Conversation List Sub-component
   const previewText = (content?: string) => {
     if (!content) return 'Say hi';
     if (content.startsWith('[IMAGE]')) return 'Photo';
@@ -313,7 +314,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             className="flex-1 min-w-0 bg-transparent border-0 outline-none text-vault-50 text-[15px]"
           />
         </label>
-        <button type="button" onClick={() => setNewChatModalOpen(true)} className="ib ib-s" aria-label="New chat" title="Direct UID Connect">
+        <button
+          type="button"
+          onClick={() => setNewChatModalOpen(true)}
+          className="ib ib-s"
+          aria-label="New chat"
+          title="Direct UID Connect"
+        >
           <UserPlus className="i" aria-hidden />
         </button>
       </div>
@@ -323,8 +330,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           <div role="status" aria-label="Loading chats">
             {[52, 40, 58, 36, 48].map((w, i) => (
               <div key={i} className="row">
-                <div className="sk w-14 h-14 !rounded-full" />
-                <div className="flex-1 flex flex-col gap-2.5">
+                <div className="sk w-12 h-12 !rounded-full" />
+                <div className="flex-1 flex flex-col gap-2">
                   <div className="sk h-3.5" style={{ width: `${w}%` }} />
                   <div className="sk h-3" style={{ width: `${w + 24}%` }} />
                 </div>
@@ -332,16 +339,16 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             ))}
           </div>
         ) : filteredConversations.length === 0 ? (
-          <div className="flex flex-col items-center text-center gap-3 px-8 py-14">
-            <div className="w-[72px] h-[72px] rounded-[22px] bg-vault-900 border border-vault-800 flex items-center justify-center text-[#34D399]">
-              <MessageSquare className="w-8 h-8" aria-hidden />
+          <div className="flex flex-col items-center text-center gap-3 px-6 py-12">
+            <div className="w-14 h-14 rounded-2xl bg-vault-900 border border-vault-800 flex items-center justify-center text-emerald">
+              <MessageSquare className="w-7 h-7" aria-hidden />
             </div>
-            <h2 className="t-h2 mt-2 mb-0">{searchQuery ? 'No matches' : 'No conversations yet'}</h2>
-            <p className="t-sm c2 m-0">
-              {searchQuery ? 'Try a different name or ID.' : 'Add someone by their ID, or share yours so they can add you.'}
+            <h2 className="t-h3 mt-1 mb-0 text-white font-bold">{searchQuery ? 'No matches' : 'No conversations'}</h2>
+            <p className="t-sm c2 m-0 text-xs">
+              {searchQuery ? 'Try a different ID or handle.' : 'Start an encrypted thread with a contact UID.'}
             </p>
             {!searchQuery && (
-              <button type="button" onClick={() => setNewChatModalOpen(true)} className="btn btn-p btn-block mt-3">
+              <button type="button" onClick={() => setNewChatModalOpen(true)} className="btn btn-p btn-sm btn-block mt-2">
                 Start a chat
               </button>
             )}
@@ -360,19 +367,21 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     onClick={() => handleStartDirectChat(c.partner, c.id)}
                     aria-current={isSelected ? 'true' : undefined}
                     aria-label={`${c.partner.display_name}. ${preview}. ${time}${unread ? `. ${c.unreadCount} unread` : ''}`}
-                    className={`row w-full text-left ${isSelected ? 'row-sel' : ''}`}
+                    className={`row w-full text-left p-2.5 rounded-xl transition-colors ${
+                      isSelected ? 'bg-vault-850 border border-vault-750' : 'hover:bg-vault-900 border border-transparent'
+                    }`}
                   >
-                    <Avatar name={c.partner.display_name} seed={c.partner.uid} src={c.partner.avatar_url} size={56} />
-                    <span className="flex-1 min-w-0 flex flex-col gap-1">
+                    <Avatar name={c.partner.display_name} seed={c.partner.uid} src={c.partner.avatar_url} size={48} />
+                    <span className="flex-1 min-w-0 flex flex-col gap-0.5 ml-1">
                       <span className="flex justify-between items-baseline gap-2">
-                        <span className="t-h3 truncate">{c.partner.display_name}</span>
-                        <span className={`t-cap mono whitespace-nowrap ${unread ? 'cem' : ''}`}>{time}</span>
+                        <span className="t-body font-bold text-white truncate">{c.partner.display_name}</span>
+                        <span className={`t-cap mono whitespace-nowrap text-[11px] ${unread ? 'cem' : 'c3'}`}>{time}</span>
                       </span>
-                      <span className="flex items-center gap-1.5 min-h-[22px]">
-                        {c.lastMessage?.content.startsWith('[IMAGE]') && <ImageIcon className="i i-sm c2" aria-hidden />}
-                        {c.lastMessage?.content.startsWith('[VOICE_NOTE') && <Mic className="i i-sm cem" aria-hidden />}
-                        <span className={`t-sm flex-1 truncate ${unread ? 'text-vault-50' : 'c2'}`}>{preview}</span>
-                        {unread && <span className="badge">{c.unreadCount}</span>}
+                      <span className="flex items-center gap-1.5 min-h-[20px]">
+                        {c.lastMessage?.content.startsWith('[IMAGE]') && <ImageIcon className="w-3.5 h-3.5 text-vault-400" aria-hidden />}
+                        {c.lastMessage?.content.startsWith('[VOICE_NOTE') && <Mic className="w-3.5 h-3.5 text-emerald" aria-hidden />}
+                        <span className={`t-sm text-xs flex-1 truncate ${unread ? 'text-white font-medium' : 'c2'}`}>{preview}</span>
+                        {unread && <span className="badge !h-5 !min-w-5 !text-[10px]">{c.unreadCount}</span>}
                       </span>
                     </span>
                   </button>
@@ -385,10 +394,6 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     </div>
   );
 
-  // Exactly one ChatRoom is mounted for the active conversation. The desktop split view and the
-  // mobile single view are chosen in code, not hidden with CSS, so two ChatRooms (and two realtime
-  // subscriptions for the same conversation) can never exist at once. `key` remounts the room when
-  // the conversation changes, so the previous room's subscription is always cleaned up first.
   const activeChat = activeConversation ? (
     <ChatRoom
       key={activeConversation.id}
@@ -401,27 +406,42 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   ) : null;
 
   return (
-    <div className="animate-fade-in w-full">
+    <div className="animate-fade-in w-full h-full">
       {isDesktop ? (
-        /* Desktop 2-Pane Split View (≥ 1024px) */
-        <div className="grid grid-cols-12 gap-4 h-[calc(100vh-140px)]">
-          {/* Left Column: Conversations List (5 cols) */}
-          <div className="col-span-5 h-full overflow-hidden flex flex-col bg-[#050505] p-2 rounded-2xl border border-[#1E2025]">
+        /* Desktop 3-Column Balanced Layout (Nav/Chats 260px | Dossier 350px | Active Chat Fluid min-720px) */
+        <div className="flex h-[calc(100vh-100px)] w-full overflow-hidden rounded-2xl border border-vault-800 bg-vault-950 shadow-2xl">
+          {/* Left Column: Conversations List (260px fixed) */}
+          <aside className="w-[260px] shrink-0 h-full overflow-hidden flex flex-col bg-vault-950 p-3 border-r border-vault-800">
             {ConversationListView}
-          </div>
+          </aside>
 
-          {/* Right Column: Active Chat Stream (7 cols) */}
-          <div className="col-span-7 h-full">
+          {/* Center Column: Contact Profile & Shared Media Dossier (340-350px fixed) */}
+          {activeConversation ? (
+            <ContactDossier
+              partner={activeConversation.partner}
+              conversationId={activeConversation.id}
+            />
+          ) : (
+            <div className="w-[340px] shrink-0 h-full bg-vault-900 border-r border-vault-800 p-6 flex flex-col items-center justify-center text-center gap-2">
+              <ShieldCheck className="w-10 h-10 text-vault-600" />
+              <p className="t-cap text-vault-400 m-0">No active contact selected</p>
+            </div>
+          )}
+
+          {/* Right Column: Active Chat Stream (flex-1 min-w-[720px]) */}
+          <main className="flex-1 min-w-[500px] xl:min-w-[720px] h-full overflow-hidden flex flex-col bg-vault-950">
             {activeChat ?? (
-              <div className="h-full bg-[#050505] border border-[#1E2025] rounded-2xl flex flex-col items-center justify-center p-8 text-center space-y-3">
-                <div className="w-16 h-16 rounded-2xl bg-[#0C0D0F] border border-[#1E2025] flex items-center justify-center text-[#10B981]">
+              <div className="h-full bg-vault-950 flex flex-col items-center justify-center p-8 text-center gap-3">
+                <div className="w-16 h-16 rounded-2xl bg-vault-900 border border-vault-800 flex items-center justify-center text-emerald shadow-sm">
                   <MessageSquare className="w-8 h-8" aria-hidden />
                 </div>
-                <h3 className="t-h2 m-0">Select a conversation</h3>
-                <p className="t-sm c2 max-w-sm m-0">Choose a chat on the left, or start a new one with someone's ID.</p>
+                <h3 className="t-h2 m-0 text-white font-bold">Select a conversation</h3>
+                <p className="t-sm c2 max-w-sm m-0">
+                  Choose a chat on the left or connect with a peer by their sovereign UID.
+                </p>
               </div>
             )}
-          </div>
+          </main>
         </div>
       ) : (
         /* Mobile Single View (< 1024px) */
@@ -431,21 +451,23 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       {/* Direct UID Connect Modal */}
       {newChatModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#0C0D0F] border border-[#1E2025] rounded-2xl p-6 max-w-sm w-full space-y-4 animate-fade-in shadow-2xl">
+          <div className="bg-vault-900 border border-vault-750 rounded-2xl p-6 max-w-sm w-full space-y-4 animate-fade-in shadow-2xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-[#10B981]" />
-                <h3 className="text-sm font-bold text-white">Direct Sovereign Connect</h3>
+                <ShieldCheck className="w-5 h-5 text-emerald" />
+                <h3 className="text-sm font-bold text-white m-0">Direct Sovereign Connect</h3>
               </div>
               <button
+                type="button"
                 onClick={() => setNewChatModalOpen(false)}
-                className="text-vault-500 hover:text-white text-sm"
+                className="ib"
+                aria-label="Close"
               >
-                ✕
+                <X className="i" aria-hidden />
               </button>
             </div>
 
-            <p className="text-xs text-[#A7ABB3]">
+            <p className="text-xs text-vault-400 m-0">
               Enter the peer's unique UID tag (e.g. <span className="font-mono text-white">CIPHER-1082</span> or <span className="font-mono text-white">SOLAR-8120</span>) to open an encrypted channel.
             </p>
 
@@ -455,12 +477,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 placeholder="Enter UID..."
                 value={newChatUidInput}
                 onChange={e => setNewChatUidInput(e.target.value)}
-                className="w-full py-2.5 px-4 bg-[#131417] border border-[#1E2025] focus:border-[#10B981] rounded-xl text-white font-mono text-sm placeholder:text-vault-500 focus:outline-none"
+                className="w-full py-2.5 px-4 bg-vault-950 border border-vault-700 focus:border-emerald rounded-xl text-white font-mono text-sm placeholder:text-vault-500 focus:outline-none"
               />
 
               <button
                 type="submit"
-                className="w-full py-2.5 bg-[#10B981] hover:bg-emerald-400 active:scale-98 text-black text-xs font-bold rounded-xl shadow-lg transition-all"
+                className="btn btn-p btn-block font-bold text-xs"
               >
                 Open Encrypted Channel
               </button>
