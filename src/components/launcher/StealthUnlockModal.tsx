@@ -4,7 +4,7 @@ import { useVault } from '../../context/VaultContext';
 import { useAuth } from '../../context/AuthContext';
 
 export const StealthUnlockModal: React.FC = () => {
-  const { unlockModalOpen, closeUnlockModal, verifyAndUnlock } = useVault();
+  const { unlockModalOpen, closeUnlockModal, verifyAndUnlock, proceedToSignIn } = useVault();
   const { user } = useAuth();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -25,7 +25,7 @@ export const StealthUnlockModal: React.FC = () => {
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password || loading) return;
+    if (!user || !password || loading) return;
     setLoading(true);
     const success = await verifyAndUnlock(password);
     setLoading(false);
@@ -60,8 +60,22 @@ export const StealthUnlockModal: React.FC = () => {
 
         <h3 className="text-base font-bold text-white mb-0.5">Security Clearance</h3>
         <p className="text-xs text-vault-400 mb-5 text-center">
-          {user ? 'Enter your vault password' : 'Enter vault password (Default: 2048)'}
+          {user ? 'Enter your vault password' : 'Sign in to continue'}
         </p>
+
+        {!user && (
+          <button
+            type="button"
+            onClick={proceedToSignIn}
+            className="w-full bg-arcade-gold hover:bg-amber-400 active:scale-95 text-vault-950 font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 transition-all shadow-md shadow-amber-500/20"
+          >
+            <ArrowRight className="w-4 h-4 stroke-[2.5]" />
+            <span>Continue</span>
+          </button>
+        )}
+
+        {user && (
+        <>
 
         {/* Password Field */}
         <div className="relative w-full mb-4">
@@ -94,6 +108,8 @@ export const StealthUnlockModal: React.FC = () => {
           {loading ? <Lock className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4 stroke-[2.5]" />}
           <span>Unlock</span>
         </button>
+        </>
+        )}
       </form>
     </div>
   );

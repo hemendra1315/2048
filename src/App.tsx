@@ -7,10 +7,11 @@ import { LauncherCoverView } from './components/launcher/LauncherCoverView';
 import { AuthModal } from './components/auth/AuthModal';
 import { SocialLayout } from './components/layout/SocialLayout';
 import { AdminLayout } from './components/admin/AdminLayout';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 const MainNavigator: React.FC = () => {
   const { user, isSuperAdmin, recoveryCodeToShow } = useAuth();
-  const { isUnlocked } = useVault();
+  const { isUnlocked, panicLock } = useVault();
   const { showToast } = useToast();
   const [adminMode, setAdminMode] = useState(false);
 
@@ -43,14 +44,23 @@ const MainNavigator: React.FC = () => {
 
   // 3. If Super Admin Hub is active (display only; admin data access is enforced by RLS on the server)
   if (isSuperAdmin && adminMode) {
-    return <AdminLayout onReturnToUserMode={() => setAdminMode(false)} />;
+    return (
+      <ErrorBoundary
+        name="admin"
+        secondaryAction={{ label: 'Back to app', onClick: () => setAdminMode(false) }}
+      >
+        <AdminLayout onReturnToUserMode={() => setAdminMode(false)} />
+      </ErrorBoundary>
+    );
   }
 
   // 4. Authenticated Private Social Layer
   return (
-    <SocialLayout
-      onAdminToggle={isSuperAdmin ? () => setAdminMode(true) : undefined}
-    />
+    <ErrorBoundary name="social" secondaryAction={{ label: 'Lock and return to cover', onClick: panicLock }}>
+      <SocialLayout
+        onAdminToggle={isSuperAdmin ? () => setAdminMode(true) : undefined}
+      />
+    </ErrorBoundary>
   );
 };
 
@@ -60,7 +70,9 @@ export function App() {
       <AuthProvider>
         <VaultProvider>
           <GameProvider>
-            <MainNavigator />
+            <ErrorBoundary name="app">
+              <MainNavigator />
+            </ErrorBoundary>
           </GameProvider>
         </VaultProvider>
       </AuthProvider>

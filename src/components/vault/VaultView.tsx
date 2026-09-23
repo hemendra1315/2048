@@ -17,13 +17,14 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useVault } from '../../context/VaultContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { uniqueChannelName } from '../../lib/realtime';
 import { mockBackend } from '../../lib/mockBackend';
 import { BiometricService } from '../../lib/biometrics';
 
 type VaultCategory = 'all' | 'photos' | 'videos' | 'documents' | 'notes';
 
 export const VaultView: React.FC = () => {
-  const { user } = useAuth();
+  const { user, loginWithBiometrics } = useAuth();
   const { showToast } = useToast();
   const { preferences, verifyAndUnlock } = useVault();
 
@@ -87,7 +88,7 @@ export const VaultView: React.FC = () => {
         return unsub;
       } else {
         const channel = supabase
-          .channel('public:vault_gallery_items')
+          .channel(uniqueChannelName('vault_gallery_items'))
           .on('postgres_changes', { event: '*', schema: 'public', table: 'gallery_items' }, () => {
             loadVaultItems();
           })
@@ -99,20 +100,27 @@ export const VaultView: React.FC = () => {
     }
   }, [isUnlocked, loadVaultItems]);
 
+  // Biometric unlock must be verified by the server: the WebAuthn assertion is checked by the
+  // vault-auth function, and the vault opens only if it belongs to the signed-in account.
   const handleUnlockWithBiometrics = async () => {
     if (!user) return;
     setIsAuthenticating(true);
     try {
       const avail = await BiometricService.isAvailable();
-      if (avail.available) {
-        setIsUnlocked(true);
-        setAutoLockSeconds(preferences.auto_lock_seconds || 60);
-        showToast('Secondary Biometric Clearance Granted', 'success');
-      } else {
+      if (!avail.available) {
         showToast('Biometric hardware not detected. Enter PIN.', 'info');
+        return;
       }
+      const verified = await loginWithBiometrics(user.username || user.uid);
+      if (verified.id !== user.id) {
+        showToast('Fingerprint belongs to a different account', 'error');
+        return;
+      }
+      setIsUnlocked(true);
+      setAutoLockSeconds(preferences.auto_lock_seconds || 60);
+      showToast('Secondary Biometric Clearance Granted', 'success');
     } catch {
-      showToast('Biometrics unavailable. Enter PIN.', 'info');
+      // loginWithBiometrics already reported the failure; the vault stays locked.
     } finally {
       setIsAuthenticating(false);
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   MessageSquare,
   Search,
@@ -13,8 +13,10 @@ import { ConversationItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { uniqueChannelName } from '../../lib/realtime';
 import { formatTimestamp } from '../../lib/utils';
 import { ChatRoom } from './ChatRoom';
+import { useMediaQuery, DESKTOP_QUERY } from '../../lib/useMediaQuery';
 
 interface MessagesViewProps {
   initialPartnerId?: string | null;
@@ -41,6 +43,35 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [newChatUidInput, setNewChatUidInput] = useState('');
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
+  const isDesktop = useMediaQuery(DESKTOP_QUERY);
+
+  // The parent passes an inline callback. Keeping it in a ref stops every parent re-render from
+  // changing loadConversations, which would re-run the realtime effect (unsubscribe/resubscribe).
+  const onSelectRef = useRef(onSelectConversationForDesktop);
+  useEffect(() => {
+    onSelectRef.current = onSelectConversationForDesktop;
+  }, [onSelectConversationForDesktop]);
+  const notifyDesktopSelection = useCallback((partner: UserProfile, convId: string) => {
+    onSelectRef.current?.(partner, convId);
+  }, []);
+
+  const activeConversationRef = useRef(activeConversation);
+  useEffect(() => {
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
+
+  // On desktop the split view opens the most recent conversation when nothing is selected yet.
+  const autoSelectFirstOnDesktop = useCallback(
+    (list: { id: string; partner: UserProfile }[]) => {
+      if (activeConversationRef.current || list.length === 0) return;
+      if (!window.matchMedia(DESKTOP_QUERY).matches) return;
+      const first = { id: list[0].id, partner: list[0].partner };
+      activeConversationRef.current = first;
+      setActiveConversation(first);
+      notifyDesktopSelection(first.partner, first.id);
+    },
+    [notifyDesktopSelection]
+  );
 
   const loadConversations = useCallback(async () => {
     if (!user) return;
@@ -96,37 +127,21 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             };
           });
           setConversations(formatted);
-          setActiveConversation(prev => {
-            if (!prev && formatted.length > 0 && typeof window !== 'undefined' && window.innerWidth >= 1024) {
-              if (onSelectConversationForDesktop) {
-                onSelectConversationForDesktop(formatted[0].partner, formatted[0].id);
-              }
-              return { id: formatted[0].id, partner: formatted[0].partner };
-            }
-            return prev;
-          });
+          autoSelectFirstOnDesktop(formatted);
         } else {
           setConversations([]);
         }
       } else {
         const list = mockBackend.getConversations(user.id);
         setConversations(list);
-        setActiveConversation(prev => {
-          if (!prev && list.length > 0 && typeof window !== 'undefined' && window.innerWidth >= 1024) {
-            if (onSelectConversationForDesktop) {
-              onSelectConversationForDesktop(list[0].partner, list[0].id);
-            }
-            return { id: list[0].id, partner: list[0].partner };
-          }
-          return prev;
-        });
+        autoSelectFirstOnDesktop(list);
       }
     } catch (err) {
       console.error('Error loading conversations:', err);
     } finally {
       setLoading(false);
     }
-  }, [user, onSelectConversationForDesktop]);
+  }, [user, autoSelectFirstOnDesktop]);
 
   useEffect(() => {
     loadConversations();
@@ -136,7 +151,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       return unsub;
     } else {
       const channel = supabase
-        .channel('public:conversations_messages')
+        .channel(uniqueChannelName('conversations_messages'))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
           loadConversations();
         })
@@ -153,14 +168,14 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       const existing = conversations.find(c => c.partner.id === initialPartnerId);
       if (existing) {
         setActiveConversation({ id: existing.id, partner: existing.partner });
-        if (onSelectConversationForDesktop) onSelectConversationForDesktop(existing.partner, existing.id);
+        notifyDesktopSelection(existing.partner, existing.id);
       } else {
         if (!isSupabaseConfigured()) {
           const partner = mockBackend.getProfileById(initialPartnerId);
           if (partner) {
             const convId = mockBackend.getOrCreateConversation(user.id, partner.id);
             setActiveConversation({ id: convId, partner });
-            if (onSelectConversationForDesktop) onSelectConversationForDesktop(partner, convId);
+            notifyDesktopSelection(partner, convId);
           }
         } else {
           (async () => {
@@ -178,7 +193,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 if (conv) {
                   await loadConversations();
                   setActiveConversation({ id: conv.id, partner });
-                  if (onSelectConversationForDesktop) onSelectConversationForDesktop(partner, conv.id);
+                  notifyDesktopSelection(partner, conv.id);
                 }
               }
             } catch (e) {
@@ -189,13 +204,11 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       }
       if (onClearInitialPartner) onClearInitialPartner();
     }
-  }, [initialPartnerId, conversations, user, onClearInitialPartner, onSelectConversationForDesktop, loadConversations]);
+  }, [initialPartnerId, conversations, user, onClearInitialPartner, notifyDesktopSelection, loadConversations]);
 
   const handleStartDirectChat = (partner: UserProfile, convId: string) => {
     setActiveConversation({ id: convId, partner });
-    if (onSelectConversationForDesktop) {
-      onSelectConversationForDesktop(partner, convId);
-    }
+    notifyDesktopSelection(partner, convId);
   };
 
   const handleCreateChatByUid = async (e: React.FormEvent) => {
@@ -245,7 +258,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         if (existingConv) {
           await loadConversations();
           setActiveConversation({ id: existingConv.id, partner: targetUser });
-          if (onSelectConversationForDesktop) onSelectConversationForDesktop(targetUser, existingConv.id);
+          notifyDesktopSelection(targetUser, existingConv.id);
           setNewChatModalOpen(false);
           setNewChatUidInput('');
         }
@@ -262,7 +275,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       if (targetUser) {
         const convId = mockBackend.getOrCreateConversation(user.id, targetUser.id);
         setActiveConversation({ id: convId, partner: targetUser });
-        if (onSelectConversationForDesktop) onSelectConversationForDesktop(targetUser, convId);
+        notifyDesktopSelection(targetUser, convId);
         setNewChatModalOpen(false);
         setNewChatUidInput('');
       } else {
@@ -278,18 +291,6 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       (c.partner.uid && c.partner.uid.toLowerCase().includes(q))
     );
   });
-
-  // Mobile Viewport: if conversation is active, show only ChatRoom
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
-  if (isMobile && activeConversation) {
-    return (
-      <ChatRoom
-        conversationId={activeConversation.id}
-        partner={activeConversation.partner}
-        onBack={() => setActiveConversation(null)}
-      />
-    );
-  }
 
   // Conversation List Sub-component
   const ConversationListView = (
@@ -446,53 +447,50 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     </div>
   );
 
+  // Exactly one ChatRoom is mounted for the active conversation. The desktop split view and the
+  // mobile single view are chosen in code, not hidden with CSS, so two ChatRooms (and two realtime
+  // subscriptions for the same conversation) can never exist at once. `key` remounts the room when
+  // the conversation changes, so the previous room's subscription is always cleaned up first.
+  const activeChat = activeConversation ? (
+    <ChatRoom
+      key={activeConversation.id}
+      conversationId={activeConversation.id}
+      partner={activeConversation.partner}
+      onBack={() => setActiveConversation(null)}
+      initialAttachment={initialAttachment}
+      onClearInitialAttachment={onClearInitialAttachment}
+    />
+  ) : null;
+
   return (
     <div className="animate-fade-in w-full">
-      {/* Desktop 2-Pane Split View (≥ 1024px) */}
-      <div className="hidden lg:grid lg:grid-cols-12 lg:gap-4 h-[calc(100vh-140px)]">
-        {/* Left Column: Conversations List (5 cols) */}
-        <div className="lg:col-span-5 h-full overflow-hidden flex flex-col bg-[#0A0A0A] p-2 rounded-2xl border border-[#262626]">
-          {ConversationListView}
-        </div>
+      {isDesktop ? (
+        /* Desktop 2-Pane Split View (≥ 1024px) */
+        <div className="grid grid-cols-12 gap-4 h-[calc(100vh-140px)]">
+          {/* Left Column: Conversations List (5 cols) */}
+          <div className="col-span-5 h-full overflow-hidden flex flex-col bg-[#0A0A0A] p-2 rounded-2xl border border-[#262626]">
+            {ConversationListView}
+          </div>
 
-        {/* Right Column: Active Chat Stream (7 cols) */}
-        <div className="lg:col-span-7 h-full">
-          {activeConversation ? (
-            <ChatRoom
-              conversationId={activeConversation.id}
-              partner={activeConversation.partner}
-              onBack={() => setActiveConversation(null)}
-              initialAttachment={initialAttachment}
-              onClearInitialAttachment={onClearInitialAttachment}
-            />
-          ) : (
-            <div className="h-full bg-[#0A0A0A] border border-[#262626] rounded-2xl flex flex-col items-center justify-center p-8 text-center space-y-3">
-              <div className="w-16 h-16 rounded-2xl bg-[#111111] border border-[#262626] flex items-center justify-center text-[#10B981]">
-                <Lock className="w-8 h-8" />
+          {/* Right Column: Active Chat Stream (7 cols) */}
+          <div className="col-span-7 h-full">
+            {activeChat ?? (
+              <div className="h-full bg-[#0A0A0A] border border-[#262626] rounded-2xl flex flex-col items-center justify-center p-8 text-center space-y-3">
+                <div className="w-16 h-16 rounded-2xl bg-[#111111] border border-[#262626] flex items-center justify-center text-[#10B981]">
+                  <Lock className="w-8 h-8" />
+                </div>
+                <h3 className="text-base font-bold text-white">Signal-Grade Encrypted Messenger</h3>
+                <p className="text-xs text-[#A1A1AA] max-w-sm">
+                  Select a conversation from the left pane or tap <span className="text-[#10B981] font-semibold">+ Direct Connect</span> to establish an end-to-end encrypted session.
+                </p>
               </div>
-              <h3 className="text-base font-bold text-white">Signal-Grade Encrypted Messenger</h3>
-              <p className="text-xs text-[#A1A1AA] max-w-sm">
-                Select a conversation from the left pane or tap <span className="text-[#10B981] font-semibold">+ Direct Connect</span> to establish an end-to-end encrypted session.
-              </p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
-
-      {/* Mobile Single View (< 1024px) */}
-      <div className="lg:hidden pb-20">
-        {activeConversation ? (
-          <ChatRoom
-            conversationId={activeConversation.id}
-            partner={activeConversation.partner}
-            onBack={() => setActiveConversation(null)}
-            initialAttachment={initialAttachment}
-            onClearInitialAttachment={onClearInitialAttachment}
-          />
-        ) : (
-          ConversationListView
-        )}
-      </div>
+      ) : (
+        /* Mobile Single View (< 1024px) */
+        <div className="pb-20">{activeChat ?? ConversationListView}</div>
+      )}
 
       {/* Direct UID Connect Modal */}
       {newChatModalOpen && (

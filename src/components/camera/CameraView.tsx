@@ -3,6 +3,7 @@ import { Camera, RefreshCw, Zap, ZapOff, Check, X, Shield, Image, Send, Video } 
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { uploadGalleryMedia } from '../../lib/storageHelper';
 import { mockBackend } from '../../lib/mockBackend';
 
 interface CameraViewProps {
@@ -135,10 +136,10 @@ export const CameraView: React.FC<CameraViewProps> = ({
     setIsProcessing(true);
     try {
       if (isSupabaseConfigured()) {
-        const filePath = `${user.id}/cam_${Date.now()}.jpg`;
+        const { publicUrl, filePath } = await uploadGalleryMedia(capturedMedia, user.id, 'jpg');
         await supabase.from('gallery_items').insert({
           user_id: user.id,
-          image_url: capturedMedia,
+          image_url: publicUrl,
           storage_path: filePath,
           caption: 'Captured via Camera',
         } as unknown as { user_id: string; image_url: string; storage_path: string; caption: string });
@@ -165,10 +166,10 @@ export const CameraView: React.FC<CameraViewProps> = ({
     setIsProcessing(true);
     try {
       if (isSupabaseConfigured()) {
-        const filePath = `${user.id}/vault_${Date.now()}.jpg`;
+        const { publicUrl, filePath } = await uploadGalleryMedia(capturedMedia, user.id, 'jpg');
         await supabase.from('gallery_items').insert({
           user_id: user.id,
-          image_url: capturedMedia,
+          image_url: publicUrl,
           storage_path: filePath,
           caption: '[ENCRYPTED_VAULT_ITEM]',
         } as unknown as { user_id: string; image_url: string; storage_path: string; caption: string });

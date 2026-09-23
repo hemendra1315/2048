@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { uniqueChannelName } from '../../lib/realtime';
 import { AddPersonModal } from './AddPersonModal';
 
 interface ConnectionsViewProps {
@@ -106,7 +107,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
       };
     } else {
       const channel = supabase
-        .channel('public:connections_and_requests')
+        .channel(uniqueChannelName('connections_and_requests'))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'connections' }, () => {
           loadData();
         })

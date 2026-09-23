@@ -48,7 +48,7 @@ export const LauncherCoverView: React.FC = () => {
           </div>
           <div>
             <h1 className="text-base font-bold text-white tracking-tight leading-tight">
-              {preferences.custom_app_name || 'Retro Arcade'}
+              {preferences.custom_app_name || 'Games'}
             </h1>
             <p className="text-[10px] text-vault-400 font-mono">v2.4 Cover Launcher</p>
           </div>

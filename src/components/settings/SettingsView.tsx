@@ -12,7 +12,7 @@ export const SettingsView: React.FC = () => {
   const { currentGame, setCurrentGame } = useGame();
   const { showToast } = useToast();
 
-  const [appName, setAppName] = useState(preferences.custom_app_name || 'Retro Arcade');
+  const [appName, setAppName] = useState(preferences.custom_app_name || 'Games');
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -71,7 +71,7 @@ export const SettingsView: React.FC = () => {
             type="text"
             value={appName}
             onChange={e => setAppName(e.target.value)}
-            placeholder="e.g. Retro Arcade, Math Brain..."
+            placeholder="e.g. Games, Math Brain..."
             className="flex-1 bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl px-3.5 py-2 text-xs text-white placeholder-vault-600 outline-none transition-colors"
           />
           <button

@@ -106,7 +106,7 @@ class MockBackendService {
         prefs[p.id] = {
           id: `pref_${p.id}`,
           user_id: p.id,
-          custom_app_name: 'Retro Arcade',
+          custom_app_name: 'Games',
           selected_icon: 'arcade_gamepad',
           selected_game: 'game_2048',
           unlock_method: 'pin',
@@ -338,7 +338,7 @@ class MockBackendService {
     prefsMap[newUserId] = {
       id: `pref_${newUserId}`,
       user_id: newUserId,
-      custom_app_name: 'Retro Arcade',
+      custom_app_name: 'Games',
       selected_icon: 'arcade_gamepad',
       selected_game: 'game_2048',
       unlock_method: 'pin',
@@ -433,7 +433,7 @@ class MockBackendService {
     return {
       id: `pref_${userId}`,
       user_id: userId,
-      custom_app_name: 'Retro Arcade',
+      custom_app_name: 'Games',
       selected_icon: 'arcade_gamepad',
       selected_game: 'game_2048',
       unlock_method: 'pin',

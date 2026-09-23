@@ -37,6 +37,7 @@ interface VaultContextType {
   openUnlockModal: () => void;
   closeUnlockModal: () => void;
   verifyAndUnlock: (secret: string) => Promise<boolean>;
+  proceedToSignIn: () => void;
   panicLock: () => void;
   updatePreferences: (updates: Partial<UserPreferences>) => Promise<void>;
   updateSecret: (oldSecret: string, newSecret: string) => Promise<void>;
@@ -52,7 +53,7 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [preferences, setPreferences] = useState<UserPreferences>({
     id: 'default',
     user_id: user?.id || 'guest',
-    custom_app_name: 'Retro Arcade',
+    custom_app_name: 'Games',
     selected_icon: 'arcade_gamepad',
     selected_game: 'game_2048',
     unlock_method: 'pin',
@@ -122,44 +123,37 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
   }, [isUnlocked, preferences.auto_lock_seconds, showToast]);
 
+  // The vault opens only when the server confirms the unlock password (verify_vault_unlock).
+  // There is no client-side fallback: an RPC error, a network failure or a rejected password
+  // all keep the vault locked.
   const verifyAndUnlock = async (secret: string): Promise<boolean> => {
+    if (!user) {
+      showToast('Sign in first', 'error');
+      return false;
+    }
     try {
-      if (isSupabaseConfigured() && user) {
-        try {
-          const { data, error } = await supabase.rpc('verify_vault_unlock', { p_secret: secret });
-          const result = data as UnlockResult | null;
-          if (!error && result && result.ok) {
-            setIsUnlocked(true);
-            setUnlockModalOpen(false);
-            showToast('Vault security cleared', 'success');
-            return true;
-          }
-        } catch {
-          // RPC fallback
+      let ok = false;
+      if (isSupabaseConfigured()) {
+        const { data, error } = await supabase.rpc('verify_vault_unlock', { p_secret: secret });
+        const result = data as UnlockResult | null;
+        if (error) {
+          showToast('Could not verify password. Check your connection and try again.', 'error');
+          return false;
         }
-        // Direct password or default code check
-        if (secret === '2048' || secret.length >= 4) {
-          setIsUnlocked(true);
-          setUnlockModalOpen(false);
-          showToast('Vault security cleared', 'success');
-          return true;
+        ok = result?.ok === true;
+        if (!ok) {
+          showToast(unlockErrorMessage(result), 'error');
+          return false;
         }
-        showToast('Incorrect password', 'error');
-        return false;
-      } else if (user && isMockBackendAllowed()) {
-        const ok = await mockBackend.verifyUnlockSecret(user.id, secret);
+      } else if (isMockBackendAllowed()) {
+        ok = await mockBackend.verifyUnlockSecret(user.id, secret);
         if (!ok) {
           showToast('Incorrect password', 'error');
           return false;
         }
-      } else if (user) {
+      } else {
         showToast('Server is not configured', 'error');
         return false;
-      } else {
-        if (secret !== '2048') {
-          showToast('Incorrect password (Default: 2048)', 'error');
-          return false;
-        }
       }
 
       setIsUnlocked(true);
@@ -167,10 +161,18 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       showToast('Vault security cleared', 'success');
       return true;
     } catch (err) {
-      console.error('Unlock verification failed:', err);
+      console.error('Unlock verification failed:', err instanceof Error ? err.message : err);
       showToast('Unlock verification error', 'error');
       return false;
     }
+  };
+
+  // Signed-out visitors have no vault to unlock. The gate takes them to the sign-in screen,
+  // where the account password is verified by the vault-auth server function.
+  const proceedToSignIn = () => {
+    if (user) return;
+    setIsUnlocked(true);
+    setUnlockModalOpen(false);
   };
 
   const updatePreferences = async (updates: Partial<UserPreferences>) => {
@@ -226,6 +228,7 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         openUnlockModal,
         closeUnlockModal,
         verifyAndUnlock,
+        proceedToSignIn,
         panicLock,
         updatePreferences,
         updateSecret,

@@ -15,6 +15,7 @@ import { GalleryItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { uniqueChannelName } from '../../lib/realtime';
 import { mockBackend } from '../../lib/mockBackend';
 import { UploadModal } from './UploadModal';
 
@@ -62,7 +63,7 @@ export const GalleryView: React.FC = () => {
       return unsub;
     } else {
       const channel = supabase
-        .channel('public:gallery_items')
+        .channel(uniqueChannelName('gallery_items'))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'gallery_items' }, () => {
           loadGallery();
         })

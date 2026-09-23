@@ -10,11 +10,14 @@ import {
   Play,
   Pause,
   Lock,
+  Loader2,
 } from 'lucide-react';
 import { MessageItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { uploadChatMedia } from '../../lib/storageHelper';
+import { uniqueChannelName } from '../../lib/realtime';
 import { formatTimestamp } from '../../lib/utils';
 import { useToast } from '../../context/ToastContext';
 
@@ -98,7 +101,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       };
     } else {
       const channel = supabase
-        .channel(`chat:${conversationId}`)
+        .channel(uniqueChannelName(`chat:${conversationId}`))
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
@@ -131,11 +134,25 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     scrollToBottom();
   }, [messages]);
 
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+
   useEffect(() => {
     if (initialAttachment) {
-      handleSend(`[IMAGE]${initialAttachment}`);
-      showToast('Camera snapshot sent to chat', 'success');
-      if (onClearInitialAttachment) onClearInitialAttachment();
+      const sendInitialMedia = async () => {
+        setIsUploadingMedia(true);
+        try {
+          const mediaUrl = await uploadChatMedia(initialAttachment, conversationId, 'jpg');
+          await handleSend(`[IMAGE]${mediaUrl}`);
+          showToast('Camera snapshot sent to chat', 'success');
+        } catch (err) {
+          console.error('Failed to send initial attachment:', err);
+          showToast('Failed to send camera snapshot', 'error');
+        } finally {
+          setIsUploadingMedia(false);
+          if (onClearInitialAttachment) onClearInitialAttachment();
+        }
+      };
+      sendInitialMedia();
     }
   }, [initialAttachment]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -194,17 +211,24 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !user) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      handleSend(`[IMAGE]${dataUrl}`);
+    // Reset input so re-selecting same file triggers change
+    e.target.value = '';
+
+    setIsUploadingMedia(true);
+    try {
+      const mediaUrl = await uploadChatMedia(file, conversationId);
+      await handleSend(`[IMAGE]${mediaUrl}`);
       showToast('Encrypted photo shared', 'success');
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('File upload error:', err);
+      showToast('Photo upload failed', 'error');
+    } finally {
+      setIsUploadingMedia(false);
+    }
   };
 
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
@@ -239,16 +263,20 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
 
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         stream.getTracks().forEach(t => t.stop());
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const dataUrl = reader.result as string;
-          handleSend(`[VOICE_NOTE:${audioSeconds || 1}s]${dataUrl}`);
+        setIsUploadingMedia(true);
+        try {
+          const mediaUrl = await uploadChatMedia(blob, conversationId, 'webm');
+          await handleSend(`[VOICE_NOTE:${audioSeconds || 1}s]${mediaUrl}`);
           showToast('Voice note transmitted securely', 'success');
-        };
-        reader.readAsDataURL(blob);
+        } catch (err) {
+          console.error('Voice upload failed:', err);
+          showToast('Voice note failed to send', 'error');
+        } finally {
+          setIsUploadingMedia(false);
+        }
       };
 
       recorder.start();
@@ -467,10 +495,15 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           <>
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-400 hover:text-white transition-all active:scale-95"
+              disabled={isUploadingMedia}
+              className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] disabled:opacity-50 text-zinc-400 hover:text-white transition-all active:scale-95"
               title="Attach Photo"
             >
-              <ImageIcon className="w-5 h-5 text-zinc-300" />
+              {isUploadingMedia ? (
+                <Loader2 className="w-5 h-5 text-emerald-400 animate-spin" />
+              ) : (
+                <ImageIcon className="w-5 h-5 text-zinc-300" />
+              )}
             </button>
 
             <button
