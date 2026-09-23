@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Lock, X, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Lock, X, Eye, EyeOff, RotateCcw } from 'lucide-react';
 import { useVault } from '../../context/VaultContext';
 import { useAuth } from '../../context/AuthContext';
 
@@ -93,7 +93,7 @@ export const StealthUnlockModal: React.FC = () => {
           </span>
         </label>
         <button type="submit" disabled={loading || password.length === 0} className="btn btn-p btn-block" aria-busy={loading}>
-          {loading ? <Loader2 className="i i-sm animate-spin" aria-hidden /> : null}
+          {loading ? <RotateCcw className="i i-sm animate-spin" aria-hidden /> : null}
           {loading ? 'Checking…' : 'Unlock'}
         </button>
       </form>
