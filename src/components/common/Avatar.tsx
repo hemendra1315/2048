@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 const HUES = ['#C9B6F2', '#F2C6A0', '#9ED8C8', '#A9C7F5', '#F0B3C0', '#E6DB9A'];
 
@@ -18,26 +18,57 @@ interface AvatarProps {
   name: string;
   seed?: string;
   src?: string | null;
-  size?: 32 | 40 | 48 | 56 | 96;
+  size?: 32 | 40 | 48 | 56 | 72 | 96;
   online?: boolean;
   className?: string;
 }
 
+const sizeClasses: Record<number, string> = {
+  32: 'w-8 h-8 text-xs',
+  40: 'w-10 h-10 text-sm',
+  48: 'w-12 h-12 text-base',
+  56: 'w-14 h-14 text-lg',
+  72: 'w-[72px] h-[72px] text-2xl',
+  96: 'w-24 h-24 text-3xl',
+};
+
 /** Round avatar: the user's photo when set, otherwise initials on a pastel fill. Decorative by default. */
 export const Avatar: React.FC<AvatarProps> = ({ name, seed, src, size = 48, online = false, className = '' }) => {
+  const [imgError, setImgError] = useState(false);
   const dot = size >= 56 ? 14 : size >= 40 ? 12 : 10;
+  const bg = hueFor(seed || name);
+  const sizeCls = sizeClasses[size] || 'w-12 h-12 text-base';
+
   return (
     <span
       aria-hidden="true"
-      className={`av av-${size} ${className}`}
-      style={src ? undefined : { background: hueFor(seed || name) }}
+      className={`relative inline-flex shrink-0 items-center justify-center rounded-full select-none ${sizeCls} ${className}`}
+      style={{
+        backgroundColor: bg,
+        minWidth: `${size}px`,
+        minHeight: `${size}px`,
+        maxWidth: `${size}px`,
+        maxHeight: `${size}px`,
+      }}
     >
-      {src ? (
-        <img src={src} alt="" className="w-full h-full rounded-full object-cover" />
-      ) : (
-        initials(name)
+      <span className="w-full h-full rounded-full overflow-hidden flex items-center justify-center">
+        {src && !imgError ? (
+          <img
+            src={src}
+            alt=""
+            onError={() => setImgError(true)}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <span className="font-bold select-none text-[#0A0A0A] leading-none">{initials(name)}</span>
+        )}
+      </span>
+      {online && (
+        <span
+          className="absolute right-0 bottom-0 rounded-full bg-[#10B981] border-[#050505]"
+          style={{ width: dot, height: dot, borderWidth: dot >= 14 ? 3 : 2 }}
+        />
       )}
-      {online && <span className="on" style={{ width: dot, height: dot, borderWidth: dot >= 14 ? 3 : 2 }} />}
     </span>
   );
 };
