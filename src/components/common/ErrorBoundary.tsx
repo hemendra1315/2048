@@ -41,13 +41,13 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     const { secondaryAction } = this.props;
     return (
       <div role="alert" className="min-h-screen w-full bg-[#050505] flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-[#111111] border border-[#262626] rounded-2xl p-6 text-center space-y-4 shadow-2xl">
+        <div className="w-full max-w-sm bg-[#0C0D0F] border border-[#1E2025] rounded-2xl p-6 text-center space-y-4 shadow-2xl">
           <div className="w-12 h-12 mx-auto rounded-xl bg-amber-950/60 border border-amber-700/50 flex items-center justify-center text-amber-400">
             <AlertTriangle className="w-6 h-6" />
           </div>
           <div className="space-y-1">
             <h2 className="text-base font-bold text-white">Something went wrong</h2>
-            <p className="text-xs text-[#A1A1AA]">This screen hit an unexpected error. Your data is safe.</p>
+            <p className="text-xs text-[#A7ABB3]">This screen hit an unexpected error. Your data is safe.</p>
           </div>
           <div className="flex flex-col gap-2">
             <button
@@ -65,7 +65,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                   this.setState({ error: null });
                   secondaryAction.onClick();
                 }}
-                className="w-full py-2.5 rounded-xl text-sm font-semibold text-[#A1A1AA] hover:text-white bg-[#171717] border border-[#262626] transition-colors"
+                className="w-full py-2.5 rounded-xl text-sm font-semibold text-[#A7ABB3] hover:text-white bg-[#131417] border border-[#1E2025] transition-colors"
               >
                 {secondaryAction.label}
               </button>

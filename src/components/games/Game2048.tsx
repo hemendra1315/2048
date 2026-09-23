@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { RotateCcw, Award, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RotateCcw, Award } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 
 interface Tile {
@@ -232,142 +232,87 @@ export const Game2048: React.FC = () => {
     touchStart.current = null;
   };
 
-  const getTileBg = (val: number) => {
-    switch (val) {
-      case 2: return 'bg-amber-100 text-vault-900 border-amber-200';
-      case 4: return 'bg-amber-200 text-vault-900 border-amber-300';
-      case 8: return 'bg-orange-400 text-white font-bold shadow-md shadow-orange-500/20';
-      case 16: return 'bg-orange-500 text-white font-bold shadow-md shadow-orange-600/30';
-      case 32: return 'bg-rose-500 text-white font-bold shadow-md shadow-rose-600/30';
-      case 64: return 'bg-red-600 text-white font-bold shadow-md shadow-red-700/40';
-      case 128: return 'bg-yellow-400 text-vault-950 font-bold text-xl shadow-lg shadow-yellow-500/40';
-      case 256: return 'bg-yellow-500 text-vault-950 font-bold text-xl shadow-lg shadow-yellow-500/50';
-      case 512: return 'bg-amber-400 text-vault-950 font-bold text-xl shadow-lg shadow-amber-500/60';
-      case 1024: return 'bg-amber-500 text-vault-950 font-bold text-lg shadow-xl shadow-amber-500/70';
-      case 2048: return 'bg-emerald-500 text-white font-bold text-lg shadow-xl shadow-emerald-500/80 animate-pulse';
-      default: return 'bg-purple-600 text-white font-bold text-base shadow-xl';
-    }
-  };
+  // Tile ramp from the design system: warm neutrals → gold → emerald (see games design canvas).
+  const tileClass = (val: number) => (val <= 2048 ? `cell v${val}` : 'cell v2048');
+
+  const best = Math.max(highScore, score);
+  const showOverlay = gameOver || (gameWon && !keepPlaying);
 
   return (
-    <div className="flex flex-col items-center w-full max-w-sm mx-auto select-none">
-      {/* Score Header */}
-      <div className="flex items-center justify-between w-full mb-3 px-1">
-        <div className="flex gap-2">
-          <div className="bg-vault-900/90 border border-vault-700/60 px-3.5 py-1.5 rounded-xl text-center min-w-[70px]">
-            <div className="text-[10px] font-semibold text-vault-400 uppercase tracking-wider">SCORE</div>
-            <div className="text-base font-bold text-white leading-tight">{score}</div>
-          </div>
-          <div className="bg-vault-900/90 border border-vault-700/60 px-3.5 py-1.5 rounded-xl text-center min-w-[70px]">
-            <div className="text-[10px] font-semibold text-arcade-gold uppercase tracking-wider flex items-center justify-center gap-1">
-              <Award className="w-3 h-3" /> BEST
-            </div>
-            <div className="text-base font-bold text-arcade-gold leading-tight">{Math.max(highScore, score)}</div>
-          </div>
+    <div className="flex flex-col w-full max-w-md mx-auto select-none">
+      <div className="flex gap-2.5 items-stretch">
+        <div className="card flex-1 px-4 py-3 flex flex-col gap-0.5">
+          <span className="t-over">Score</span>
+          <span className="mono text-[26px] leading-8 font-bold" aria-live="polite">{score.toLocaleString('en-US')}</span>
         </div>
-
-        <button
-          onClick={startNewGame}
-          className="flex items-center gap-1.5 bg-vault-800 hover:bg-vault-700 active:scale-95 text-vault-100 text-xs font-semibold px-3 py-2 rounded-xl transition-all border border-vault-600/50 shadow-sm"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>New Game</span>
+        <div className="card flex-1 px-4 py-3 flex flex-col gap-0.5 !bg-[#0F0D08] !border-[rgba(227,179,65,0.22)]">
+          <span className="t-over !text-[#C9A24A] flex items-center gap-1.5">
+            <Award className="w-3.5 h-3.5" aria-hidden />
+            Best
+          </span>
+          <span className="mono cgold text-[26px] leading-8 font-bold">{best.toLocaleString('en-US')}</span>
+        </div>
+        <button type="button" onClick={startNewGame} className="ib ib-s self-center" aria-label="New game">
+          <RotateCcw className="i" aria-hidden />
         </button>
       </div>
 
-      {/* 4x4 Game Board */}
       <div
         ref={boardRef}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
-        className="relative w-full aspect-square bg-vault-900 border-2 border-vault-700/80 rounded-2xl p-2.5 shadow-2xl shadow-black/40 touch-none flex flex-col justify-between"
+        role="grid"
+        aria-label="2048 board, 4 by 4. Swipe or use the arrow keys to move tiles."
+        className="relative mt-4 touch-none"
       >
-        {/* Background Grid Cells */}
-        <div className="grid grid-cols-4 grid-rows-4 gap-2 w-full h-full">
-          {Array(16).fill(null).map((_, i) => (
-            <div key={i} className="bg-vault-950/60 rounded-xl border border-vault-800/40" />
-          ))}
-        </div>
-
-        {/* Foreground Tile Overlay */}
-        <div className="absolute inset-2.5 grid grid-cols-4 grid-rows-4 gap-2 pointer-events-none">
+        <div className="board">
           {grid.map((row, r) =>
             row.map((tile, c) => (
-              <div key={`${r}-${c}`} className="relative flex items-center justify-center">
-                {tile && (
-                  <div
-                    className={`w-full h-full rounded-xl flex items-center justify-center text-2xl font-bold transition-all duration-100 ${getTileBg(
-                      tile.val
-                    )} ${tile.isNew ? 'scale-90 animate-fade-in' : ''} ${
-                      tile.merged ? 'scale-110' : 'scale-100'
-                    }`}
-                  >
-                    {tile.val}
-                  </div>
-                )}
+              <div
+                key={`${r}-${c}`}
+                role="gridcell"
+                className={`${tile ? tileClass(tile.val) : 'cell'} transition-transform duration-100 ${
+                  tile?.isNew ? 'scale-90 animate-fade-in' : ''
+                } ${tile?.merged ? 'scale-105' : ''}`}
+              >
+                {tile ? tile.val : ''}
               </div>
             ))
           )}
         </div>
 
-        {/* Game Over / Win Overlay */}
-        {(gameOver || (gameWon && !keepPlaying)) && (
-          <div className="absolute inset-0 bg-vault-950/85 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center z-20 animate-fade-in p-4 text-center">
-            <h3 className="text-2xl font-bold text-white mb-1">
-              {gameWon ? '🎉 2048 Reached!' : 'Game Over'}
-            </h3>
-            <p className="text-xs text-vault-400 mb-4">
-              {gameWon ? 'You mastered the Vault Matrix!' : 'No more legal moves left.'}
+        {showOverlay && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="g2048-over"
+            className="absolute inset-0 rounded-[22px] bg-[rgba(5,5,5,0.86)] flex flex-col items-center justify-center gap-3.5 p-6 text-center z-20 animate-fade-in"
+          >
+            {gameWon && (
+              <div className="w-16 h-16 rounded-[20px] bg-[rgba(227,179,65,0.12)] text-gold flex items-center justify-center">
+                <Award className="w-7 h-7" aria-hidden />
+              </div>
+            )}
+            <h3 id="g2048-over" className="t-h1 m-0">{gameWon ? 'You made 2048!' : 'No moves left'}</h3>
+            <p className="t-sm c2 m-0">
+              Score <span className="mono text-vault-50">{score.toLocaleString('en-US')}</span> · Best{' '}
+              <span className="mono cgold">{best.toLocaleString('en-US')}</span>
             </p>
-            <div className="flex gap-2">
+            <div className="flex gap-2.5">
               {gameWon && (
-                <button
-                  onClick={() => setKeepPlaying(true)}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-xl"
-                >
-                  Keep Playing
+                <button type="button" onClick={() => setKeepPlaying(true)} className="btn btn-s">
+                  Keep going
                 </button>
               )}
-              <button
-                onClick={startNewGame}
-                className="bg-arcade-amber hover:bg-amber-400 text-vault-950 text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-1.5"
-              >
-                <RotateCcw className="w-3.5 h-3.5" /> Try Again
+              <button type="button" onClick={startNewGame} className="btn btn-p">
+                {gameWon ? 'New game' : 'Try again'}
               </button>
             </div>
           </div>
         )}
       </div>
 
-      {/* Touch D-Pad Helpers for Accessibility */}
-      <div className="grid grid-cols-3 gap-1.5 mt-3 w-36 sm:hidden">
-        <div></div>
-        <button
-          onClick={() => move(0)}
-          className="p-2.5 bg-vault-800/80 active:bg-vault-700 rounded-xl flex items-center justify-center border border-vault-700 text-vault-300"
-        >
-          <ChevronUp className="w-5 h-5" />
-        </button>
-        <div></div>
-        <button
-          onClick={() => move(3)}
-          className="p-2.5 bg-vault-800/80 active:bg-vault-700 rounded-xl flex items-center justify-center border border-vault-700 text-vault-300"
-        >
-          <ChevronLeft className="w-5 h-5" />
-        </button>
-        <button
-          onClick={() => move(2)}
-          className="p-2.5 bg-vault-800/80 active:bg-vault-700 rounded-xl flex items-center justify-center border border-vault-700 text-vault-300"
-        >
-          <ChevronDown className="w-5 h-5" />
-        </button>
-        <button
-          onClick={() => move(1)}
-          className="p-2.5 bg-vault-800/80 active:bg-vault-700 rounded-xl flex items-center justify-center border border-vault-700 text-vault-300"
-        >
-          <ChevronRight className="w-5 h-5" />
-        </button>
-      </div>
+      <p className="t-sm c3 text-center mt-4 mb-0">Swipe to slide tiles. Matching numbers merge.</p>
     </div>
   );
 };

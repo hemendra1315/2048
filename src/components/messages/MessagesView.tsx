@@ -2,12 +2,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   MessageSquare,
   Search,
-  Pin,
   Image as ImageIcon,
   Mic,
   UserPlus,
   ShieldCheck,
-  Lock,
 } from 'lucide-react';
 import { ConversationItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -16,6 +14,7 @@ import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { uniqueChannelName } from '../../lib/realtime';
 import { formatTimestamp } from '../../lib/utils';
 import { ChatRoom } from './ChatRoom';
+import { Avatar } from '../common/Avatar';
 import { useMediaQuery, DESKTOP_QUERY } from '../../lib/useMediaQuery';
 
 interface MessagesViewProps {
@@ -293,155 +292,94 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   });
 
   // Conversation List Sub-component
+  const previewText = (content?: string) => {
+    if (!content) return 'Say hi';
+    if (content.startsWith('[IMAGE]')) return 'Photo';
+    if (content.startsWith('[VOICE_NOTE')) return 'Voice message';
+    return content;
+  };
+
   const ConversationListView = (
-    <div className="space-y-4 select-none h-full flex flex-col">
-      {/* Search & Direct Add Header */}
+    <div className="flex flex-col gap-3 h-full">
       <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3 pointer-events-none" />
+        <label className="search flex-1">
+          <Search className="i i-sm" aria-hidden />
           <input
             type="text"
-            placeholder="Search conversations or UID..."
+            placeholder="Search chats or an ID"
+            aria-label="Search chats or an ID"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full bg-[#111111] border border-[#262626] focus:border-[#10B981] rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-zinc-500 outline-none transition-all"
+            className="flex-1 min-w-0 bg-transparent border-0 outline-none text-vault-50 text-[15px]"
           />
-        </div>
-
-        <button
-          onClick={() => setNewChatModalOpen(true)}
-          className="flex items-center justify-center p-2.5 bg-[#171717] hover:bg-[#222222] border border-[#262626] hover:border-[#10B981] rounded-xl text-[#10B981] transition-all active:scale-95"
-          title="Direct UID Connect"
-        >
-          <UserPlus className="w-4 h-4" />
+        </label>
+        <button type="button" onClick={() => setNewChatModalOpen(true)} className="ib ib-s" aria-label="New chat" title="Direct UID Connect">
+          <UserPlus className="i" aria-hidden />
         </button>
       </div>
 
-      {/* Pinned Contacts Carousel */}
-      {conversations.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-1.5 px-1 text-xs text-zinc-500 font-semibold">
-            <Pin className="w-3 h-3 text-[#10B981]" />
-            <span>PINNED CONTACTS</span>
-          </div>
-
-          <div className="flex items-center gap-2.5 overflow-x-auto pb-1 scrollbar-none">
-            {conversations.slice(0, 5).map(c => (
-              <button
-                key={c.id}
-                onClick={() => handleStartDirectChat(c.partner, c.id)}
-                className={`flex flex-col items-center gap-1.5 p-2 rounded-xl border min-w-[76px] transition-all active:scale-95 ${
-                  activeConversation?.id === c.id
-                    ? 'bg-[#171717] border-[#10B981]'
-                    : 'bg-[#111111] border-[#262626] hover:border-[#10B981]/60'
-                }`}
-              >
-                <div className="relative">
-                  <img
-                    src={c.partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${c.partner.uid}`}
-                    alt={c.partner.display_name}
-                    className="w-11 h-11 rounded-xl bg-[#171717] border border-[#262626] object-cover"
-                  />
-                  <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#10B981] border-2 border-[#111111]" />
+      <div className="flex-1 overflow-y-auto -mx-1">
+        {loading ? (
+          <div role="status" aria-label="Loading chats">
+            {[52, 40, 58, 36, 48].map((w, i) => (
+              <div key={i} className="row">
+                <div className="sk w-14 h-14 !rounded-full" />
+                <div className="flex-1 flex flex-col gap-2.5">
+                  <div className="sk h-3.5" style={{ width: `${w}%` }} />
+                  <div className="sk h-3" style={{ width: `${w + 24}%` }} />
                 </div>
-                <span className="text-[11px] font-semibold text-zinc-300 truncate max-w-[68px]">
-                  {c.partner.display_name.split(' ')[0]}
-                </span>
-              </button>
+              </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* Main Conversation Stream */}
-      <div className="space-y-2 flex-1 overflow-y-auto">
-        <div className="flex items-center justify-between px-1 text-xs text-zinc-500 font-semibold">
-          <span>RECENT MESSAGES</span>
-          <span className="font-mono text-[10px] text-[#10B981]">E2E ENCRYPTED</span>
-        </div>
-
-        {loading ? (
-          <div className="p-12 text-center text-xs text-zinc-500 font-mono">Loading secure channels...</div>
         ) : filteredConversations.length === 0 ? (
-          <div className="p-8 bg-[#111111] border border-[#262626] rounded-2xl text-center space-y-3">
-            <MessageSquare className="w-8 h-8 text-zinc-600 mx-auto" />
-            <p className="text-sm font-semibold text-white">No Active Chats</p>
-            <p className="text-xs text-[#A1A1AA] max-w-xs mx-auto">
-              Connect directly with sovereign peers using their UID tag.
+          <div className="flex flex-col items-center text-center gap-3 px-8 py-14">
+            <div className="w-[72px] h-[72px] rounded-[22px] bg-vault-900 border border-vault-800 flex items-center justify-center text-[#34D399]">
+              <MessageSquare className="w-8 h-8" aria-hidden />
+            </div>
+            <h2 className="t-h2 mt-2 mb-0">{searchQuery ? 'No matches' : 'No conversations yet'}</h2>
+            <p className="t-sm c2 m-0">
+              {searchQuery ? 'Try a different name or ID.' : 'Add someone by their ID, or share yours so they can add you.'}
             </p>
-            <button
-              onClick={() => setNewChatModalOpen(true)}
-              className="px-4 py-2 bg-[#10B981] hover:bg-emerald-400 text-black text-xs font-bold rounded-xl shadow-lg transition-all"
-            >
-              Start New Chat
-            </button>
+            {!searchQuery && (
+              <button type="button" onClick={() => setNewChatModalOpen(true)} className="btn btn-p btn-block mt-3">
+                Start a chat
+              </button>
+            )}
           </div>
         ) : (
-          <div className="space-y-1.5">
+          <ul aria-label="Conversations" className="list-none m-0 p-0 flex flex-col gap-0.5">
             {filteredConversations.map(c => {
               const isSelected = activeConversation?.id === c.id;
+              const unread = c.unreadCount > 0;
+              const preview = previewText(c.lastMessage?.content);
+              const time = c.lastMessage ? formatTimestamp(c.lastMessage.created_at) : '';
               return (
-                <div
-                  key={c.id}
-                  onClick={() => handleStartDirectChat(c.partner, c.id)}
-                  className={`group flex items-center justify-between p-3 border rounded-2xl cursor-pointer transition-all active:scale-98 ${
-                    isSelected
-                      ? 'bg-[#171717] border-[#10B981] shadow-sm'
-                      : 'bg-[#111111] border-[#262626] hover:bg-[#171717] hover:border-zinc-600'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="relative">
-                      <img
-                        src={c.partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${c.partner.uid}`}
-                        alt={c.partner.display_name}
-                        className="w-11 h-11 rounded-xl bg-[#171717] border border-[#262626] object-cover"
-                      />
-                      <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#10B981] border-2 border-[#111111]" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-white truncate leading-tight">
-                          {c.partner.display_name}
-                        </h4>
-                        <span className="text-[10px] font-mono text-[#10B981]">
-                          {c.partner.uid}
-                        </span>
-                      </div>
-
-                      <p className="text-xs text-[#A1A1AA] truncate mt-0.5 flex items-center gap-1">
-                        {c.lastMessage?.content.startsWith('[IMAGE]') ? (
-                          <>
-                            <ImageIcon className="w-3.5 h-3.5 text-[#10B981]" />
-                            <span>Encrypted photo</span>
-                          </>
-                        ) : c.lastMessage?.content.startsWith('[VOICE_NOTE') ? (
-                          <>
-                            <Mic className="w-3.5 h-3.5 text-[#10B981]" />
-                            <span>Voice message (0:14)</span>
-                          </>
-                        ) : (
-                          c.lastMessage?.content || 'Encrypted direct channel ready'
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-1 text-right pl-2">
-                    <span className="text-[10px] text-zinc-500 whitespace-nowrap">
-                      {c.lastMessage ? formatTimestamp(c.lastMessage.created_at) : ''}
-                    </span>
-                    {c.unreadCount > 0 && (
-                      <span className="px-2 py-0.5 bg-[#10B981] text-black font-bold text-[10px] rounded-full">
-                        {c.unreadCount}
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => handleStartDirectChat(c.partner, c.id)}
+                    aria-current={isSelected ? 'true' : undefined}
+                    aria-label={`${c.partner.display_name}. ${preview}. ${time}${unread ? `. ${c.unreadCount} unread` : ''}`}
+                    className={`row w-full text-left ${isSelected ? 'row-sel' : ''}`}
+                  >
+                    <Avatar name={c.partner.display_name} seed={c.partner.uid} src={c.partner.avatar_url} size={56} />
+                    <span className="flex-1 min-w-0 flex flex-col gap-1">
+                      <span className="flex justify-between items-baseline gap-2">
+                        <span className="t-h3 truncate">{c.partner.display_name}</span>
+                        <span className={`t-cap mono whitespace-nowrap ${unread ? 'cem' : ''}`}>{time}</span>
                       </span>
-                    )}
-                  </div>
-                </div>
+                      <span className="flex items-center gap-1.5 min-h-[22px]">
+                        {c.lastMessage?.content.startsWith('[IMAGE]') && <ImageIcon className="i i-sm c2" aria-hidden />}
+                        {c.lastMessage?.content.startsWith('[VOICE_NOTE') && <Mic className="i i-sm cem" aria-hidden />}
+                        <span className={`t-sm flex-1 truncate ${unread ? 'text-vault-50' : 'c2'}`}>{preview}</span>
+                        {unread && <span className="badge">{c.unreadCount}</span>}
+                      </span>
+                    </span>
+                  </button>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
       </div>
     </div>
@@ -468,21 +406,19 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         /* Desktop 2-Pane Split View (≥ 1024px) */
         <div className="grid grid-cols-12 gap-4 h-[calc(100vh-140px)]">
           {/* Left Column: Conversations List (5 cols) */}
-          <div className="col-span-5 h-full overflow-hidden flex flex-col bg-[#0A0A0A] p-2 rounded-2xl border border-[#262626]">
+          <div className="col-span-5 h-full overflow-hidden flex flex-col bg-[#050505] p-2 rounded-2xl border border-[#1E2025]">
             {ConversationListView}
           </div>
 
           {/* Right Column: Active Chat Stream (7 cols) */}
           <div className="col-span-7 h-full">
             {activeChat ?? (
-              <div className="h-full bg-[#0A0A0A] border border-[#262626] rounded-2xl flex flex-col items-center justify-center p-8 text-center space-y-3">
-                <div className="w-16 h-16 rounded-2xl bg-[#111111] border border-[#262626] flex items-center justify-center text-[#10B981]">
-                  <Lock className="w-8 h-8" />
+              <div className="h-full bg-[#050505] border border-[#1E2025] rounded-2xl flex flex-col items-center justify-center p-8 text-center space-y-3">
+                <div className="w-16 h-16 rounded-2xl bg-[#0C0D0F] border border-[#1E2025] flex items-center justify-center text-[#10B981]">
+                  <MessageSquare className="w-8 h-8" aria-hidden />
                 </div>
-                <h3 className="text-base font-bold text-white">Signal-Grade Encrypted Messenger</h3>
-                <p className="text-xs text-[#A1A1AA] max-w-sm">
-                  Select a conversation from the left pane or tap <span className="text-[#10B981] font-semibold">+ Direct Connect</span> to establish an end-to-end encrypted session.
-                </p>
+                <h3 className="t-h2 m-0">Select a conversation</h3>
+                <p className="t-sm c2 max-w-sm m-0">Choose a chat on the left, or start a new one with someone's ID.</p>
               </div>
             )}
           </div>
@@ -495,7 +431,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       {/* Direct UID Connect Modal */}
       {newChatModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#111111] border border-[#262626] rounded-2xl p-6 max-w-sm w-full space-y-4 animate-fade-in shadow-2xl">
+          <div className="bg-[#0C0D0F] border border-[#1E2025] rounded-2xl p-6 max-w-sm w-full space-y-4 animate-fade-in shadow-2xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-5 h-5 text-[#10B981]" />
@@ -503,13 +439,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               </div>
               <button
                 onClick={() => setNewChatModalOpen(false)}
-                className="text-zinc-500 hover:text-white text-sm"
+                className="text-vault-500 hover:text-white text-sm"
               >
                 ✕
               </button>
             </div>
 
-            <p className="text-xs text-[#A1A1AA]">
+            <p className="text-xs text-[#A7ABB3]">
               Enter the peer's unique UID tag (e.g. <span className="font-mono text-white">CIPHER-1082</span> or <span className="font-mono text-white">SOLAR-8120</span>) to open an encrypted channel.
             </p>
 
@@ -519,7 +455,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 placeholder="Enter UID..."
                 value={newChatUidInput}
                 onChange={e => setNewChatUidInput(e.target.value)}
-                className="w-full py-2.5 px-4 bg-[#171717] border border-[#262626] focus:border-[#10B981] rounded-xl text-white font-mono text-sm placeholder:text-zinc-600 focus:outline-none"
+                className="w-full py-2.5 px-4 bg-[#131417] border border-[#1E2025] focus:border-[#10B981] rounded-xl text-white font-mono text-sm placeholder:text-vault-500 focus:outline-none"
               />
 
               <button

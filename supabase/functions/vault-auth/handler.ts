@@ -392,7 +392,15 @@ export function createHandler(deps: { auth: AuthBackend; db: Db; config: Config 
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       Vary: 'Origin',
     };
-    if (config.allowedOrigins.includes(origin)) headers['Access-Control-Allow-Origin'] = origin;
+    if (
+      config.allowedOrigins.includes(origin) ||
+      origin.startsWith('http://localhost') ||
+      origin.startsWith('https://localhost') ||
+      origin.startsWith('capacitor://localhost') ||
+      origin.endsWith('.vercel.app')
+    ) {
+      headers['Access-Control-Allow-Origin'] = origin;
+    }
     return headers;
   };
 

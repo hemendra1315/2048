@@ -1,15 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Image as ImageIcon,
-  Plus,
-  Calendar,
-  Grid,
-  FolderHeart,
-  Share2,
-  Trash2,
-  Layers,
-  Sparkles,
-  UploadCloud,
+  Upload,
 } from 'lucide-react';
 import { GalleryItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -18,14 +10,15 @@ import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { uniqueChannelName } from '../../lib/realtime';
 import { mockBackend } from '../../lib/mockBackend';
 import { UploadModal } from './UploadModal';
+import { LightboxViewer } from './LightboxViewer';
 
-type GalleryTab = 'all' | 'photos' | 'videos' | 'albums' | 'shared';
+type GalleryFilter = 'all' | 'photos' | 'videos' | 'shared';
 
 export const GalleryView: React.FC = () => {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<GalleryTab>('all');
+  const [filter, setFilter] = useState<GalleryFilter>('all');
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
@@ -91,215 +84,139 @@ export const GalleryView: React.FC = () => {
     }
   };
 
-  // Group items by date for Apple Photos-style timeline
+  // Group items by relative period (This Week, This Month, or Month Year)
   const groupedItems = items.reduce((acc, item) => {
-    const date = new Date(item.created_at || Date.now());
-    const dateKey = date.toLocaleDateString(undefined, {
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric',
-    });
-    if (!acc[dateKey]) {
-      acc[dateKey] = [];
-    }
-    acc[dateKey].push(item);
+    const d = new Date(item.created_at || Date.now());
+    const now = new Date();
+    const diffDays = (now.getTime() - d.getTime()) / (1000 * 3600 * 24);
+
+    let key = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }).toUpperCase();
+    if (diffDays <= 7) key = 'THIS WEEK';
+    else if (diffDays <= 30) key = 'THIS MONTH';
+
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(item);
     return acc;
   }, {} as Record<string, GalleryItem[]>);
 
   return (
-    <div className="space-y-4 pb-20 animate-fade-in select-none">
-      {/* Header & Apple Photos Segment Selector */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-bold text-white tracking-tight">Personal Gallery</h2>
-          <p className="text-xs text-[#A1A1AA]">Organized media library & albums</p>
-        </div>
+    <div className="flex flex-col gap-4 pb-20 animate-fade-in select-none">
+      {/* Top Header */}
+      <div className="flex items-center justify-between">
+        <h1 className="t-h1 m-0">Gallery</h1>
 
         <button
+          type="button"
           onClick={() => setUploadModalOpen(true)}
-          className="flex items-center justify-center gap-1.5 px-4 py-2 bg-[#171717] hover:bg-[#222222] border border-[#262626] hover:border-[#10B981] rounded-xl text-xs font-semibold text-white transition-all active:scale-95 shadow-md"
+          className="ib ib-s rounded-xl"
+          aria-label="Upload photo"
+          title="Upload photo"
         >
-          <Plus className="w-4 h-4 text-[#10B981]" />
-          <span>Add Media</span>
+          <Upload className="i" aria-hidden />
         </button>
       </div>
 
-      {/* Segmented Control Bar */}
-      <div className="flex items-center gap-1.5 p-1 bg-[#111111] border border-[#262626] rounded-xl overflow-x-auto">
+      {/* Filter Chips Bar */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1 no-scrollbar" role="tablist" aria-label="Gallery filters">
         <button
-          onClick={() => setActiveTab('all')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-            activeTab === 'all'
-              ? 'bg-[#171717] text-white border border-[#262626] shadow-sm'
-              : 'text-[#A1A1AA] hover:text-white'
-          }`}
+          type="button"
+          role="tab"
+          aria-selected={filter === 'all'}
+          onClick={() => setFilter('all')}
+          className={`chip ${filter === 'all' ? 'chip-on' : ''}`}
         >
-          <Grid className="w-3.5 h-3.5" />
-          <span>All Media</span>
+          All {items.length > 0 && <span className="opacity-80">{items.length}</span>}
         </button>
-
         <button
-          onClick={() => setActiveTab('photos')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-            activeTab === 'photos'
-              ? 'bg-[#171717] text-white border border-[#262626] shadow-sm'
-              : 'text-[#A1A1AA] hover:text-white'
-          }`}
+          type="button"
+          role="tab"
+          aria-selected={filter === 'photos'}
+          onClick={() => setFilter('photos')}
+          className={`chip ${filter === 'photos' ? 'chip-on' : ''}`}
         >
-          <ImageIcon className="w-3.5 h-3.5" />
-          <span>Photos</span>
+          Photos
         </button>
-
         <button
-          onClick={() => setActiveTab('albums')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-            activeTab === 'albums'
-              ? 'bg-[#171717] text-white border border-[#262626] shadow-sm'
-              : 'text-[#A1A1AA] hover:text-white'
-          }`}
+          type="button"
+          role="tab"
+          aria-selected={filter === 'videos'}
+          onClick={() => setFilter('videos')}
+          className={`chip ${filter === 'videos' ? 'chip-on' : ''}`}
         >
-          <FolderHeart className="w-3.5 h-3.5" />
-          <span>Albums</span>
+          Videos
         </button>
-
         <button
-          onClick={() => setActiveTab('shared')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-            activeTab === 'shared'
-              ? 'bg-[#171717] text-white border border-[#262626] shadow-sm'
-              : 'text-[#A1A1AA] hover:text-white'
-          }`}
+          type="button"
+          role="tab"
+          aria-selected={filter === 'shared'}
+          onClick={() => setFilter('shared')}
+          className={`chip ${filter === 'shared' ? 'chip-on' : ''}`}
         >
-          <Share2 className="w-3.5 h-3.5" />
-          <span>Shared</span>
+          Shared
         </button>
       </div>
 
-      {/* Album Category Tiles (when Albums tab is active) */}
-      {activeTab === 'albums' && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <div className="p-4 rounded-2xl bg-[#111111] border border-[#262626] hover:border-[#10B981]/50 cursor-pointer transition-all">
-            <div className="w-10 h-10 rounded-xl bg-[#171717] flex items-center justify-center text-[#10B981] mb-3">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <h4 className="text-xs font-bold text-white">Recents</h4>
-            <p className="text-[11px] text-zinc-500 mt-0.5">{items.length} items</p>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-[#111111] border border-[#262626] hover:border-[#10B981]/50 cursor-pointer transition-all">
-            <div className="w-10 h-10 rounded-xl bg-[#171717] flex items-center justify-center text-amber-400 mb-3">
-              <FolderHeart className="w-5 h-5" />
-            </div>
-            <h4 className="text-xs font-bold text-white">Favorites</h4>
-            <p className="text-[11px] text-zinc-500 mt-0.5">0 items</p>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-[#111111] border border-[#262626] hover:border-[#10B981]/50 cursor-pointer transition-all">
-            <div className="w-10 h-10 rounded-xl bg-[#171717] flex items-center justify-center text-cyan-400 mb-3">
-              <Layers className="w-5 h-5" />
-            </div>
-            <h4 className="text-xs font-bold text-white">Screenshots</h4>
-            <p className="text-[11px] text-zinc-500 mt-0.5">0 items</p>
-          </div>
-        </div>
-      )}
-
-      {/* Main Timeline Grid */}
+      {/* Gallery Content */}
       {loading ? (
-        <div className="p-12 text-center text-xs text-zinc-500 font-mono">Loading gallery timeline...</div>
+        <div className="grid grid-cols-3 gap-1.5 sm:gap-2" role="status" aria-label="Loading gallery">
+          {Array.from({ length: 9 }).map((_, i) => (
+            <div key={i} className="sk aspect-square rounded-xl" />
+          ))}
+        </div>
       ) : items.length === 0 ? (
-        <div className="p-12 bg-[#111111] border border-[#262626] rounded-2xl text-center space-y-3">
-          <UploadCloud className="w-10 h-10 text-zinc-600 mx-auto" />
-          <p className="text-sm font-semibold text-white">No Media in Gallery</p>
-          <p className="text-xs text-[#A1A1AA] max-w-xs mx-auto">
+        <div className="card p-8 flex flex-col items-center justify-center text-center gap-3">
+          <div className="w-16 h-16 rounded-2xl bg-vault-850 border border-vault-700 flex items-center justify-center text-vault-400">
+            <ImageIcon className="w-8 h-8" aria-hidden />
+          </div>
+          <h2 className="t-h2 m-0">No media in gallery</h2>
+          <p className="t-sm c2 max-w-xs m-0">
             Use the Camera tab or tap Add Media to build your personal photo library.
           </p>
           <button
+            type="button"
             onClick={() => setUploadModalOpen(true)}
-            className="px-4 py-2 bg-[#10B981] hover:bg-emerald-400 text-black text-xs font-bold rounded-xl shadow-lg transition-all"
+            className="btn btn-p mt-2"
           >
-            Upload Photo
+            <Upload className="i i-sm" aria-hidden />
+            <span>Upload Photo</span>
           </button>
         </div>
       ) : (
-        <div className="space-y-6">
-          {Object.entries(groupedItems).map(([dateLabel, dateItems]) => (
-            <div key={dateLabel} className="space-y-2">
-              <div className="flex items-center gap-2 px-1">
-                <Calendar className="w-3.5 h-3.5 text-zinc-500" />
-                <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{dateLabel}</h3>
-              </div>
-
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1.5 sm:gap-2">
-                {dateItems.map(item => (
-                  <div
+        <div className="flex flex-col gap-6">
+          {Object.entries(groupedItems).map(([periodLabel, periodItems]) => (
+            <section key={periodLabel} className="flex flex-col gap-2">
+              <h2 className="t-over px-1 m-0">{periodLabel}</h2>
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+                {periodItems.map(item => (
+                  <button
                     key={item.id}
+                    type="button"
                     onClick={() => setSelectedItem(item)}
-                    className="group relative aspect-square rounded-xl overflow-hidden bg-[#171717] border border-[#262626] cursor-pointer hover:border-zinc-500 transition-all shadow-sm"
+                    aria-label={item.caption || 'Open photo'}
+                    className="group relative aspect-square rounded-xl overflow-hidden bg-vault-900 border border-vault-800 hover:border-vault-600 focus-visible:fr transition-all cursor-pointer p-0"
                   >
                     <img
                       src={item.image_url}
-                      alt={item.caption || 'Media item'}
+                      alt={item.caption || 'Gallery photo'}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                       loading="lazy"
                     />
-                  </div>
+                  </button>
                 ))}
               </div>
-            </div>
+            </section>
           ))}
         </div>
       )}
 
-      {/* Lightbox / Fullscreen Viewer */}
-      {selectedItem && (
-        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col justify-between p-4 sm:p-6 animate-fade-in">
-          {/* Top Bar */}
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-zinc-400">
-              {new Date(selectedItem.created_at).toLocaleDateString(undefined, {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              })}
-            </span>
+      {/* Lightbox / Expanded Viewer */}
+      <LightboxViewer
+        item={selectedItem}
+        onClose={() => setSelectedItem(null)}
+        onDelete={handleDelete}
+      />
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => handleDelete(selectedItem)}
-                className="p-2.5 rounded-full bg-[#111111] hover:bg-red-950 border border-[#262626] hover:border-red-600 text-zinc-300 hover:text-red-400 transition-all active:scale-95"
-                title="Delete Photo"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setSelectedItem(null)}
-                className="p-2.5 rounded-full bg-[#111111] hover:bg-[#171717] border border-[#262626] text-white transition-all active:scale-95"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-
-          {/* Media Viewport */}
-          <div className="flex-1 flex items-center justify-center p-4">
-            <img
-              src={selectedItem.image_url}
-              alt="Expanded Media"
-              className="max-h-[72vh] max-w-full rounded-2xl object-contain shadow-2xl border border-[#262626]"
-            />
-          </div>
-
-          {/* Bottom Bar Details */}
-          <div className="bg-[#111111] border border-[#262626] rounded-2xl p-4 max-w-md mx-auto w-full text-center">
-            <p className="text-xs text-white font-medium">
-              {selectedItem.caption || 'Personal Gallery Photo'}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Upload Modal */}
+      {/* Upload Bottom Sheet */}
       <UploadModal
         isOpen={uploadModalOpen}
         onClose={() => setUploadModalOpen(false)}

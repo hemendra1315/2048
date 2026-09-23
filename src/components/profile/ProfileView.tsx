@@ -1,33 +1,98 @@
 import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck,
-  Fingerprint,
   Lock,
-  Gamepad2,
-  Clock,
-  Eye,
-  Smartphone,
   Copy,
   LogOut,
-  CheckCircle2,
+  Settings as SettingsIcon,
+  Edit3,
+  QrCode,
+  Users,
+  Plus,
+  ChevronRight,
+  Camera,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useVault } from '../../context/VaultContext';
-import { CoverGameType } from '../../types';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { mockBackend } from '../../lib/mockBackend';
+import { Avatar } from '../common/Avatar';
+import { SettingsView } from '../settings/SettingsView';
 
-export const ProfileView: React.FC = () => {
-  const { user, isSuperAdmin, logout, enrollBiometrics, disableBiometrics } = useAuth();
+interface ProfileViewProps {
+  onOpenSettings?: () => void;
+}
+
+export const ProfileView: React.FC<ProfileViewProps> = () => {
+  const { user, isSuperAdmin, logout } = useAuth();
   const { showToast } = useToast();
-  const { preferences, updatePreferences, panicLock } = useVault();
+  const { panicLock } = useVault();
 
-  const [biometricsEnabled, setBiometricsEnabled] = useState(user?.biometric_enabled ?? false);
-  const [readReceipts, setReadReceipts] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [stats, setStats] = useState({
+    connections: 24,
+    media: 0,
+    messages: 120,
+  });
+  const [recentConnections, setRecentConnections] = useState<Array<{ id: string; name: string; uid: string; online: boolean }>>([
+    { id: '1', name: 'Maya', uid: 'MAYA-9102', online: true },
+    { id: '2', name: 'Arjun', uid: 'ARJUN-4412', online: false },
+    { id: '3', name: 'Lena', uid: 'LENA-8821', online: true },
+    { id: '4', name: 'Theo', uid: 'THEO-3109', online: false },
+  ]);
 
   useEffect(() => {
-    if (user?.biometric_enabled !== undefined) {
-      setBiometricsEnabled(user.biometric_enabled);
-    }
+    if (!user) return;
+    const loadProfileStats = async () => {
+      try {
+        if (isSupabaseConfigured()) {
+          const [{ count: galleryCount }, { count: messageCount }, { count: connectionCount }, { data: profiles }] = await Promise.all([
+            supabase.from('gallery_items').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
+            supabase.from('messages').select('*', { count: 'exact', head: true }).eq('sender_id', user.id),
+            supabase.from('connections').select('*', { count: 'exact', head: true }).or(`user_a.eq.${user.id},user_b.eq.${user.id}`),
+            supabase.from('profiles').select('id, display_name, uid').neq('id', user.id).limit(6),
+          ]);
+
+          setStats({
+            connections: (connectionCount ?? 0) || 24,
+            media: galleryCount ?? 0,
+            messages: (messageCount ?? 0) || 120,
+          });
+
+          if (profiles && profiles.length > 0) {
+            setRecentConnections(
+              profiles.map((p, i) => ({
+                id: p.id,
+                name: (p.display_name || 'Peer').split(' ')[0],
+                uid: p.uid,
+                online: i % 2 === 0,
+              }))
+            );
+          }
+        } else {
+          const gallery = mockBackend.getGallery(user.id);
+          const allProfiles = mockBackend.getProfiles().filter(p => p.id !== user.id);
+          setStats({
+            connections: allProfiles.length || 24,
+            media: gallery.length,
+            messages: 320,
+          });
+          setRecentConnections(
+            allProfiles.slice(0, 5).map((p, i) => ({
+              id: p.id,
+              name: (p.display_name || 'Peer').split(' ')[0],
+              uid: p.uid,
+              online: i % 2 === 0,
+            }))
+          );
+        }
+      } catch (err) {
+        console.warn('Error loading profile stats:', err);
+      }
+    };
+
+    void loadProfileStats();
   }, [user]);
 
   const copyUid = () => {
@@ -37,222 +102,232 @@ export const ProfileView: React.FC = () => {
     }
   };
 
-  const handleToggleBiometrics = async () => {
-    try {
-      if (!biometricsEnabled) {
-        await enrollBiometrics();
-        setBiometricsEnabled(true);
-      } else {
-        await disableBiometrics();
-        setBiometricsEnabled(false);
-      }
-    } catch {
-      // Toast shown by AuthContext
-    }
-  };
-
   const handleLogout = () => {
     logout();
     panicLock();
     showToast('Secure session terminated', 'info');
   };
 
+  if (showSettings) {
+    return <SettingsView onBack={() => setShowSettings(false)} />;
+  }
+
   return (
-    <div className="space-y-4 pb-24 animate-fade-in select-none">
-      {/* Identity Card */}
-      <div className="p-5 bg-[#111111] border border-[#262626] rounded-2xl relative overflow-hidden">
-        <div className="flex items-center gap-4">
-          <img
-            src={user?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.uid || 'vault'}`}
-            alt="Avatar"
-            className="w-16 h-16 rounded-2xl bg-[#171717] border border-[#262626] object-cover"
+    <div className="flex flex-col gap-6 pb-24 animate-fade-in select-none">
+      {/* Header */}
+      <header className="flex items-center justify-between">
+        <h1 className="t-h1 m-0">Profile</h1>
+
+        <button
+          type="button"
+          onClick={() => setShowSettings(true)}
+          className="ib ib-s rounded-xl"
+          aria-label="Open settings"
+          title="Settings"
+        >
+          <SettingsIcon className="i" aria-hidden />
+        </button>
+      </header>
+
+      {/* Profile Hero Card */}
+      <section className="flex flex-col items-center text-center">
+        <div className="relative">
+          <Avatar
+            name={user?.display_name || 'Sovereign Node'}
+            seed={user?.uid}
+            src={user?.avatar_url}
+            size={96}
           />
-
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold text-white truncate">
-                {user?.display_name || 'Sovereign Node'}
-              </h2>
-              {isSuperAdmin && (
-                <span className="px-2 py-0.5 bg-amber-950 text-amber-300 border border-amber-600/50 rounded text-[10px] font-bold">
-                  SUPER ADMIN
-                </span>
-              )}
-            </div>
-
-            {/* Sovereign UID Pill */}
-            <button
-              onClick={copyUid}
-              className="mt-1.5 flex items-center gap-1.5 px-2.5 py-1 bg-[#171717] hover:bg-[#222222] border border-[#262626] rounded-lg text-xs font-mono text-[#10B981] transition-all active:scale-95"
-              title="Click to copy UID"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>{user?.uid || 'CIPHER-4921'}</span>
-              <Copy className="w-3 h-3 opacity-60 ml-1" />
-            </button>
-          </div>
-        </div>
-
-        {/* Verification Status */}
-        <div className="mt-4 pt-4 border-t border-[#262626] flex items-center justify-between text-xs">
-          <div className="flex items-center gap-1.5 text-zinc-400">
-            <CheckCircle2 className="w-4 h-4 text-[#10B981]" />
-            <span>Cryptographic Proof: Active</span>
-          </div>
-          <span className="font-mono text-[11px] text-zinc-500">Tier: Zero-Knowledge</span>
-        </div>
-      </div>
-
-      {/* Security Settings Section */}
-      <div className="bg-[#111111] border border-[#262626] rounded-2xl p-4 space-y-3">
-        <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider px-1">
-          Security & Access Gate
-        </h3>
-
-        {/* Biometrics Toggle */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-[#171717] border border-[#262626]">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-[#222222] text-[#10B981]">
-              <Fingerprint className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-white">Biometric Unlock</p>
-              <p className="text-[11px] text-zinc-500">Touch ID / Face ID / WebAuthn</p>
-            </div>
-          </div>
           <button
-            onClick={handleToggleBiometrics}
-            className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-              biometricsEnabled ? 'bg-[#10B981]' : 'bg-[#262626]'
-            }`}
+            type="button"
+            className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-vault-800 border-2 border-vault-950 flex items-center justify-center text-vault-200 hover:bg-vault-700 active:scale-95 transition-all shadow-md"
+            aria-label="Edit avatar"
           >
-            <div
-              className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                biometricsEnabled ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
+            <Camera className="w-4 h-4" aria-hidden />
           </button>
         </div>
 
-        {/* Stealth Cover Game Selector */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-[#171717] border border-[#262626]">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-[#222222] text-amber-400">
-              <Gamepad2 className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-white">Stealth Camouflage Cover</p>
-              <p className="text-[11px] text-zinc-500">Decoy game for app launcher</p>
-            </div>
-          </div>
-          <select
-            value={preferences.selected_game || 'game_2048'}
-            onChange={e => {
-              const game = e.target.value as CoverGameType;
-              updatePreferences({ selected_game: game });
-            }}
-            className="bg-[#222222] text-xs font-semibold text-white px-2.5 py-1.5 rounded-lg border border-[#262626] focus:outline-none focus:border-[#10B981]"
-          >
-            <option value="game_2048">2048 Game</option>
-            <option value="snake">Snake Retro</option>
-            <option value="tic_tac_toe">Tic Tac Toe</option>
-          </select>
+        <h2 className="t-h1 mt-3.5 mb-0.5">
+          {user?.display_name || 'Alex Morgan'}
+        </h2>
+        <p className="t-sm c2 font-mono m-0">
+          @{user?.username || user?.uid?.toLowerCase() || 'alexm'}
+        </p>
+
+        {/* Sovereign UID Chip */}
+        <button
+          type="button"
+          onClick={copyUid}
+          title="Click to copy your UID"
+          aria-label={`UID ${user?.uid || 'CIPHER-4921'}, click to copy`}
+          className="tag tag-em font-mono mt-3 gap-1.5 cursor-pointer hover:opacity-90 active:scale-98 transition-all"
+        >
+          <ShieldCheck className="w-3.5 h-3.5" aria-hidden />
+          <span>{user?.uid || 'CIPHER-4921'}</span>
+          <Copy className="w-3 h-3 opacity-70" aria-hidden />
+        </button>
+      </section>
+
+      {/* 3 Metric Summary Cards */}
+      <section className="grid grid-cols-3 gap-2" aria-label="Profile statistics">
+        <div className="card p-3.5 flex flex-col items-center justify-center text-center">
+          <span className="t-h2 font-bold font-mono text-vault-50">{stats.connections}</span>
+          <span className="t-cap c3 mt-0.5">Connections</span>
         </div>
-
-        {/* Auto Lock Timer */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-[#171717] border border-[#262626]">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-[#222222] text-cyan-400">
-              <Clock className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-white">Auto-Lock Inactivity Timer</p>
-              <p className="text-[11px] text-zinc-500">Automatically seal vault</p>
-            </div>
-          </div>
-          <select
-            value={preferences.auto_lock_seconds ?? 60}
-            onChange={e => {
-              const secs = Number(e.target.value);
-              updatePreferences({ auto_lock_seconds: secs });
-            }}
-            className="bg-[#222222] text-xs font-semibold text-white px-2.5 py-1.5 rounded-lg border border-[#262626] focus:outline-none focus:border-[#10B981]"
-          >
-            <option value={30}>30 seconds</option>
-            <option value={60}>1 minute</option>
-            <option value={300}>5 minutes</option>
-          </select>
+        <div className="card p-3.5 flex flex-col items-center justify-center text-center">
+          <span className="t-h2 font-bold font-mono text-vault-50">{stats.media}</span>
+          <span className="t-cap c3 mt-0.5">Media</span>
         </div>
-      </div>
+        <div className="card p-3.5 flex flex-col items-center justify-center text-center">
+          <span className="t-h2 font-bold font-mono text-vault-50">
+            {stats.messages >= 1000 ? `${(stats.messages / 1000).toFixed(1)}k` : stats.messages}
+          </span>
+          <span className="t-cap c3 mt-0.5">Messages</span>
+        </div>
+      </section>
 
-      {/* Privacy Controls Section */}
-      <div className="bg-[#111111] border border-[#262626] rounded-2xl p-4 space-y-3">
-        <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider px-1">
-          Privacy & Message Receipts
-        </h3>
-
-        <div className="flex items-center justify-between p-3 rounded-xl bg-[#171717] border border-[#262626]">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-[#222222] text-zinc-300">
-              <Eye className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-white">Read Receipts</p>
-              <p className="text-[11px] text-zinc-500">Send double-check ✓✓ indicators</p>
-            </div>
-          </div>
+      {/* Connections Carousels / Horizontal Contacts */}
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between px-1">
+          <h2 className="t-over m-0">Connections</h2>
           <button
+            type="button"
+            className="t-sm font-semibold text-cy hover:underline cursor-pointer bg-transparent border-0 p-0"
+          >
+            See all
+          </button>
+        </div>
+
+        <div className="flex items-center gap-3 overflow-x-auto pb-1 -mx-1 px-1 no-scrollbar">
+          {/* Add Connection Button */}
+          <button
+            type="button"
+            className="flex flex-col items-center gap-1.5 shrink-0 group cursor-pointer bg-transparent border-0 p-0"
+            aria-label="Add new connection"
+          >
+            <div className="w-14 h-14 rounded-full border border-dashed border-vault-700 group-hover:border-vault-500 flex items-center justify-center text-vault-400 group-hover:text-white transition-colors">
+              <Plus className="w-6 h-6" aria-hidden />
+            </div>
+            <span className="t-cap text-vault-300 group-hover:text-white">Add</span>
+          </button>
+
+          {/* Connection Avatars */}
+          {recentConnections.map(c => (
+            <div key={c.id} className="flex flex-col items-center gap-1.5 shrink-0">
+              <Avatar
+                name={c.name}
+                seed={c.uid}
+                size={56}
+                online={c.online}
+              />
+              <span className="t-cap text-vault-200 truncate max-w-[56px] text-center">{c.name}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Quick Action Navigation Rows */}
+      <section className="flex flex-col gap-2">
+        <div className="card overflow-hidden">
+          <button
+            type="button"
+            onClick={() => showToast('Profile editing enabled in Settings', 'info')}
+            className="row w-full text-left justify-between"
+          >
+            <div className="flex items-center gap-3">
+              <Edit3 className="i c2" aria-hidden />
+              <span className="t-body">Edit profile</span>
+            </div>
+            <ChevronRight className="i i-sm c3" aria-hidden />
+          </button>
+
+          <div className="divider ml-12" />
+
+          <button
+            type="button"
             onClick={() => {
-              setReadReceipts(!readReceipts);
-              showToast(`Read receipts ${!readReceipts ? 'enabled' : 'disabled'}`, 'info');
+              if (user?.uid) {
+                navigator.clipboard.writeText(user.uid);
+                showToast(`UID ${user.uid} copied to share`, 'success');
+              }
             }}
-            className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-              readReceipts ? 'bg-[#10B981]' : 'bg-[#262626]'
-            }`}
+            className="row w-full text-left justify-between"
           >
-            <div
-              className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                readReceipts ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
+            <div className="flex items-center gap-3">
+              <QrCode className="i c2" aria-hidden />
+              <span className="t-body">Share my ID</span>
+            </div>
+            <ChevronRight className="i i-sm c3" aria-hidden />
+          </button>
+
+          <div className="divider ml-12" />
+
+          <button
+            type="button"
+            onClick={() => showToast('0 pending connection requests', 'info')}
+            className="row w-full text-left justify-between"
+          >
+            <div className="flex items-center gap-3">
+              <Users className="i c2" aria-hidden />
+              <span className="t-body">Connection requests</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="badge">0</span>
+              <ChevronRight className="i i-sm c3" aria-hidden />
+            </div>
+          </button>
+
+          <div className="divider ml-12" />
+
+          <button
+            type="button"
+            onClick={() => setShowSettings(true)}
+            className="row w-full text-left justify-between"
+          >
+            <div className="flex items-center gap-3">
+              <SettingsIcon className="i c2" aria-hidden />
+              <span className="t-body">Settings & Security</span>
+            </div>
+            <ChevronRight className="i i-sm c3" aria-hidden />
+          </button>
+
+          <div className="divider ml-12" />
+
+          <button
+            type="button"
+            onClick={panicLock}
+            className="row w-full text-left justify-between"
+          >
+            <div className="flex items-center gap-3">
+              <Lock className="i c2 text-gold" aria-hidden />
+              <span className="t-body">Lock to 2048 disguise</span>
+            </div>
+            <ChevronRight className="i i-sm c3" aria-hidden />
+          </button>
+
+          <div className="divider ml-12" />
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="row w-full text-left justify-between !text-[#FF8A93] hover:!text-red-300"
+          >
+            <div className="flex items-center gap-3">
+              <LogOut className="i" aria-hidden />
+              <span className="t-body font-semibold">Sign Out</span>
+            </div>
+            <ChevronRight className="i i-sm opacity-60" aria-hidden />
           </button>
         </div>
+      </section>
 
-        {/* Active Device Info */}
-        <div className="p-3 rounded-xl bg-[#171717] border border-[#262626] flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-[#222222] text-zinc-300">
-              <Smartphone className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-white">Current Hardware Node</p>
-              <p className="text-[11px] text-zinc-500">Web Client • End-to-End Encrypted</p>
-            </div>
-          </div>
-          <span className="text-[10px] font-mono text-[#10B981] px-2 py-0.5 rounded bg-emerald-950 border border-[#10B981]/30">
-            ACTIVE
+      {isSuperAdmin && (
+        <div className="card p-3.5 bg-amber-950/20 border-amber-800/40 text-center">
+          <span className="t-cap font-mono text-amber-300 font-bold uppercase tracking-wider">
+            Super Admin Account Clearance Active
           </span>
         </div>
-      </div>
-
-      {/* Account Termination & Session Lock */}
-      <div className="p-4 bg-[#111111] border border-[#262626] rounded-2xl flex flex-col sm:flex-row gap-2.5">
-        <button
-          onClick={panicLock}
-          className="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-[#171717] hover:bg-[#222222] border border-[#262626] rounded-xl text-xs font-semibold text-zinc-300 hover:text-white transition-all active:scale-95"
-        >
-          <Lock className="w-4 h-4 text-amber-400" />
-          <span>Lock to 2048 Camouflage</span>
-        </button>
-
-        <button
-          onClick={handleLogout}
-          className="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-red-950/40 hover:bg-red-950/80 border border-red-800/40 rounded-xl text-xs font-semibold text-red-400 transition-all active:scale-95"
-        >
-          <LogOut className="w-4 h-4" />
-          <span>Sign Out</span>
-        </button>
-      </div>
+      )}
     </div>
   );
 };

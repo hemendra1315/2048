@@ -330,13 +330,13 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-140px)] md:h-[680px] bg-[#0A0A0A] border border-[#262626] rounded-2xl overflow-hidden select-none animate-fade-in">
+    <div className="flex flex-col h-[calc(100vh-140px)] md:h-[680px] bg-[#050505] border border-[#1E2025] rounded-2xl overflow-hidden select-none animate-fade-in">
       {/* Header */}
-      <header className="bg-[#111111] border-b border-[#262626] px-4 py-3 flex items-center justify-between">
+      <header className="bg-[#0C0D0F] border-b border-[#1E2025] px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="p-1.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-300 hover:text-white transition-colors"
+            className="p-1.5 rounded-xl bg-[#131417] hover:bg-[#1B1D21] text-vault-300 hover:text-white transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -344,7 +344,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           <img
             src={partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${partner.uid}`}
             alt="Partner"
-            className="w-10 h-10 rounded-xl bg-[#171717] border border-[#262626] object-cover"
+            className="w-10 h-10 rounded-xl bg-[#131417] border border-[#1E2025] object-cover"
           />
 
           <div>
@@ -355,21 +355,21 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             <div className="flex items-center gap-1 text-[11px] font-mono text-[#10B981]">
               <ShieldCheck className="w-3 h-3" />
               <span>{partner.uid}</span>
-              <span className="text-zinc-500 font-sans ml-1 text-[10px]">• E2E Encrypted</span>
+              <span className="text-vault-500 font-sans ml-1 text-[10px]">• E2E Encrypted</span>
             </div>
           </div>
         </div>
       </header>
 
       {/* Messages Thread */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#0A0A0A]">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#050505]">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center p-6 text-xs text-zinc-500">
-            <div className="w-14 h-14 rounded-2xl bg-[#111111] border border-[#262626] flex items-center justify-center text-[#10B981] mb-3">
+          <div className="h-full flex flex-col items-center justify-center text-center p-6 text-xs text-vault-500">
+            <div className="w-14 h-14 rounded-2xl bg-[#0C0D0F] border border-[#1E2025] flex items-center justify-center text-[#10B981] mb-3">
               <Lock className="w-7 h-7" />
             </div>
             <span className="font-bold text-white text-sm mb-1">Direct Encrypted Channel</span>
-            <p className="max-w-xs text-[11px] text-zinc-400">
+            <p className="max-w-xs text-[11px] text-vault-400">
               Only you and {partner.display_name} have cryptographic clearance to this stream.
             </p>
           </div>
@@ -391,7 +391,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                   className={`max-w-[85%] sm:max-w-[70%] p-3 rounded-2xl text-sm leading-relaxed ${
                     isMe
                       ? 'bg-[#10B981] text-black font-medium rounded-br-xs shadow-md'
-                      : 'bg-[#171717] border border-[#262626] text-white rounded-bl-xs shadow-sm'
+                      : 'bg-[#131417] border border-[#1E2025] text-white rounded-bl-xs shadow-sm'
                   }`}
                 >
                   {isImage ? (
@@ -423,7 +423,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                             }`}
                           />
                         </div>
-                        <span className={`text-[10px] font-mono ${isMe ? 'text-black/70' : 'text-zinc-400'}`}>
+                        <span className={`text-[10px] font-mono ${isMe ? 'text-black/70' : 'text-vault-400'}`}>
                           Voice Note ({voiceDuration})
                         </span>
                       </div>
@@ -434,13 +434,13 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 </div>
 
                 {/* Meta info / Read receipt */}
-                <div className="flex items-center gap-1 text-[10px] text-zinc-500 mt-1 px-1">
+                <div className="flex items-center gap-1 text-[10px] text-vault-500 mt-1 px-1">
                   <span>{formatTimestamp(msg.created_at)}</span>
                   {isMe && (
                     msg.is_read ? (
                       <CheckCheck className="w-3.5 h-3.5 text-[#10B981]" />
                     ) : (
-                      <Check className="w-3.5 h-3.5 text-zinc-500" />
+                      <Check className="w-3.5 h-3.5 text-vault-500" />
                     )
                   )}
                 </div>
@@ -450,7 +450,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         )}
 
         {isTyping && (
-          <div className="flex items-center gap-1.5 bg-[#171717] border border-[#262626] px-3 py-1.5 rounded-full w-20 text-[#10B981] animate-pulse">
+          <div className="flex items-center gap-1.5 bg-[#131417] border border-[#1E2025] px-3 py-1.5 rounded-full w-20 text-[#10B981] animate-pulse">
             <div className="w-1.5 h-1.5 bg-[#10B981] rounded-full animate-bounce" />
             <div className="w-1.5 h-1.5 bg-[#10B981] rounded-full animate-bounce [animation-delay:0.2s]" />
             <div className="w-1.5 h-1.5 bg-[#10B981] rounded-full animate-bounce [animation-delay:0.4s]" />
@@ -461,7 +461,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       </div>
 
       {/* Input Bar */}
-      <div className="bg-[#111111] border-t border-[#262626] p-3 flex items-center gap-2">
+      <div className="bg-[#0C0D0F] border-t border-[#1E2025] p-3 flex items-center gap-2">
         <input
           type="file"
           ref={fileInputRef}
@@ -479,7 +479,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             <div className="flex items-center gap-2">
               <button
                 onClick={() => handleStopVoiceRecord(false)}
-                className="px-2.5 py-1 bg-[#171717] hover:bg-[#222222] text-xs font-semibold rounded-lg text-zinc-300"
+                className="px-2.5 py-1 bg-[#131417] hover:bg-[#1B1D21] text-xs font-semibold rounded-lg text-vault-300"
               >
                 Cancel
               </button>
@@ -496,19 +496,19 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploadingMedia}
-              className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] disabled:opacity-50 text-zinc-400 hover:text-white transition-all active:scale-95"
+              className="p-2.5 rounded-xl bg-[#131417] hover:bg-[#1B1D21] disabled:opacity-50 text-vault-400 hover:text-white transition-all active:scale-95"
               title="Attach Photo"
             >
               {isUploadingMedia ? (
                 <Loader2 className="w-5 h-5 text-emerald-400 animate-spin" />
               ) : (
-                <ImageIcon className="w-5 h-5 text-zinc-300" />
+                <ImageIcon className="w-5 h-5 text-vault-300" />
               )}
             </button>
 
             <button
               onClick={handleStartVoiceRecord}
-              className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-400 hover:text-white transition-all active:scale-95"
+              className="p-2.5 rounded-xl bg-[#131417] hover:bg-[#1B1D21] text-vault-400 hover:text-white transition-all active:scale-95"
               title="Record Voice Note"
             >
               <Mic className="w-5 h-5 text-[#10B981]" />
@@ -520,7 +520,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 value={inputContent}
                 onChange={e => setInputContent(e.target.value)}
                 placeholder={`Message ${partner.display_name}...`}
-                className="flex-1 bg-[#171717] border border-[#262626] focus:border-[#10B981] rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition-colors"
+                className="flex-1 bg-[#131417] border border-[#1E2025] focus:border-[#10B981] rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition-colors"
               />
               <button
                 type="submit"

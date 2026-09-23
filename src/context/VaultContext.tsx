@@ -39,7 +39,7 @@ interface VaultContextType {
   verifyAndUnlock: (secret: string) => Promise<boolean>;
   proceedToSignIn: () => void;
   panicLock: () => void;
-  updatePreferences: (updates: Partial<UserPreferences>) => Promise<void>;
+  updatePreferences: (updates: Partial<UserPreferences>, options?: { silent?: boolean }) => Promise<void>;
   updateSecret: (oldSecret: string, newSecret: string) => Promise<void>;
 }
 
@@ -87,8 +87,8 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     loadPreferences();
   }, [loadPreferences]);
 
-  const openUnlockModal = () => setUnlockModalOpen(true);
-  const closeUnlockModal = () => setUnlockModalOpen(false);
+  const openUnlockModal = useCallback(() => setUnlockModalOpen(true), []);
+  const closeUnlockModal = useCallback(() => setUnlockModalOpen(false), []);
 
   const panicLock = useCallback(() => {
     setIsUnlocked(false);
@@ -169,13 +169,14 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Signed-out visitors have no vault to unlock. The gate takes them to the sign-in screen,
   // where the account password is verified by the vault-auth server function.
-  const proceedToSignIn = () => {
+  const proceedToSignIn = useCallback(() => {
     if (user) return;
     setIsUnlocked(true);
     setUnlockModalOpen(false);
-  };
+  }, [user]);
 
-  const updatePreferences = async (updates: Partial<UserPreferences>) => {
+  // `silent` is used from the game screen: choosing a game must not show app-level feedback there.
+  const updatePreferences = async (updates: Partial<UserPreferences>, options?: { silent?: boolean }) => {
     if (!user) return;
     try {
       if (isSupabaseConfigured()) {
@@ -188,10 +189,11 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         mockBackend.updateUserPreferences(user.id, updates);
       }
       setPreferences(prev => ({ ...prev, ...updates }));
-      showToast('App customization saved', 'success');
+      if (!options?.silent) showToast('Settings saved', 'success');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Preferences update failed';
-      showToast(msg, 'error');
+      if (options?.silent) console.warn('Preferences update failed');
+      else showToast(msg, 'error');
     }
   };
 

@@ -7,7 +7,7 @@ import { mockBackend } from '../lib/mockBackend';
 export const COVER_GAMES: CoverGameMeta[] = [
   {
     id: 'game_2048',
-    name: '2048 Vault',
+    name: '2048',
     tagline: 'Join the numbers and reach 2048!',
     icon: 'Grid',
     color: 'from-amber-500 to-orange-600',
@@ -79,7 +79,7 @@ export const COVER_GAMES: CoverGameMeta[] = [
   },
   {
     id: 'flappy_bird',
-    name: 'Flappy Stealth',
+    name: 'Flappy Bird',
     tagline: 'Tap to flap through high-frequency obstacles',
     icon: 'Feather',
     color: 'from-yellow-400 to-orange-500',
@@ -131,7 +131,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const setCurrentGame = (game: CoverGameType) => {
     setCurrentGameState(game);
-    updatePreferences({ selected_game: game });
+    void updatePreferences({ selected_game: game }, { silent: true });
   };
 
   const getHighScore = (game: CoverGameType): number => {

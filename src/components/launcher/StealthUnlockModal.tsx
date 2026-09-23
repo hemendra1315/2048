@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Lock, X, ArrowRight, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { Lock, X, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useVault } from '../../context/VaultContext';
 import { useAuth } from '../../context/AuthContext';
 
@@ -13,19 +13,31 @@ export const StealthUnlockModal: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (unlockModalOpen) {
-      setPassword('');
-      setShowPassword(false);
-      setErrorShake(false);
-      setTimeout(() => inputRef.current?.focus(), 50);
+    if (!unlockModalOpen) return;
+    // Signed out: there is nothing to unlock, so go straight to the sign-in screen.
+    if (!user) {
+      proceedToSignIn();
+      return;
     }
-  }, [unlockModalOpen]);
+    setPassword('');
+    setShowPassword(false);
+    setErrorShake(false);
+    const t = window.setTimeout(() => inputRef.current?.focus(), 50);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeUnlockModal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [unlockModalOpen, user, proceedToSignIn, closeUnlockModal]);
 
-  if (!unlockModalOpen) return null;
+  if (!unlockModalOpen || !user) return null;
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !password || loading) return;
+    if (!password || loading) return;
     setLoading(true);
     const success = await verifyAndUnlock(password);
     setLoading(false);
@@ -38,78 +50,52 @@ export const StealthUnlockModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-lg flex items-center justify-center p-4 animate-fade-in">
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/70" onClick={closeUnlockModal} aria-hidden="true" />
       <form
         onSubmit={handleVerify}
-        className={`bg-vault-900 border border-vault-700/80 rounded-3xl w-full max-w-xs p-6 flex flex-col items-center shadow-2xl relative transition-transform ${
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="unlock-title"
+        className={`sheet anim-sheet absolute left-0 right-0 bottom-0 mx-auto max-w-md px-5 pt-2.5 pb-7 flex flex-col gap-4 transition-transform ${
           errorShake ? 'translate-x-2' : ''
         }`}
       >
-        <button
-          type="button"
-          onClick={closeUnlockModal}
-          className="absolute top-4 right-4 p-1 rounded-full text-vault-400 hover:text-white hover:bg-vault-800 transition-colors"
-        >
-          <X className="w-5 h-5" />
-        </button>
-
-        {/* Security Shield Icon */}
-        <div className="w-14 h-14 rounded-2xl bg-vault-800/80 border border-vault-700/60 flex items-center justify-center text-arcade-gold mb-3 shadow-inner">
-          <ShieldCheck className="w-7 h-7" />
-        </div>
-
-        <h3 className="text-base font-bold text-white mb-0.5">Security Clearance</h3>
-        <p className="text-xs text-vault-400 mb-5 text-center">
-          {user ? 'Enter your vault password' : 'Sign in to continue'}
-        </p>
-
-        {!user && (
-          <button
-            type="button"
-            onClick={proceedToSignIn}
-            className="w-full bg-arcade-gold hover:bg-amber-400 active:scale-95 text-vault-950 font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 transition-all shadow-md shadow-amber-500/20"
-          >
-            <ArrowRight className="w-4 h-4 stroke-[2.5]" />
-            <span>Continue</span>
-          </button>
-        )}
-
-        {user && (
-        <>
-
-        {/* Password Field */}
-        <div className="relative w-full mb-4">
-          <Lock className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            ref={inputRef}
-            type={showPassword ? 'text' : 'password'}
-            autoComplete="current-password"
-            maxLength={72}
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="Password"
-            className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-10 pr-10 py-2.5 text-sm text-white placeholder-vault-600 outline-none transition-colors"
-          />
-          <button
-            type="button"
-            onClick={() => setShowPassword(s => !s)}
-            aria-label={showPassword ? 'Hide password' : 'Show password'}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-vault-500 hover:text-vault-200 transition-colors"
-          >
-            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+        <div className="w-9 h-1 rounded-full bg-vault-700 self-center" aria-hidden="true" />
+        <div className="flex items-center justify-between">
+          <h2 id="unlock-title" className="t-h2 m-0">Enter password</h2>
+          <button type="button" className="ib" aria-label="Close" onClick={closeUnlockModal}>
+            <X className="i" aria-hidden />
           </button>
         </div>
-
-        <button
-          type="submit"
-          disabled={loading || password.length === 0}
-          className="w-full bg-arcade-gold hover:bg-amber-400 disabled:opacity-40 active:scale-95 text-vault-950 font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 transition-all shadow-md shadow-amber-500/20"
-        >
-          {loading ? <Lock className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4 stroke-[2.5]" />}
-          <span>Unlock</span>
+        <label className="field">
+          <span className="lab">Password</span>
+          <span className="inp">
+            <Lock className="i i-sm c3" aria-hidden />
+            <input
+              ref={inputRef}
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              maxLength={72}
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="Password"
+              className="flex-1 min-w-0 bg-transparent border-0 outline-none text-vault-50 text-base"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(v => !v)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              className="ib -mr-3"
+            >
+              {showPassword ? <EyeOff className="i" aria-hidden /> : <Eye className="i" aria-hidden />}
+            </button>
+          </span>
+        </label>
+        <button type="submit" disabled={loading || password.length === 0} className="btn btn-p btn-block" aria-busy={loading}>
+          {loading ? <Loader2 className="i i-sm animate-spin" aria-hidden /> : null}
+          {loading ? 'Checking…' : 'Unlock'}
         </button>
-        </>
-        )}
       </form>
     </div>
   );

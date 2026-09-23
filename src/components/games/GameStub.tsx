@@ -57,8 +57,8 @@ export const GameStub: React.FC<GameStubProps> = ({ gameId }) => {
           <Sparkles className="w-8 h-8 text-white" />
         </div>
 
-        <h3 className="text-xl font-bold text-white mb-1">{meta?.name || 'Cover Game'}</h3>
-        <p className="text-xs text-vault-400 max-w-xs mb-5">{meta?.tagline || 'Stealth Cover Game Engine'}</p>
+        <h3 className="text-xl font-bold text-white mb-1">{meta?.name || 'Game'}</h3>
+        <p className="text-xs text-vault-400 max-w-xs mb-5">{meta?.tagline || ''}</p>
 
         <button
           onClick={simulatePlay}
@@ -69,7 +69,7 @@ export const GameStub: React.FC<GameStubProps> = ({ gameId }) => {
         </button>
 
         <div className="mt-4 text-[11px] text-vault-500 font-mono">
-          Engine Mode: Interactive Cover Simulation
+          Coming soon
         </div>
       </div>
     </div>
