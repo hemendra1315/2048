@@ -51,6 +51,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const typingHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSentAtRef = useRef(0);
 
   const STICKERS = ['😂', '❤️', '🔥', '👍', '🎉', '😢', '😮', '🙏'];
 
@@ -129,9 +132,19 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             setMessages(prev => prev.map(m => (m.id === updatedMsg.id ? updatedMsg : m)));
           }
         )
+        .on('broadcast', { event: 'typing' }, ({ payload }) => {
+          if (payload?.userId === user?.id) return;
+          setIsTyping(true);
+          if (typingHideTimeoutRef.current) clearTimeout(typingHideTimeoutRef.current);
+          typingHideTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+        })
         .subscribe();
 
+      channelRef.current = channel;
+
       return () => {
+        if (typingHideTimeoutRef.current) clearTimeout(typingHideTimeoutRef.current);
+        channelRef.current = null;
         supabase.removeChannel(channel);
       };
     }
@@ -202,6 +215,14 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       console.error('Send message error:', err);
       showToast('Message send failed', 'error');
     }
+  };
+
+  const broadcastTyping = () => {
+    if (!isSupabaseConfigured() || !user || !channelRef.current) return;
+    const now = Date.now();
+    if (now - lastTypingSentAtRef.current < 2000) return;
+    lastTypingSentAtRef.current = now;
+    channelRef.current.send({ type: 'broadcast', event: 'typing', payload: { userId: user.id } });
   };
 
   const handleSendSticker = (emoji: string) => {
@@ -547,7 +568,10 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               <input
                 type="text"
                 value={inputContent}
-                onChange={e => setInputContent(e.target.value)}
+                onChange={e => {
+                  setInputContent(e.target.value);
+                  broadcastTyping();
+                }}
                 placeholder={`Message ${partner.display_name}...`}
                 className="w-full bg-[#171717] border border-[#262626] focus:border-[#10B981] rounded-xl pl-4 pr-10 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition-colors"
               />
