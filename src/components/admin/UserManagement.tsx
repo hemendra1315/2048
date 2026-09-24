@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Ban, ShieldAlert, Shield, RefreshCw, Eye } from 'lucide-react';
+import { Search, X, Ban, ShieldAlert, Shield, RefreshCw, Eye } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { listProfiles, getConnectionCounts, setUserStatus } from '../../lib/adminApi';
@@ -12,6 +12,7 @@ export const UserManagement: React.FC = () => {
   const { showToast } = useToast();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED' | 'BANNED'>('ALL');
   const [selectedUserForDetail, setSelectedUserForDetail] = useState<UserProfile | null>(null);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
@@ -80,25 +81,41 @@ export const UserManagement: React.FC = () => {
   return (
     <div className="space-y-4 pb-20 animate-fade-in">
       {/* Header */}
-      <div>
-        <h2 className="text-base font-bold text-white">Super Admin → Users Registry</h2>
-        <p className="text-xs text-vault-400">
-          Inspect full user matrix: profiles, private chats, media galleries, and connections
-        </p>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-base font-bold text-white">Users</h2>
+        <button
+          onClick={() => {
+            if (searchOpen && !searchQuery) {
+              setSearchOpen(false);
+            } else if (searchOpen) {
+              setSearchQuery('');
+              setSearchOpen(false);
+            } else {
+              setSearchOpen(true);
+            }
+          }}
+          className="p-1.5 rounded-lg text-vault-400 hover:text-white hover:bg-vault-900 transition-colors"
+          title={searchOpen ? 'Close search' : 'Search users'}
+        >
+          {searchOpen ? <X className="w-4 h-4" /> : <Search className="w-4 h-4" />}
+        </button>
       </div>
 
       {/* Search & Status Filters */}
       <div className="space-y-2">
-        <div className="relative">
-          <Search className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search by Username, UID, or Display Name..."
-            className="w-full bg-vault-900 border border-vault-800 focus:border-amber-500 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-vault-600 outline-none transition-colors"
-          />
-        </div>
+        {searchOpen && (
+          <div className="relative animate-fade-in">
+            <Search className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              autoFocus
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search by username, UID, or name..."
+              className="w-full bg-vault-900 border border-vault-800 focus:border-amber-500 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-vault-600 outline-none transition-colors"
+            />
+          </div>
+        )}
 
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
           {(['ALL', 'ACTIVE', 'SUSPENDED', 'BANNED'] as const).map(filter => (
