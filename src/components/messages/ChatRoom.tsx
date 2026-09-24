@@ -1060,7 +1060,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               <h3 className="t-body font-bold text-white m-0 flex items-center gap-2"><Timer className="w-4 h-4 text-emerald" aria-hidden /> Disappearing messages</h3>
               <p className="text-xs text-vault-400 mt-1 mb-0">
                 New messages in this chat disappear for both of you after the time you pick. {partner.display_name} will see that you changed it.
-                The app's moderators can still review disappeared messages for safety reasons.
+                The app's moderators can still review disappeared and deleted messages and photos from this chat for safety reasons.
               </p>
             </div>
             {([null, 86400, 604800] as (number | null)[]).map(opt => (
@@ -1636,6 +1636,9 @@ function MessageActionSheet({
                   <Trash2 className="w-4 h-4" aria-hidden /> Delete for everyone
                 </button>
               )
+            )}
+            {canDelete && msg.expires_at && (
+              <p className="px-4 pt-1 text-xs text-vault-500">This chat has disappearing messages on. Moderators can still see messages deleted here.</p>
             )}
             {isMe && !deleted && !withinWindow && (
               <p className="px-4 pt-1 text-xs text-vault-500">Edit and delete are available for 15 minutes after sending.</p>

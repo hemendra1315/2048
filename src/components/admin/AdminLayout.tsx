@@ -9,6 +9,7 @@ import {
   Search,
   Command,
   Shield,
+  Timer,
 } from 'lucide-react';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { LiveActivityFeed } from './LiveActivityFeed';
@@ -17,9 +18,10 @@ import { User360View } from './User360View';
 import { ConversationViewer } from './ConversationViewer';
 import { MediaOversight } from './MediaOversight';
 import { ReportsView } from './ReportsView';
+import { DisappearingArchive } from './DisappearingArchive';
 import { getSafetyReports } from '../../lib/safetyApi';
 
-export type AdminTab = 'activity' | 'users' | 'conversations' | 'media' | 'reports';
+export type AdminTab = 'activity' | 'users' | 'conversations' | 'media' | 'disappearing' | 'reports';
 
 interface AdminLayoutProps {
   onReturnToUserMode: () => void;
@@ -105,6 +107,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
     { id: 'users' as AdminTab, label: 'User 360', icon: Users },
     { id: 'conversations' as AdminTab, label: 'Conversations', icon: MessageSquare },
     { id: 'media' as AdminTab, label: 'Media Oversight', icon: Image },
+    { id: 'disappearing' as AdminTab, label: 'Disappearing', icon: Timer },
     {
       id: 'reports' as AdminTab,
       label: 'Reports Queue',
@@ -247,6 +250,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
 
         {activeTab === 'media' && (
           <MediaOversight
+            onNavigateToConversation={handleNavigateToConversation}
+            onNavigateToUser={handleNavigateToUser}
+          />
+        )}
+
+        {activeTab === 'disappearing' && (
+          <DisappearingArchive
             onNavigateToConversation={handleNavigateToConversation}
             onNavigateToUser={handleNavigateToUser}
           />
