@@ -231,7 +231,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           .maybeSingle();
 
         if (error || !rawProfile) {
-          alert(`No sovereign user node found with UID/Username "${cleanUid}"`);
+          alert(`No user found with UID/Username "${cleanUid}"`);
           return;
         }
 
@@ -280,7 +280,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         setNewChatModalOpen(false);
         setNewChatUidInput('');
       } else {
-        alert(`No sovereign user node found with UID "${cleanUid}"`);
+        alert(`No user found with UID "${cleanUid}"`);
       }
     }
   };
@@ -409,7 +409,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     <div className="animate-fade-in w-full h-full">
       {isDesktop ? (
         /* Desktop 3-Column Balanced Layout (Nav/Chats 260px | Dossier 350px | Active Chat Fluid min-720px) */
-        <div className="flex h-[calc(100vh-100px)] w-full overflow-hidden rounded-2xl border border-vault-800 bg-vault-950 shadow-2xl">
+        <div className="flex h-full w-full overflow-hidden rounded-2xl border border-vault-800 bg-vault-950 shadow-2xl">
           {/* Left Column: Conversations List (260px fixed) */}
           <aside className="w-[260px] shrink-0 h-full overflow-hidden flex flex-col bg-vault-950 p-3 border-r border-vault-800">
             {ConversationListView}
@@ -437,7 +437,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 </div>
                 <h3 className="t-h2 m-0 text-white font-bold">Select a conversation</h3>
                 <p className="t-sm c2 max-w-sm m-0">
-                  Choose a chat on the left or connect with a peer by their sovereign UID.
+                  Choose a chat on the left or start a new conversation using a contact UID.
                 </p>
               </div>
             )}
@@ -445,7 +445,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         </div>
       ) : (
         /* Mobile Single View (< 1024px) */
-        <div className="pb-20">{activeChat ?? ConversationListView}</div>
+        <div className="h-full min-h-0 flex flex-col">{activeChat ?? ConversationListView}</div>
       )}
 
       {/* Direct UID Connect Modal */}
@@ -455,7 +455,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-5 h-5 text-emerald" />
-                <h3 className="text-sm font-bold text-white m-0">Direct Sovereign Connect</h3>
+                <h3 className="text-sm font-bold text-white m-0">Direct Connect</h3>
               </div>
               <button
                 type="button"

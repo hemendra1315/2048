@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "313417082752",
+    "project_id": "project-5596271546931697413",
+    "storage_bucket": "project-5596271546931697413.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:313417082752:android:5a976aefb7a9d9247b0365",
+        "android_client_info": {
+          "package_name": "com.hemu.games"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBVMiotk-HuoOo1krKbZxEBoaXr98PUsWE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

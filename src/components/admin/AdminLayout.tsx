@@ -1,86 +1,275 @@
-import React, { useState } from 'react';
-import { ShieldAlert, LayoutDashboard, Users, MessageSquare, Image, Activity, ArrowLeft } from 'lucide-react';
-import { AdminTab } from '../../types';
-import { AdminDashboard } from './AdminDashboard';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  ShieldAlert,
+  Users,
+  MessageSquare,
+  Image,
+  Activity,
+  ArrowLeft,
+  Search,
+  Command,
+  Shield,
+} from 'lucide-react';
+import { GlobalSearchModal } from './GlobalSearchModal';
+import { LiveActivityFeed } from './LiveActivityFeed';
 import { UserManagement } from './UserManagement';
-import { MessageOversight } from './MessageOversight';
-import { GalleryOversight } from './GalleryOversight';
-import { AuditLogViewer } from './AuditLogViewer';
+import { User360View } from './User360View';
+import { ConversationViewer } from './ConversationViewer';
+import { MediaOversight } from './MediaOversight';
+import { ReportsView } from './ReportsView';
+import { getSafetyReports } from '../../lib/safetyApi';
+
+export type AdminTab = 'activity' | 'users' | 'conversations' | 'media' | 'reports';
 
 interface AdminLayoutProps {
   onReturnToUserMode: () => void;
 }
 
 export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) => {
-  const [currentTab, setCurrentTab] = useState<AdminTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<AdminTab>('activity');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
-  const tabs = [
-    { id: 'dashboard' as AdminTab, label: 'Overview', icon: LayoutDashboard },
-    { id: 'users' as AdminTab, label: 'Users', icon: Users },
-    { id: 'messages' as AdminTab, label: 'Chats', icon: MessageSquare },
-    { id: 'gallery' as AdminTab, label: 'Media', icon: Image },
-    { id: 'audit_log' as AdminTab, label: 'Audit', icon: Activity },
+  // Deep-linking state
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedUserTab, setSelectedUserTab] = useState<
+    'overview' | 'chats' | 'media' | 'reports' | 'activity' | 'notes'
+  >('overview');
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+
+  // Pending reports count badge
+  const [pendingReportsCount, setPendingReportsCount] = useState<number>(0);
+
+  useEffect(() => {
+    const fetchPendingCount = async () => {
+      try {
+        const reports = await getSafetyReports();
+        const pending = reports.filter(r => r.status === 'pending').length;
+        setPendingReportsCount(pending);
+      } catch (err) {
+        console.error('Error fetching pending reports count:', err);
+      }
+    };
+    fetchPendingCount();
+    const interval = setInterval(fetchPendingCount, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Global Ctrl+K / Cmd+K listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Navigation handlers
+  const handleNavigateToUser = useCallback(
+    (userId: string, tab: 'overview' | 'chats' | 'media' | 'reports' | 'activity' | 'notes' = 'overview') => {
+      setSelectedUserId(userId);
+      setSelectedUserTab(tab);
+      setActiveTab('users');
+    },
+    []
+  );
+
+  const handleNavigateToConversation = useCallback(
+    (conversationId: string, highlightMsgId?: string) => {
+      setSelectedConversationId(conversationId);
+      setHighlightMessageId(highlightMsgId || null);
+      setActiveTab('conversations');
+    },
+    []
+  );
+
+  const handleNavigateToReport = useCallback((reportId: string) => {
+    setSelectedReportId(reportId);
+    setActiveTab('reports');
+  }, []);
+
+  const handleNavigateToMedia = useCallback((conversationId?: string, messageId?: string) => {
+    if (conversationId) {
+      handleNavigateToConversation(conversationId, messageId);
+    } else {
+      setActiveTab('media');
+    }
+  }, [handleNavigateToConversation]);
+
+  const navTabs = [
+    { id: 'activity' as AdminTab, label: 'Live Activity', icon: Activity },
+    { id: 'users' as AdminTab, label: 'User 360', icon: Users },
+    { id: 'conversations' as AdminTab, label: 'Conversations', icon: MessageSquare },
+    { id: 'media' as AdminTab, label: 'Media Oversight', icon: Image },
+    {
+      id: 'reports' as AdminTab,
+      label: 'Reports Queue',
+      icon: ShieldAlert,
+      badge: pendingReportsCount > 0 ? pendingReportsCount : null,
+    },
   ];
 
   return (
-    <div className="min-h-screen bg-vault-950 text-vault-100 flex flex-col max-w-md mx-auto">
-      {/* Admin Top Header */}
-      <header className="sticky top-0 z-30 bg-amber-950/90 backdrop-blur-md border-b border-amber-600/40 px-4 py-3 flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-2.5">
+    <div className="min-h-screen bg-[#050505] text-vault-100 flex flex-col w-full selection:bg-arcade-gold selection:text-vault-950 font-sans">
+      {/* Top Header Bar */}
+      <header className="sticky top-0 z-40 bg-vault-950/90 backdrop-blur-md border-b border-vault-800 px-4 py-2.5 shadow-lg">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+          {/* Brand & Left Actions */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onReturnToUserMode}
+              className="p-2 rounded-xl bg-vault-900 hover:bg-vault-800 text-vault-300 hover:text-white border border-vault-800 transition-colors"
+              title="Return to User Mode"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+
+            <div>
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-arcade-gold" />
+                <h1 className="text-sm font-bold text-white tracking-wide flex items-center gap-1.5">
+                  <span>Trust & Safety Hub</span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 bg-amber-950/80 text-amber-300 border border-amber-600/40 rounded">
+                    STAFF
+                  </span>
+                </h1>
+              </div>
+              <p className="text-[10px] text-vault-400 font-mono hidden sm:block">
+                Universal Oversight & Moderation Workspace
+              </p>
+            </div>
+          </div>
+
+          {/* Center Universal Global Search Button */}
+          <button
+            onClick={() => setIsSearchOpen(true)}
+            className="flex-1 max-w-md bg-vault-900/90 hover:bg-vault-850 border border-vault-800 hover:border-arcade-gold/50 rounded-2xl px-3.5 py-1.5 flex items-center justify-between text-xs text-vault-400 transition-all shadow-inner group"
+          >
+            <div className="flex items-center gap-2">
+              <Search className="w-3.5 h-3.5 text-vault-500 group-hover:text-arcade-gold transition-colors" />
+              <span className="truncate">Search users, chats, media, reports...</span>
+            </div>
+            <div className="hidden sm:flex items-center gap-0.5 text-[10px] font-mono bg-vault-950 border border-vault-700/80 px-1.5 py-0.5 rounded text-vault-300">
+              <Command className="w-2.5 h-2.5" />
+              <span>K</span>
+            </div>
+          </button>
+
+          {/* Right Exit Button */}
           <button
             onClick={onReturnToUserMode}
-            className="p-1.5 rounded-xl bg-amber-900/80 text-amber-200 hover:text-white transition-colors"
-            title="Return to User Mode"
+            className="px-3 py-1.5 rounded-xl bg-vault-900 hover:bg-vault-800 border border-vault-800 text-xs font-bold text-vault-300 hover:text-white transition-colors whitespace-nowrap"
           >
-            <ArrowLeft className="w-5 h-5" />
+            Exit Staff Mode
           </button>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <ShieldAlert className="w-4 h-4 text-amber-400" />
-              <h2 className="text-sm font-bold text-white leading-tight">Super Admin Hub</h2>
-            </div>
-            <span className="text-[10px] text-amber-300/80 font-mono">Central Oversight Active</span>
-          </div>
         </div>
-
-        <button
-          onClick={onReturnToUserMode}
-          className="text-xs font-bold text-amber-300 hover:text-white underline"
-        >
-          User Mode
-        </button>
       </header>
 
-      {/* Admin Subnav */}
-      <div className="bg-vault-900 border-b border-vault-800 px-2 py-1.5 flex justify-between overflow-x-auto">
-        {tabs.map(t => {
-          const Icon = t.icon;
-          const isActive = currentTab === t.id;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setCurrentTab(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 ${
-                isActive
-                  ? 'bg-amber-950 text-amber-300 border border-amber-600/50 shadow-sm'
-                  : 'text-vault-400 hover:text-white'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              <span>{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* Sub Navigation Bar */}
+      <nav className="bg-vault-900/60 border-b border-vault-800/80 px-4 py-1.5 sticky top-[53px] z-30 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-1 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1">
+            {navTabs.map(t => {
+              const Icon = t.icon;
+              const isActive = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    setActiveTab(t.id);
+                    if (t.id === 'users' && !selectedUserId) {
+                      setSelectedUserId(null);
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 relative ${
+                    isActive
+                      ? 'bg-arcade-gold text-vault-950 shadow-md ring-1 ring-arcade-gold/30'
+                      : 'text-vault-400 hover:text-white hover:bg-vault-850'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{t.label}</span>
+                  {t.badge && (
+                    <span
+                      className={`ml-1 px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold ${
+                        isActive
+                          ? 'bg-rose-950 text-rose-300'
+                          : 'bg-rose-600 text-white animate-pulse'
+                      }`}
+                    >
+                      {t.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </nav>
 
-      {/* Admin View Body */}
-      <main className="flex-1 p-4">
-        {currentTab === 'dashboard' && <AdminDashboard onSelectTab={setCurrentTab} />}
-        {currentTab === 'users' && <UserManagement />}
-        {currentTab === 'messages' && <MessageOversight />}
-        {currentTab === 'gallery' && <GalleryOversight />}
-        {currentTab === 'audit_log' && <AuditLogViewer />}
+      {/* Main Workspace Body */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6">
+        {activeTab === 'activity' && (
+          <LiveActivityFeed
+            onNavigateToUser={handleNavigateToUser}
+            onNavigateToConversation={handleNavigateToConversation}
+            onNavigateToReport={handleNavigateToReport}
+          />
+        )}
+
+        {activeTab === 'users' && (
+          <>
+            {selectedUserId ? (
+              <User360View
+                userId={selectedUserId}
+                initialTab={selectedUserTab}
+                onBack={() => setSelectedUserId(null)}
+                onNavigateToConversation={handleNavigateToConversation}
+                onNavigateToReport={handleNavigateToReport}
+              />
+            ) : (
+              <UserManagement onSelectUser={handleNavigateToUser} />
+            )}
+          </>
+        )}
+
+        {activeTab === 'conversations' && (
+          <ConversationViewer
+            initialConversationId={selectedConversationId}
+            highlightMessageId={highlightMessageId}
+            onNavigateToUser={handleNavigateToUser}
+          />
+        )}
+
+        {activeTab === 'media' && (
+          <MediaOversight
+            onNavigateToConversation={handleNavigateToConversation}
+            onNavigateToUser={handleNavigateToUser}
+          />
+        )}
+
+        {activeTab === 'reports' && (
+          <ReportsView
+            initialReportId={selectedReportId}
+            onNavigateToUser={handleNavigateToUser}
+            onNavigateToConversation={handleNavigateToConversation}
+          />
+        )}
       </main>
+
+      {/* Universal Global Search Modal (Ctrl+K) */}
+      <GlobalSearchModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        onNavigateToUser={handleNavigateToUser}
+        onNavigateToConversation={handleNavigateToConversation}
+        onNavigateToReport={handleNavigateToReport}
+        onNavigateToMedia={handleNavigateToMedia}
+      />
     </div>
   );
 };

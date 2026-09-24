@@ -108,3 +108,25 @@ export interface CoverGameMeta {
 
 export type SocialTab = 'chats' | 'camera' | 'gallery' | 'vault' | 'profile' | 'messages' | 'home' | 'connections' | 'settings';
 export type AdminTab = 'dashboard' | 'users' | 'messages' | 'gallery' | 'audit_log';
+
+export type NotificationMode = 'default' | 'custom' | 'silent';
+
+export interface ContactNotificationPreference {
+  id?: string;
+  owner_id: string;
+  contact_id: string;
+  notification_mode: NotificationMode;
+  custom_phrase: string | null;
+  custom_sound: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PushSubscriptionItem {
+  id?: string;
+  user_id: string;
+  fcm_token: string;
+  device_info?: string;
+  created_at?: string;
+  updated_at?: string;
+}

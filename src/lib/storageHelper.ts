@@ -75,6 +75,8 @@ export async function uploadChatMedia(
 
 /**
  * Uploads a photo to the private 'gallery' Supabase storage bucket.
+ * `publicUrl` is kept for the image_url column only: the bucket is private, so screens must
+ * display a signed URL created from `filePath` (see lib/mediaUrls.ts).
  */
 export async function uploadGalleryMedia(
   media: File | Blob | string,
@@ -129,4 +131,36 @@ export async function uploadGalleryMedia(
 
   const { data } = supabase.storage.from('gallery').getPublicUrl(filePath);
   return { publicUrl: data.publicUrl, filePath };
+}
+
+/**
+ * Uploads a cropped profile photo to the `avatars` bucket (public read, owner-only write:
+ * the first folder must be the user's id) and returns the URL to store on the profile.
+ * Every upload gets a new file name, so devices never keep showing a cached old photo.
+ */
+export async function uploadAvatarImage(image: Blob, userId: string): Promise<string> {
+  if (!isSupabaseConfigured()) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Could not read the image.')));
+      reader.onerror = () => reject(reader.error ?? new Error('Could not read the image.'));
+      reader.readAsDataURL(image);
+    });
+  }
+
+  const contentType = image.type === 'image/png' || image.type === 'image/webp' ? image.type : 'image/jpeg';
+  const ext = contentType === 'image/png' ? 'png' : contentType === 'image/webp' ? 'webp' : 'jpg';
+  const filePath = `${userId}/avatar_${Date.now()}.${ext}`;
+
+  const { error } = await supabase.storage.from('avatars').upload(filePath, image, {
+    contentType,
+    cacheControl: '31536000',
+    upsert: false,
+  });
+  if (error) {
+    console.error('[storage] Avatar upload failed:', error.message);
+    throw error;
+  }
+
+  return supabase.storage.from('avatars').getPublicUrl(filePath).data.publicUrl;
 }

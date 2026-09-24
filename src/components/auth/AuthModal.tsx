@@ -23,7 +23,7 @@ import { isSupabaseConfigured } from '../../lib/supabase';
 // Demo identities exist only in the offline mock backend used for local UI development.
 // They are never rendered in a production build or when a real backend is configured.
 // `import.meta.env.DEV` is replaced with `false` at build time, so this UI is stripped from production bundles.
-const SHOW_DEMO_ACCOUNTS = import.meta.env.DEV && !isSupabaseConfigured();
+const isShowDemoAccounts = (): boolean => import.meta.env.DEV && !isSupabaseConfigured();
 
 type AuthMode = 'login' | 'onboarding' | 'recovery';
 type OnboardingStep = 'username' | 'password' | 'biometric' | 'recovery_code';
@@ -108,7 +108,7 @@ export const AuthModal: React.FC = () => {
   // Quick Demo Account switcher
   const handleQuickDemo = async (role: 'user' | 'admin' | 'friend') => {
     // The mock backend ignores passwords; this path does not exist outside local development.
-    if (!SHOW_DEMO_ACCOUNTS) return;
+    if (!isShowDemoAccounts()) return;
     const demoUser = role === 'admin' ? 'admin' : role === 'friend' ? 'elena' : 'alex';
     setIdentifier(demoUser);
     try {
@@ -240,7 +240,7 @@ export const AuthModal: React.FC = () => {
             </div>
 
             {/* Quick Demo Switcher (local development with the mock backend only) */}
-            {import.meta.env.DEV && SHOW_DEMO_ACCOUNTS && (
+            {import.meta.env.DEV && isShowDemoAccounts() && (
               <div className="card p-3 mt-5 flex flex-col gap-2" role="group" aria-label="Demo accounts">
                 <span className="t-over flex items-center gap-1"><Sparkles className="w-3 h-3" aria-hidden /> Demo accounts</span>
                 <div className="grid grid-cols-3 gap-1.5">

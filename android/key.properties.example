@@ -1,0 +1,9 @@
+# Android Keystore Signing Configuration Template
+# Copy this file to 'key.properties' in this directory and populate with your keystore credentials.
+# For local development, 'games.keystore' with alias 'games' and password 'games123' can be generated via:
+# keytool -genkey -v -keystore app/games.keystore -alias games -keyalg RSA -keysize 2048 -validity 10000
+
+storeFile=games.keystore
+storePassword=your_keystore_password
+keyAlias=your_key_alias
+keyPassword=your_key_password

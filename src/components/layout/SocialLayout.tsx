@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import {
   MessageSquare,
   Camera,
@@ -14,12 +14,30 @@ import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { MobileHeader } from './MobileHeader';
 import { MobileNavbar } from './MobileNavbar';
-import { MessagesView } from '../messages/MessagesView';
-import { CameraView } from '../camera/CameraView';
-import { GalleryView } from '../gallery/GalleryView';
-import { VaultView } from '../vault/VaultView';
-import { ProfileView } from '../profile/ProfileView';
 import { PanicButton } from '../launcher/PanicButton';
+
+// Code-split subviews
+const MessagesView = React.lazy(() =>
+  import('../messages/MessagesView').then(m => ({ default: m.MessagesView }))
+);
+const CameraView = React.lazy(() =>
+  import('../camera/CameraView').then(m => ({ default: m.CameraView }))
+);
+const GalleryView = React.lazy(() =>
+  import('../gallery/GalleryView').then(m => ({ default: m.GalleryView }))
+);
+const VaultView = React.lazy(() =>
+  import('../vault/VaultView').then(m => ({ default: m.VaultView }))
+);
+const ProfileView = React.lazy(() =>
+  import('../profile/ProfileView').then(m => ({ default: m.ProfileView }))
+);
+
+const TabSkeleton: React.FC = () => (
+  <div className="flex-1 w-full h-full flex items-center justify-center p-8">
+    <div className="w-7 h-7 rounded-full border-2 border-vault-700 border-t-emerald animate-spin" />
+  </div>
+);
 
 interface SocialLayoutProps {
   onAdminToggle?: () => void;
@@ -75,56 +93,68 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
 
   useEffect(() => {
     void refreshStats();
-  }, [refreshStats, currentTab]);
+    const interval = setInterval(refreshStats, 8000);
+    return () => clearInterval(interval);
+  }, [refreshStats]);
 
-  const copyUid = () => {
-    if (user?.uid) {
-      navigator.clipboard.writeText(user.uid);
-      showToast(`UID ${user.uid} copied to clipboard`, 'success');
+  const copyUid = async () => {
+    if (!user?.uid) return;
+    try {
+      await navigator.clipboard.writeText(user.uid);
+      showToast('UID copied to clipboard', 'success');
+    } catch {
+      showToast(user.uid, 'info');
     }
   };
 
   const navItems = [
     { id: 'chats' as SocialTab, label: 'Chats', icon: MessageSquare, badge: stats.unreadCount },
     { id: 'camera' as SocialTab, label: 'Camera', icon: Camera },
-    { id: 'gallery' as SocialTab, label: 'Gallery', icon: ImageIcon },
+    { id: 'gallery' as SocialTab, label: 'Gallery', icon: ImageIcon, badge: stats.galleryCount },
     { id: 'vault' as SocialTab, label: 'Vault', icon: Shield },
     { id: 'profile' as SocialTab, label: 'Profile', icon: User },
   ];
 
   return (
-    <div className="min-h-screen bg-vault-950 text-vault-50 flex flex-col justify-between">
+    <div className="h-screen w-screen bg-vault-950 text-vault-100 flex flex-col select-none overflow-hidden font-sans">
       {/* Mobile Top Header (< 1024px) */}
-      <div className="lg:hidden">
-        <MobileHeader title={navItems.find(n => n.id === currentTab)?.label} onAdminToggle={onAdminToggle} />
-      </div>
+      <MobileHeader
+        title={navItems.find(n => n.id === currentTab)?.label}
+        onAdminToggle={onAdminToggle}
+      />
 
-      {/* Main Container */}
-      <div className="flex-1 w-full max-w-7xl mx-auto flex">
-        {/* Desktop Left Navigation Sidebar (>= 1024px) */}
-        <aside className="hidden lg:flex flex-col justify-between w-64 p-4 bg-vault-950 border-r border-vault-800 select-none">
+      <div className="flex-1 flex min-h-0 relative">
+        {/* Desktop / Tablet Left Sidebar (>= 1024px) */}
+        <aside className="hidden lg:flex flex-col justify-between w-64 border-r border-vault-800 bg-vault-950 p-4 shrink-0">
           <div className="flex flex-col gap-6">
-            {/* Brand */}
-            <div className="flex items-center gap-2.5 px-2">
-              <span aria-hidden="true" className="w-8 h-8 rounded-[10px] bg-[#111214] border border-vault-700 grid grid-cols-2 gap-[2px] p-1.5 shadow-sm">
+            {/* App Brand Header */}
+            <div className="flex items-center gap-3 px-2 py-1">
+              <span
+                aria-hidden="true"
+                className="w-9 h-9 rounded-xl bg-[#111214] border border-vault-700 grid grid-cols-2 gap-[2px] p-1.5 shrink-0 shadow-sm"
+              >
                 <span className="rounded-[2px] bg-gold" />
                 <span className="rounded-[2px] bg-[#2D3137]" />
                 <span className="rounded-[2px] bg-[#3A3224]" />
-                <span className="rounded-[2px] bg-[#10B981]" />
+                <span className="rounded-[2px] bg-emerald" />
               </span>
-              <span className="text-xl font-extrabold tracking-tight text-white">Games</span>
+              <div className="min-w-0">
+                <h1 className="text-base font-extrabold text-white truncate leading-none">Games</h1>
+                <span className="text-xs font-mono text-emerald font-semibold">Active Session</span>
+              </div>
             </div>
 
-            {/* Navigation Links */}
-            <nav className="flex flex-col gap-1">
+            {/* Desktop Navigation Items */}
+            <nav className="flex flex-col gap-1.5" aria-label="Main Navigation">
               {navItems.map(item => {
                 const Icon = item.icon;
                 const isActive = currentTab === item.id;
                 return (
                   <button
                     key={item.id}
+                    type="button"
                     onClick={() => setCurrentTab(item.id)}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    className={`min-h-[44px] flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
                       isActive
                         ? 'bg-vault-850 text-emerald border border-vault-750 shadow-sm'
                         : 'text-vault-400 hover:text-white hover:bg-vault-900 border border-transparent'
@@ -152,7 +182,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
               <button
                 type="button"
                 onClick={onAdminToggle}
-                className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-amber-950/60 hover:bg-amber-900/80 border border-amber-600/50 rounded-xl text-amber-300 text-xs font-bold transition-all cursor-pointer active:scale-97"
+                className="min-h-[44px] w-full flex items-center justify-center gap-2 py-2 px-3 bg-amber-950/60 hover:bg-amber-900/80 border border-amber-600/50 rounded-xl text-amber-300 text-xs font-bold transition-all cursor-pointer active:scale-97"
               >
                 <ShieldAlert className="w-4 h-4" />
                 <span>Super Admin Hub</span>
@@ -173,7 +203,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
                     onClick={copyUid}
                     title="Click to copy your UID"
                     aria-label="Click to copy your UID"
-                    className="text-[10px] font-mono text-emerald hover:underline truncate block cursor-pointer bg-transparent border-0 p-0"
+                    className="text-xs font-mono text-emerald hover:underline truncate block cursor-pointer bg-transparent border-0 p-0"
                   >
                     {user?.uid}
                   </button>
@@ -188,30 +218,32 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
         </aside>
 
         {/* Center Main Workspace */}
-        <main className="flex-1 min-w-0 p-3 lg:p-4 max-w-full mx-auto w-full flex flex-col h-[calc(100vh)] overflow-hidden">
-          {currentTab === 'chats' && (
-            <MessagesView
-              initialPartnerId={chatPartnerId}
-              initialAttachment={pendingMediaAttachment}
-              onClearInitialPartner={() => setChatPartnerId(null)}
-              onClearInitialAttachment={() => setPendingMediaAttachment(null)}
-            />
-          )}
-          {currentTab === 'camera' && (
-            <div className="max-w-2xl mx-auto w-full">
-              <CameraView
-                onSendToChat={media => {
-                  setPendingMediaAttachment(media);
-                  setCurrentTab('chats');
-                }}
-                onSavedToGallery={() => setCurrentTab('gallery')}
-                onSavedToVault={() => setCurrentTab('vault')}
+        <main className="flex-1 min-w-0 min-h-0 p-3 lg:p-4 max-w-full mx-auto w-full flex flex-col overflow-hidden">
+          <Suspense fallback={<TabSkeleton />}>
+            {currentTab === 'chats' && (
+              <MessagesView
+                initialPartnerId={chatPartnerId}
+                initialAttachment={pendingMediaAttachment}
+                onClearInitialPartner={() => setChatPartnerId(null)}
+                onClearInitialAttachment={() => setPendingMediaAttachment(null)}
               />
-            </div>
-          )}
-          {currentTab === 'gallery' && <div className="max-w-4xl mx-auto w-full overflow-y-auto"><GalleryView /></div>}
-          {currentTab === 'vault' && <div className="max-w-4xl mx-auto w-full overflow-y-auto"><VaultView /></div>}
-          {currentTab === 'profile' && <div className="max-w-2xl mx-auto w-full overflow-y-auto"><ProfileView /></div>}
+            )}
+            {currentTab === 'camera' && (
+              <div className="max-w-2xl mx-auto w-full h-full min-h-0 flex flex-col">
+                <CameraView
+                  onSendToChat={media => {
+                    setPendingMediaAttachment(media);
+                    setCurrentTab('chats');
+                  }}
+                  onSavedToGallery={() => setCurrentTab('gallery')}
+                  onSavedToVault={() => setCurrentTab('vault')}
+                />
+              </div>
+            )}
+            {currentTab === 'gallery' && <div className="max-w-4xl mx-auto w-full h-full min-h-0 overflow-y-auto overscroll-contain"><GalleryView /></div>}
+            {currentTab === 'vault' && <div className="max-w-4xl mx-auto w-full h-full min-h-0 overflow-y-auto overscroll-contain"><VaultView /></div>}
+            {currentTab === 'profile' && <div className="max-w-2xl mx-auto w-full h-full min-h-0 overflow-y-auto overscroll-contain"><ProfileView /></div>}
+          </Suspense>
         </main>
       </div>
 

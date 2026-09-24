@@ -1,12 +1,17 @@
 import React, { useEffect } from 'react';
 import { X, Trash, MoreHorizontal, Send, Download, Info } from 'lucide-react';
 import { GalleryItem } from '../../types';
+import type { MediaUrlState } from '../../lib/mediaUrls';
+import { MediaImage } from '../common/MediaImage';
 
 interface LightboxViewerProps {
   item: GalleryItem | null;
   onClose: () => void;
   onDelete: (item: GalleryItem) => void;
   onSend?: (item: GalleryItem) => void;
+  /** Resolved URL for the item (private-bucket objects need a signed URL). */
+  mediaState?: MediaUrlState;
+  onRetry?: () => void;
 }
 
 export const LightboxViewer: React.FC<LightboxViewerProps> = ({
@@ -14,6 +19,8 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
   onClose,
   onDelete,
   onSend,
+  mediaState,
+  onRetry,
 }) => {
   useEffect(() => {
     if (!item) return;
@@ -25,6 +32,9 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
   }, [item, onClose]);
 
   if (!item) return null;
+
+  const state: MediaUrlState = mediaState ?? (item.image_url ? { status: 'ready', url: item.image_url } : { status: 'error' });
+  const downloadUrl = state.status === 'ready' ? state.url : null;
 
   const date = new Date(item.created_at || Date.now());
   const dateFormatted = date.toLocaleDateString(undefined, {
@@ -75,11 +85,15 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
 
       {/* Main Image Viewport */}
       <main className="flex-1 flex items-center justify-center p-4 min-h-0">
-        <img
-          src={item.image_url}
-          alt={item.caption || 'Personal gallery photo'}
-          className="max-w-full max-h-[70vh] object-contain rounded-2xl shadow-2xl border border-vault-800"
-        />
+        <div className="relative w-full h-full max-h-[70vh] rounded-2xl overflow-hidden">
+          <MediaImage
+            state={state}
+            alt={item.caption || 'Personal gallery photo'}
+            imgClassName="w-full h-full object-contain"
+            onRetry={onRetry}
+            loading="eager"
+          />
+        </div>
       </main>
 
       {/* Bottom Actions Bar */}
@@ -97,7 +111,11 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
         )}
 
         <a
-          href={item.image_url}
+          href={downloadUrl ?? undefined}
+          aria-disabled={!downloadUrl}
+          onClick={e => {
+            if (!downloadUrl) e.preventDefault();
+          }}
           download={`photo-${item.id}.jpg`}
           target="_blank"
           rel="noreferrer"

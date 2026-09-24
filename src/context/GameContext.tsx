@@ -7,7 +7,7 @@ import { mockBackend } from '../lib/mockBackend';
 export const COVER_GAMES: CoverGameMeta[] = [
   {
     id: 'game_2048',
-    name: '2048',
+    name: '2048 Classic',
     tagline: 'Join the numbers and reach 2048!',
     icon: 'Grid',
     color: 'from-amber-500 to-orange-600',
@@ -23,69 +23,37 @@ export const COVER_GAMES: CoverGameMeta[] = [
   },
   {
     id: 'tic_tac_toe',
-    name: 'Tic-Tac-Toe AI',
-    tagline: 'Battle against unbeatable Minimax logic or local 2P',
+    name: 'Tic Tac Toe',
+    tagline: 'Battle against smart Minimax logic or local 2P',
     icon: 'Hash',
     color: 'from-cyan-500 to-blue-600',
     implemented: true,
   },
   {
-    id: 'sudoku',
-    name: 'Sudoku Master',
-    tagline: 'Logical number puzzles with pencil notes',
-    icon: 'LayoutGrid',
-    color: 'from-indigo-500 to-purple-600',
-    implemented: false,
-  },
-  {
     id: 'minesweeper',
     name: 'Minesweeper',
-    tagline: 'Flag mines and clear the danger grid',
+    tagline: 'Flag danger mines and deduce safe terrain',
     icon: 'ShieldAlert',
     color: 'from-rose-500 to-red-600',
-    implemented: false,
-  },
-  {
-    id: 'brick_breaker',
-    name: 'Brick Breaker',
-    tagline: 'Bounce balls and shatter the neon brick fortress',
-    icon: 'SquareDashedBottom',
-    color: 'from-amber-400 to-pink-600',
-    implemented: false,
+    implemented: true,
   },
   {
     id: 'memory_match',
-    name: 'Memory Match',
-    tagline: 'Flip and pair matching cyber tiles under time pressure',
+    name: 'Memory Matrix',
+    tagline: 'Flip and pair matching cyber tiles with precision focus',
     icon: 'Layers',
     color: 'from-purple-500 to-pink-500',
-    implemented: false,
-  },
-  {
-    id: 'bubble_shooter',
-    name: 'Bubble Shooter',
-    tagline: 'Aim and pop matching colored bubble clusters',
-    icon: 'CircleDot',
-    color: 'from-sky-400 to-indigo-600',
-    implemented: false,
-  },
-  {
-    id: 'block_puzzle',
-    name: 'Block Puzzle',
-    tagline: 'Fit geometrical blocks into rows & columns',
-    icon: 'Boxes',
-    color: 'from-emerald-400 to-cyan-600',
-    implemented: false,
-  },
-  {
-    id: 'flappy_bird',
-    name: 'Flappy Bird',
-    tagline: 'Tap to flap through high-frequency obstacles',
-    icon: 'Feather',
-    color: 'from-yellow-400 to-orange-500',
-    implemented: false,
+    implemented: true,
   },
 ];
+
+interface DailyChallengeState {
+  gameId: CoverGameType;
+  dateKey: string;
+  targetScore: number;
+  completed: boolean;
+  streak: number;
+}
 
 interface GameContextType {
   currentGame: CoverGameType;
@@ -97,73 +65,163 @@ interface GameContextType {
   hapticsEnabled: boolean;
   toggleSound: () => void;
   toggleHaptics: () => void;
+  dailyChallenge: DailyChallengeState;
+  completeDailyChallenge: () => void;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
+const DAILY_GAMES: CoverGameType[] = ['game_2048', 'snake', 'tic_tac_toe', 'minesweeper', 'memory_match'];
+
+const getTodayKey = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const getDailyGameForDate = (dateKey: string): { gameId: CoverGameType; targetScore: number } => {
+  let hash = 0;
+  for (let i = 0; i < dateKey.length; i++) {
+    hash = (hash * 31 + dateKey.charCodeAt(i)) >>> 0;
+  }
+  const gameIndex = hash % DAILY_GAMES.length;
+  const gameId = DAILY_GAMES[gameIndex];
+  const targets: Record<CoverGameType, number> = {
+    game_2048: 512,
+    snake: 60,
+    tic_tac_toe: 3,
+    minesweeper: 1,
+    memory_match: 1,
+    sudoku: 1,
+    brick_breaker: 100,
+    bubble_shooter: 100,
+    block_puzzle: 100,
+    flappy_bird: 20,
+  };
+  return { gameId, targetScore: targets[gameId] || 100 };
+};
+
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
   const { preferences, updatePreferences } = useVault();
-  const [currentGame, setCurrentGameState] = useState<CoverGameType>('game_2048');
-  const [scores, setScores] = useState<Record<string, number>>({});
+  const { user } = useAuth();
+
+  const [currentGame, setCurrentGame] = useState<CoverGameType>(() => {
+    return preferences?.selected_game || 'game_2048';
+  });
+
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
+  const [highScores, setHighScores] = useState<Record<string, number>>({});
 
-  useEffect(() => {
-    if (preferences.selected_game) {
-      setCurrentGameState(preferences.selected_game);
+  // Daily Challenge & Streak State
+  const [dailyChallenge, setDailyChallenge] = useState<DailyChallengeState>(() => {
+    const today = getTodayKey();
+    const { gameId, targetScore } = getDailyGameForDate(today);
+    const rawSaved = localStorage.getItem('games_daily_challenge');
+    let streak = 0;
+    let completed = false;
+
+    if (rawSaved) {
+      try {
+        const parsed = JSON.parse(rawSaved);
+        if (parsed.dateKey === today) {
+          completed = !!parsed.completed;
+          streak = parsed.streak || 0;
+        } else {
+          // Check if yesterday was completed to maintain streak
+          const yesterday = new Date(Date.now() - 86400000);
+          const yesterdayKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+          if (parsed.dateKey === yesterdayKey && parsed.completed) {
+            streak = parsed.streak || 1;
+          } else {
+            streak = 0;
+          }
+        }
+      } catch {
+        streak = 0;
+      }
     }
-  }, [preferences.selected_game]);
 
-  const loadScores = useCallback(() => {
-    const userId = user?.id || 'guest';
+    return {
+      gameId,
+      dateKey: today,
+      targetScore,
+      completed,
+      streak,
+    };
+  });
+
+  // Sync selected game from preferences
+  useEffect(() => {
+    if (preferences?.selected_game) {
+      setCurrentGame(preferences.selected_game);
+    }
+  }, [preferences?.selected_game]);
+
+  // Load high scores
+  useEffect(() => {
+    const userId = user?.id || 'anonymous';
     const loadedScores: Record<string, number> = {};
-    COVER_GAMES.forEach(g => {
-      const progress = mockBackend.getGameProgress(userId, g.id);
-      loadedScores[g.id] = progress.highScore;
+    COVER_GAMES.forEach(game => {
+      loadedScores[game.id] = mockBackend.getHighScore(userId, game.id);
     });
-    setScores(loadedScores);
+    setHighScores(loadedScores);
   }, [user?.id]);
 
-  useEffect(() => {
-    loadScores();
-  }, [loadScores]);
+  const handleSetCurrentGame = useCallback((game: CoverGameType) => {
+    setCurrentGame(game);
+    if (preferences && preferences.selected_game !== game) {
+      void updatePreferences({ selected_game: game });
+    }
+  }, [preferences, updatePreferences]);
 
-  const setCurrentGame = (game: CoverGameType) => {
-    setCurrentGameState(game);
-    void updatePreferences({ selected_game: game }, { silent: true });
-  };
+  const getHighScore = useCallback((game: CoverGameType): number => {
+    return highScores[game] || 0;
+  }, [highScores]);
 
-  const getHighScore = (game: CoverGameType): number => {
-    return scores[game] || 0;
-  };
+  const completeDailyChallenge = useCallback(() => {
+    setDailyChallenge(prev => {
+      if (prev.completed) return prev;
+      const updated = {
+        ...prev,
+        completed: true,
+        streak: prev.streak + 1,
+      };
+      localStorage.setItem('games_daily_challenge', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
 
-  const saveHighScore = (game: CoverGameType, score: number) => {
-    const userId = user?.id || 'guest';
-    mockBackend.saveGameProgress(userId, game, score);
-    setScores(prev => ({
-      ...prev,
-      [game]: Math.max(prev[game] || 0, score),
-    }));
-  };
+  const saveHighScore = useCallback((game: CoverGameType, score: number) => {
+    const userId = user?.id || 'anonymous';
+    setHighScores(prev => {
+      const currentBest = prev[game] || 0;
+      if (score > currentBest) {
+        mockBackend.saveHighScore(userId, game, score);
+        return { ...prev, [game]: score };
+      }
+      return prev;
+    });
 
-  const resetGame = (game: CoverGameType) => {
-    const userId = user?.id || 'guest';
-    mockBackend.resetGameProgress(userId, game);
-    setScores(prev => ({
-      ...prev,
-      [game]: 0,
-    }));
-  };
+    // Check daily challenge progress
+    if (game === dailyChallenge.gameId && !dailyChallenge.completed && score >= dailyChallenge.targetScore) {
+      completeDailyChallenge();
+    }
+  }, [user?.id, dailyChallenge, completeDailyChallenge]);
 
-  const toggleSound = () => setSoundEnabled(v => !v);
-  const toggleHaptics = () => setHapticsEnabled(v => !v);
+  const resetGame = useCallback((game: CoverGameType) => {
+    const userId = user?.id || 'anonymous';
+    mockBackend.saveHighScore(userId, game, 0);
+    setHighScores(prev => ({ ...prev, [game]: 0 }));
+  }, [user?.id]);
+
+  const toggleSound = useCallback(() => setSoundEnabled(s => !s), []);
+  const toggleHaptics = useCallback(() => setHapticsEnabled(h => !h), []);
 
   return (
     <GameContext.Provider
       value={{
         currentGame,
-        setCurrentGame,
+        setCurrentGame: handleSetCurrentGame,
         getHighScore,
         saveHighScore,
         resetGame,
@@ -171,6 +229,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         hapticsEnabled,
         toggleSound,
         toggleHaptics,
+        dailyChallenge,
+        completeDailyChallenge,
       }}
     >
       {children}

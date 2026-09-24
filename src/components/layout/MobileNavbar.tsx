@@ -24,7 +24,7 @@ export const MobileNavbar: React.FC<MobileNavbarProps> = ({
   return (
     <nav
       aria-label="Main"
-      className="tabbar fixed bottom-0 left-0 right-0 z-30 max-w-md mx-auto lg:hidden pb-[max(10px,env(safe-area-inset-bottom))]"
+      className="tabbar shrink-0 w-full max-w-md mx-auto lg:hidden !h-auto min-h-[68px] pb-[max(10px,env(safe-area-inset-bottom))]"
     >
       {tabs.map(t => {
         const Icon = t.icon;

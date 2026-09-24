@@ -447,3 +447,20 @@ export async function getUserSecurityDetailsForAdmin(
     last_login_at: profile.last_login_at || profile.updated_at,
   };
 }
+
+/** Moderation: Permanently delete an abusive message as Admin */
+export async function deleteMessageAsAdmin(
+  adminId: string,
+  messageId: string,
+  conversationId?: string
+): Promise<void> {
+  if (backendIsSupabase()) {
+    const { error } = await supabase.from('messages').delete().eq('id', messageId);
+    if (error) {
+      console.warn('Failed to delete message from supabase:', error);
+    }
+  }
+  await logAdminAction(adminId, 'DELETE_MESSAGE', null, messageId, {
+    conversationId,
+  });
+}

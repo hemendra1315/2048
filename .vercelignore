@@ -1,0 +1,7 @@
+# Vercel ignore
+android/
+node_modules/
+.git/
+Claude outputs/
+*.apk
+dist/

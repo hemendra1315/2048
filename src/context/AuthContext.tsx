@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, Rea
 import { UserProfile } from '../types';
 import { mockBackend } from '../lib/mockBackend';
 import { supabase, isSupabaseConfigured, isMockBackendAllowed, callVaultAuth } from '../lib/supabase';
+import { signOutAndReleasePush } from '../lib/notifications';
 import { useToast } from './ToastContext';
 import { BiometricService, ServerCreationOptions, ServerRequestOptions } from '../lib/biometrics';
 
@@ -76,7 +77,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (profile.status !== 'active') {
           // Suspended or banned accounts keep no session, including sessions opened before the change.
           console.warn('[auth] profile status is not active; signing out', { status: profile.status });
-          await supabase.auth.signOut();
+          await signOutAndReleasePush();
           setUser(null);
           showToast(
             profile.status === 'banned'
@@ -97,7 +98,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // or status is inferred. (Auth user_metadata is user-editable and is never read.)
     if (hasSession && profileMissing) {
       console.warn('[auth] session has no profile row; signing out');
-      await supabase.auth.signOut();
+      await signOutAndReleasePush();
     }
     setUser(null);
     return null;
@@ -180,7 +181,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // The UI identity is the profile row read back under the new session, not the response body.
     const profile = await loadProfile(result.profile.id, true);
     if (!profile) {
-      await supabase.auth.signOut();
+      await signOutAndReleasePush();
       throw new Error('Could not load your profile. Please sign in again.');
     }
     return profile;
@@ -323,7 +324,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const logout = async () => {
     try {
       if (isSupabaseConfigured()) {
-        await supabase.auth.signOut();
+        await signOutAndReleasePush();
       } else if (useMock) {
         mockBackend.setCurrentUser(null);
       }

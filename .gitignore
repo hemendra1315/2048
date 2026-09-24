@@ -1,4 +1,4 @@
-﻿# Logs
+# Logs
 logs
 *.log
 npm-debug.log*
@@ -31,3 +31,20 @@ dist-ssr
 *.tsbuildinfo
 .vercel
 .env*
+
+# Android Keystores & Signing Properties
+android/key.properties
+*.keystore
+*.jks
+
+# Supabase CLI local state (project ref, pooler URL)
+supabase/.temp/
+
+# Built app packages
+*.apk
+*.aab
+
+# AI tool scratch output (screenshots, tarballs, node_modules archives)
+Claude outputs/
+/screen.png
+/pixel9_screen.png

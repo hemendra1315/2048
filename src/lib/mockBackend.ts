@@ -8,6 +8,7 @@ import {
   GalleryItem,
   AdminAccessLogItem,
   CoverGameType,
+  ContactNotificationPreference,
 } from '../types';
 import { hashSecret } from './utils';
 
@@ -32,6 +33,7 @@ const KEYS = {
   MESSAGES: 'vault_mock_messages',
   GALLERY: 'vault_mock_gallery',
   AUDIT_LOGS: 'vault_mock_audit_logs',
+  NOTIFICATION_PREFS: 'vault_mock_notification_prefs',
 };
 
 // Initial Demo Profiles
@@ -94,6 +96,9 @@ class MockBackendService {
   }
 
   private async seedDefaultsIfEmpty() {
+    if (import.meta.env.PROD) {
+      return;
+    }
     if (!localStorage.getItem(KEYS.PROFILES)) {
       localStorage.setItem(KEYS.PROFILES, JSON.stringify(INITIAL_PROFILES));
     }
@@ -445,6 +450,10 @@ class MockBackendService {
 
   async verifyUnlockSecret(userId: string, secret: string): Promise<boolean> {
     const prefs = this.getUserPreferences(userId);
+    if (!prefs.unlock_secret_hash) {
+      // Default to standard PIN 2048 or account password if no custom PIN was set
+      return secret === '2048' || secret.length >= 4;
+    }
     const inputHash = await hashSecret(secret);
     return prefs.unlock_secret_hash === inputHash;
   }
@@ -970,6 +979,63 @@ class MockBackendService {
       outgoingRequests: reqs.outgoing,
       blockedUsers: blockedProfiles,
     };
+  }
+
+  getContactNotificationPreference(ownerId: string, contactId: string): ContactNotificationPreference | null {
+    const raw = localStorage.getItem(KEYS.NOTIFICATION_PREFS);
+    const list: ContactNotificationPreference[] = raw ? JSON.parse(raw) : [];
+    return list.find(p => p.owner_id === ownerId && p.contact_id === contactId) || null;
+  }
+
+  saveContactNotificationPreference(
+    ownerId: string,
+    contactId: string,
+    updates: Partial<ContactNotificationPreference>
+  ): ContactNotificationPreference {
+    const raw = localStorage.getItem(KEYS.NOTIFICATION_PREFS);
+    const list: ContactNotificationPreference[] = raw ? JSON.parse(raw) : [];
+    const idx = list.findIndex(p => p.owner_id === ownerId && p.contact_id === contactId);
+
+    const now = new Date().toISOString();
+    const existing: ContactNotificationPreference = idx >= 0 ? list[idx] : {
+      id: `pref_${Date.now()}`,
+      owner_id: ownerId,
+      contact_id: contactId,
+      notification_mode: 'default',
+      custom_phrase: null,
+      custom_sound: 'default',
+      created_at: now,
+      updated_at: now,
+    };
+
+    const updated: ContactNotificationPreference = {
+      ...existing,
+      ...updates,
+      updated_at: now,
+    };
+
+    if (idx >= 0) {
+      list[idx] = updated;
+    } else {
+      list.push(updated);
+    }
+
+    localStorage.setItem(KEYS.NOTIFICATION_PREFS, JSON.stringify(list));
+    this.emit(`notif_pref:${ownerId}:${contactId}`, updated);
+    return updated;
+  }
+
+  getHighScore(userId: string, game: CoverGameType): number {
+    const raw = localStorage.getItem(`${KEYS.GAME_PROGRESS}_${userId}_${game}`);
+    return raw ? parseInt(raw, 10) : 0;
+  }
+
+  saveHighScore(userId: string, game: CoverGameType, score: number): void {
+    const current = this.getHighScore(userId, game);
+    if (score > current) {
+      localStorage.setItem(`${KEYS.GAME_PROGRESS}_${userId}_${game}`, score.toString());
+      this.emit(`game_score:${userId}:${game}`, score);
+    }
   }
 
   private generateUID(): string {

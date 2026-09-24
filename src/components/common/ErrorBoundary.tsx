@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { crashReporter } from '../../lib/crashReporting';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -27,8 +28,12 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Diagnostics only: the error and component stack, never user data.
-    console.error(`[ErrorBoundary:${this.props.name ?? 'app'}]`, error.message, info.componentStack);
+    // Report crash to telemetry service
+    crashReporter.recordCrash({
+      message: error.message,
+      stack: error.stack || info.componentStack || undefined,
+      component: `ErrorBoundary:${this.props.name ?? 'app'}`,
+    });
   }
 
   private reset = () => {
@@ -53,7 +58,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <button
               type="button"
               onClick={this.reset}
-              className="w-full flex items-center justify-center gap-2 bg-[#10B981] hover:bg-emerald-400 text-black font-bold py-2.5 rounded-xl text-sm transition-colors"
+              className="w-full min-h-[44px] flex items-center justify-center gap-2 bg-[#10B981] hover:bg-emerald-400 text-black font-bold py-2.5 rounded-xl text-sm transition-colors cursor-pointer"
             >
               <RotateCcw className="w-4 h-4" />
               <span>Try again</span>
@@ -65,7 +70,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                   this.setState({ error: null });
                   secondaryAction.onClick();
                 }}
-                className="w-full py-2.5 rounded-xl text-sm font-semibold text-[#A7ABB3] hover:text-white bg-[#131417] border border-[#1E2025] transition-colors"
+                className="w-full min-h-[44px] flex items-center justify-center py-2.5 rounded-xl text-sm font-semibold text-[#A7ABB3] hover:text-white bg-[#131417] border border-[#1E2025] transition-colors cursor-pointer"
               >
                 {secondaryAction.label}
               </button>

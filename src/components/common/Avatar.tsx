@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 const HUES = ['#C9B6F2', '#F2C6A0', '#9ED8C8', '#A9C7F5', '#F0B3C0', '#E6DB9A'];
 
@@ -35,6 +35,8 @@ const sizeClasses: Record<number, string> = {
 /** Round avatar: the user's photo when set, otherwise initials on a pastel fill. Decorative by default. */
 export const Avatar: React.FC<AvatarProps> = ({ name, seed, src, size = 48, online = false, className = '' }) => {
   const [imgError, setImgError] = useState(false);
+  // A new photo (for example right after changing it) gets a fresh load attempt.
+  useEffect(() => setImgError(false), [src]);
   const dot = size >= 56 ? 14 : size >= 40 ? 12 : 10;
   const bg = hueFor(seed || name);
   const sizeCls = sizeClasses[size] || 'w-12 h-12 text-base';

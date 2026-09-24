@@ -45,8 +45,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPassword.length < 4) {
-      showToast('Password must be at least 4 characters', 'error');
+    if (newPassword.length < 8) {
+      showToast('Password must be at least 8 characters', 'error');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -86,11 +86,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const handleLogout = () => {
     logout();
     panicLock();
-    showToast('Signed out of secure session', 'info');
+    showToast('Signed out', 'info');
+  };
+
+  const dismissKeyboard = () => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
   };
 
   return (
-    <div className="flex flex-col gap-6 pb-24 animate-fade-in select-none">
+    <div
+      onScroll={dismissKeyboard}
+      onTouchMove={dismissKeyboard}
+      className="flex flex-col gap-6 pb-4 animate-fade-in select-none"
+    >
       {/* Top Header */}
       <header className="flex items-center gap-3">
         {onBack && (
@@ -112,7 +122,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
         <div className="card overflow-hidden">
           <div className="set-row">
             <div className="flex-1 min-w-0">
-              <span className="t-body block">{user?.display_name || 'Node'}</span>
+              <span className="t-body block">{user?.display_name || 'User'}</span>
               <span className="t-cap c3 font-mono">{user?.uid}</span>
             </div>
             <span className="tag tag-em mono">Active</span>
@@ -179,7 +189,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
             className="set-row w-full text-left"
           >
             <Lock className="i c2 text-gold" aria-hidden />
-            <span className="t-body flex-1">Lock to disguise cover now</span>
+            <span className="t-body flex-1">Lock app now</span>
             <ChevronRight className="i i-sm c3" aria-hidden />
           </button>
         </div>
@@ -262,7 +272,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                   required
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
-                  placeholder="Min 4 characters"
+                  placeholder="Min 8 characters"
                   className="inp text-sm"
                 />
               </div>
@@ -322,10 +332,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
           <div className="set-row">
             <Smartphone className="i c2" aria-hidden />
             <div className="flex-1 min-w-0">
-              <span className="t-body block">Device Node</span>
-              <span className="t-cap c3">Client hardware • Hardware isolated</span>
+              <span className="t-body block">Local Cache</span>
+              <span className="t-cap c3">Protected cache on device</span>
             </div>
-            <span className="tag tag-em mono">E2EE</span>
+            <span className="tag tag-em mono">Protected</span>
           </div>
         </div>
       </section>
@@ -340,7 +350,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
             className="set-row w-full text-left"
           >
             <Gamepad2 className="i c2" aria-hidden />
-            <span className="t-body flex-1">Engage Camouflage Cover</span>
+            <span className="t-body flex-1">Lock to cover game</span>
             <ChevronRight className="i i-sm c3" aria-hidden />
           </button>
 
