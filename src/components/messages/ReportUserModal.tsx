@@ -19,6 +19,9 @@ interface ReportUserModalProps {
   /** The partner's recent messages; the reporter may attach one as evidence. */
   partnerMessages: MessageItem[];
   onClose: () => void;
+  /** Offer "also block" (hidden if you've already blocked them). */
+  canBlock?: boolean;
+  onBlock?: () => Promise<void>;
 }
 
 export const ReportUserModal: React.FC<ReportUserModalProps> = ({
@@ -26,12 +29,15 @@ export const ReportUserModal: React.FC<ReportUserModalProps> = ({
   conversationId,
   partnerMessages,
   onClose,
+  canBlock,
+  onBlock,
 }) => {
   const { showToast } = useToast();
   const [category, setCategory] = useState<ReportCategory | null>(null);
   const [reason, setReason] = useState('');
   const [messageId, setMessageId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [alsoBlock, setAlsoBlock] = useState(false);
   const recent = partnerMessages.slice(-5).reverse();
 
   const submit = async (e: React.FormEvent) => {
@@ -46,7 +52,16 @@ export const ReportUserModal: React.FC<ReportUserModalProps> = ({
         conversationId,
         messageId: messageId ?? undefined,
       });
-      showToast('Report sent. Our team will review it.', 'success');
+      if (alsoBlock && onBlock) {
+        try {
+          await onBlock();
+        } catch {
+          showToast('Report sent, but blocking failed. Try again from the chat menu.', 'error');
+          onClose();
+          return;
+        }
+      }
+      showToast(alsoBlock ? 'Report sent and user blocked.' : 'Report sent. Our team will review it.', 'success');
       onClose();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Could not send report', 'error');
@@ -135,6 +150,13 @@ export const ReportUserModal: React.FC<ReportUserModalProps> = ({
               className="mt-1 w-full rounded-xl bg-vault-950 border border-vault-750 p-2 text-sm text-white"
             />
           </label>
+
+          {canBlock && onBlock && (
+            <label className="flex items-center gap-3 p-3 rounded-xl border border-vault-750 bg-vault-950 cursor-pointer min-h-[44px]">
+              <input type="checkbox" checked={alsoBlock} onChange={e => setAlsoBlock(e.target.checked)} />
+              <span className="text-sm text-white">Also block {partner.display_name}</span>
+            </label>
+          )}
 
           <p className="text-xs text-vault-500">
             {partner.display_name} won't be told who reported them.

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Radio,
+  Ban,
   ArrowLeft,
   Shield,
   KeyRound,
@@ -19,6 +20,8 @@ import { useGame, COVER_GAMES } from '../../context/GameContext';
 import { useToast } from '../../context/ToastContext';
 import { getPresenceSharing, setPresenceSharing, getReadReceiptSharing, setReadReceiptSharing } from '../../lib/presence';
 import { isSupabaseConfigured } from '../../lib/supabase';
+import { listBlocked, unblockUser } from '../../lib/blocks';
+import { UserProfile } from '../../types';
 import { CoverGameType } from '../../types';
 
 interface SettingsViewProps {
@@ -39,6 +42,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [readReceipts, setReadReceipts] = useState(true);
   const [shareOnline, setShareOnline] = useState(true);
   const [shareOnlineSaving, setShareOnlineSaving] = useState(false);
+  const [blocked, setBlocked] = useState<{ profile: UserProfile; blockedAt: string }[]>([]);
+  const [showBlocked, setShowBlocked] = useState(false);
+
+  useEffect(() => {
+    if (!user || !isSupabaseConfigured()) return;
+    let cancelled = false;
+    void listBlocked(user.id).then(list => { if (!cancelled) setBlocked(list); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const handleUnblock = async (p: UserProfile) => {
+    if (!user) return;
+    try {
+      await unblockUser(user.id, p.id);
+      setBlocked(prev => prev.filter(b => b.profile.id !== p.id));
+      showToast(`Unblocked ${p.display_name}`, 'success');
+    } catch {
+      showToast('Could not unblock', 'error');
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -387,6 +410,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
           </button>
 
           <div className="divider ml-[52px]" />
+
+          {isSupabaseConfigured() && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowBlocked(v => !v)}
+                aria-expanded={showBlocked}
+                className="set-row w-full text-left"
+              >
+                <Ban className="i c2" aria-hidden />
+                <div className="flex-1 min-w-0">
+                  <span className="t-body block">Blocked people</span>
+                  <span className="t-cap c3">{blocked.length ? `${blocked.length} blocked` : 'Nobody blocked'}</span>
+                </div>
+              </button>
+              {showBlocked && blocked.length > 0 && (
+                <ul className="list-none m-0 px-4 pb-3 flex flex-col gap-2">
+                  {blocked.map(b => (
+                    <li key={b.profile.id} className="flex items-center justify-between gap-3">
+                      <span className="min-w-0">
+                        <span className="block text-sm text-white truncate">{b.profile.display_name}</span>
+                        <span className="block text-xs text-vault-500 font-mono">{b.profile.uid}</span>
+                      </span>
+                      <button type="button" onClick={() => void handleUnblock(b.profile)} className="btn btn-s btn-sm min-h-[36px]">
+                        Unblock
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="divider ml-[52px]" />
+            </>
+          )}
 
           <div className="set-row">
             <Smartphone className="i c2" aria-hidden />

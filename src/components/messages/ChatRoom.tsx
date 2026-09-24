@@ -24,6 +24,8 @@ import {
   Smile,
   Palette,
   Trophy,
+  MoreVertical,
+  Ban,
 } from 'lucide-react';
 import { CoverGameType, MessageItem, MessageReaction, ReactionEmoji, REACTION_EMOJIS, UserProfile } from '../../types';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -62,6 +64,9 @@ import {
 import { ChatGameCard } from './ChatGameCard';
 import { ChatExtrasSheet, ChatThemeSheet } from './ChatExtrasSheet';
 import { COVER_GAMES, useGame } from '../../context/GameContext';
+import { resolveChatMediaUrl } from '../../lib/mediaUrls';
+import { BlockStatus, blockUser, getBlockStatus, unblockUser } from '../../lib/blocks';
+import { ChatImage } from '../common/ChatMedia';
 
 interface ChatRoomProps {
   conversationId: string;
@@ -105,6 +110,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [showThemeSheet, setShowThemeSheet] = useState(false);
   const [themeId, setThemeId] = useState<ChatThemeId>('default');
   const [audioProgress, setAudioProgress] = useState(0);
+  const [showChatMenu, setShowChatMenu] = useState(false);
+  const [confirmBlock, setConfirmBlock] = useState(false);
+  const [blockStatus, setBlockStatus] = useState<BlockStatus>({ iBlocked: false, blocked: false });
+  const blockedRef = useRef(false);
+  blockedRef.current = blockStatus.blocked;
   const theme = themeById(themeId);
   const partnerPresence = usePresence([partner.id])[partner.id];
   const presenceLabel = describePresence(partnerPresence);
@@ -117,10 +127,21 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const stickToBottomRef = useRef(true);
   const hasScrolledInitiallyRef = useRef(false);
 
+  // Long chats load the latest PAGE_SIZE messages; older ones load as you scroll up.
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const hasOlderRef = useRef(false);
+  hasOlderRef.current = hasOlder;
+  const loadingOlderRef = useRef(false);
+  /** Distance from the bottom to keep while older messages are inserted above. */
+  const prependAnchorRef = useRef<number | null>(null);
+  const loadOlderRef = useRef<() => void>(() => {});
+
   const handleListScroll = useCallback(() => {
     const el = listRef.current;
     if (!el) return;
     stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (el.scrollTop < 150 && hasOlderRef.current && !loadingOlderRef.current) loadOlderRef.current();
   }, []);
 
   // After new messages are committed to the DOM: jump to the end on first load, then follow new
@@ -129,6 +150,12 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   useLayoutEffect(() => {
     const el = listRef.current;
     if (!el || messages.length === 0) return;
+    if (prependAnchorRef.current !== null) {
+      // Older messages were added above: keep what the reader was looking at in place.
+      el.scrollTop = el.scrollHeight - prependAnchorRef.current;
+      prependAnchorRef.current = null;
+      return;
+    }
     const mine = lastMessage?.sender_id === userId;
     if (!hasScrolledInitiallyRef.current) {
       hasScrolledInitiallyRef.current = true;
@@ -233,6 +260,30 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     }
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    void getBlockStatus(partner.id).then(st => { if (!cancelled) setBlockStatus(st); });
+    return () => { cancelled = true; };
+  }, [partner.id]);
+
+  const toggleBlock = async () => {
+    if (!userId) return;
+    setConfirmBlock(false);
+    setShowChatMenu(false);
+    try {
+      if (blockStatus.iBlocked) {
+        await unblockUser(userId, partner.id);
+        showToast(`Unblocked ${partner.display_name}`, 'success');
+      } else {
+        await blockUser(userId, partner.id);
+        showToast(`Blocked ${partner.display_name}`, 'success');
+      }
+      setBlockStatus(await getBlockStatus(partner.id));
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not update block', 'error');
+    }
+  };
+
   const startGame = useCallback(async () => {
     setShowExtras(false);
     const { error } = await supabase.rpc('start_chat_game', { p_conversation_id: conversationId });
@@ -248,11 +299,13 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           .from('messages')
           .select('*')
           .eq('conversation_id', conversationId)
-          .order('created_at', { ascending: true });
+          .order('created_at', { ascending: false })
+          .limit(PAGE_SIZE);
 
         if (error) throw error;
         if (data) {
-          const stored = data as unknown as MessageItem[];
+          const stored = (data as unknown as MessageItem[]).reverse();
+          setHasOlder(data.length === PAGE_SIZE);
           // Messages still waiting in the outbox (sent while offline) show as queued.
           const storedClientIds = new Set(stored.map(m => m.client_id).filter(Boolean));
           const waiting = pendingFor(conversationId, userId)
@@ -275,6 +328,40 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       console.error('Error loading messages:', err);
     }
   }, [conversationId, userId, loadReactions]);
+
+  const loadOlder = useCallback(async () => {
+    if (!isSupabaseConfigured() || loadingOlderRef.current || !hasOlderRef.current) return;
+    const oldest = messagesRef.current.find(m => !m.status);
+    if (!oldest) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .lt('created_at', oldest.created_at)
+        .order('created_at', { ascending: false })
+        .limit(PAGE_SIZE);
+      if (error) throw error;
+      const older = ((data ?? []) as unknown as MessageItem[]).reverse();
+      setHasOlder(older.length === PAGE_SIZE);
+      if (older.length) {
+        const el = listRef.current;
+        prependAnchorRef.current = el ? el.scrollHeight - el.scrollTop : null;
+        setMessages(prev => {
+          const seen = new Set(prev.map(m => m.id));
+          return [...older.filter(m => !seen.has(m.id)), ...prev];
+        });
+      }
+    } catch (err) {
+      console.warn('[chat] loading older messages failed:', err);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [conversationId]);
+  loadOlderRef.current = () => void loadOlder();
 
   useEffect(() => {
     loadMessages();
@@ -430,7 +517,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       const channel = supabase.channel(name, { config: { broadcast: { self: false } } });
       channel
         .on('broadcast', { event: 'typing' }, ({ payload }) => {
-          if (!payload || payload.user_id !== partner.id) return;
+          if (!payload || payload.user_id !== partner.id || blockedRef.current) return;
           if (hideTimer) clearTimeout(hideTimer);
           setIsTyping(Boolean(payload.typing));
           // If the "stopped" signal is lost, don't show "typing" forever.
@@ -451,7 +538,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
   const sendTyping = useCallback((typing: boolean) => {
     const channel = typingChannelRef.current;
-    if (!channel || !userId) return;
+    if (!channel || !userId || blockedRef.current) return;
     const now = Date.now();
     if (typing && now - lastTypingSentRef.current < 2500) return; // at most one "typing" every 2.5 s
     if (!typing && lastTypingSentRef.current === 0) return;
@@ -756,20 +843,28 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
     audioElementRef.current?.pause();
 
-    const audio = new Audio(audioUrl);
-    audioElementRef.current = audio;
     setPlayingAudioId(msgId);
     setAudioProgress(0);
 
-    audio.ontimeupdate = () => {
-      if (audio.duration && Number.isFinite(audio.duration)) setAudioProgress(audio.currentTime / audio.duration);
-    };
-    audio.onended = () => {
-      setPlayingAudioId(null);
-      setAudioProgress(0);
-    };
-    audio.onerror = () => setPlayingAudioId(null);
-    audio.play().catch(() => setPlayingAudioId(null));
+    // Voice notes are private: play them through a short-lived signed link.
+    void resolveChatMediaUrl(audioUrl).then(src => {
+      if (playingAudioIdRef.current !== msgId) return; // user tapped something else meanwhile
+      if (!src) {
+        setPlayingAudioId(null);
+        return;
+      }
+      const audio = new Audio(src);
+      audioElementRef.current = audio;
+      audio.ontimeupdate = () => {
+        if (audio.duration && Number.isFinite(audio.duration)) setAudioProgress(audio.currentTime / audio.duration);
+      };
+      audio.onended = () => {
+        setPlayingAudioId(null);
+        setAudioProgress(0);
+      };
+      audio.onerror = () => setPlayingAudioId(null);
+      audio.play().catch(() => setPlayingAudioId(null));
+    });
   }, []);
 
   useEffect(() => () => audioElementRef.current?.pause(), []);
@@ -817,34 +912,19 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5">
+          {disappearAfter ? (
+            <span className="text-emerald" title={`Disappearing messages: ${timerLabel(disappearAfter)}`} aria-label={`Disappearing messages: ${timerLabel(disappearAfter)}`}>
+              <Timer className="w-4 h-4" aria-hidden />
+            </span>
+          ) : null}
           <button
             type="button"
-            onClick={() => setShowThemeSheet(true)}
+            onClick={() => setShowChatMenu(true)}
             className="ib ib-s rounded-xl"
-            aria-label="Chat theme"
-            title="Chat theme"
+            aria-label="Chat options"
+            title="Chat options"
           >
-            <Palette className="i" aria-hidden />
-          </button>
-          {isSupabaseConfigured() && (
-            <button
-              type="button"
-              onClick={() => setShowTimerSheet(true)}
-              className={`ib ib-s rounded-xl ${disappearAfter ? 'text-emerald' : ''}`}
-              aria-label={disappearAfter ? `Disappearing messages: ${timerLabel(disappearAfter)}` : 'Disappearing messages: off'}
-              title="Disappearing messages"
-            >
-              <Timer className="i" aria-hidden />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowReportModal(true)}
-            className="ib ib-s rounded-xl"
-            aria-label={`Report ${partner.display_name}`}
-            title="Report"
-          >
-            <Flag className="i" aria-hidden />
+            <MoreVertical className="i" aria-hidden />
           </button>
           <button
             type="button"
@@ -864,6 +944,17 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         onScroll={handleListScroll}
         className={`flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 ${theme.wallpaper} min-h-0 [-webkit-overflow-scrolling:touch]`}
       >
+        {(loadingOlder || hasOlder) && messages.length > 0 && (
+          <div className="flex justify-center py-2">
+            {loadingOlder ? (
+              <span className="text-xs text-vault-500">Loading earlier messages…</span>
+            ) : (
+              <button type="button" onClick={() => void loadOlder()} className="text-xs text-emerald hover:underline min-h-[32px]">
+                Load earlier messages
+              </button>
+            )}
+          </div>
+        )}
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 text-xs text-vault-500 gap-2">
             <div className="w-14 h-14 rounded-2xl bg-vault-900 border border-vault-750 flex items-center justify-center text-emerald mb-2 shadow-sm">
@@ -926,7 +1017,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           aria-label="File upload"
         />
 
-        {(replyTo || editing) && !isRecordingAudio && (
+        {(replyTo || editing) && !isRecordingAudio && !blockStatus.blocked && (
           <div className="flex items-center gap-2 mb-2 pl-3 pr-1 py-1.5 rounded-xl bg-vault-950 border-l-2 border-emerald">
             {editing ? <Pencil className="w-4 h-4 text-emerald shrink-0" aria-hidden /> : <Reply className="w-4 h-4 text-emerald shrink-0" aria-hidden />}
             <div className="min-w-0 flex-1">
@@ -941,7 +1032,17 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           </div>
         )}
 
-        {isRecordingAudio ? (
+        {blockStatus.blocked ? (
+          <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-vault-950 border border-vault-800 text-xs text-vault-300">
+            <span className="flex items-center gap-2">
+              <Ban className="w-4 h-4 text-rose-400" aria-hidden />
+              {blockStatus.iBlocked ? `You blocked ${partner.display_name}.` : 'You can’t send messages in this chat.'}
+            </span>
+            {blockStatus.iBlocked && (
+              <button type="button" onClick={() => void toggleBlock()} className="btn btn-s btn-sm min-h-[36px]">Unblock</button>
+            )}
+          </div>
+        ) : isRecordingAudio ? (
           <div className="flex items-center justify-between bg-red-950/80 border border-red-600/50 rounded-xl px-4 py-2.5 text-red-300 animate-pulse">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
@@ -1032,6 +1133,56 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         )}
       </footer>
 
+      {showChatMenu && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Chat options"
+          className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center anim-fade"
+          onClick={() => { setShowChatMenu(false); setConfirmBlock(false); }}
+          onKeyDown={e => { if (e.key === 'Escape') { setShowChatMenu(false); setConfirmBlock(false); } }}
+        >
+          <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <p className="px-4 pt-2 pb-2 text-xs text-vault-400 truncate">{partner.display_name}</p>
+            <button type="button" className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+              onClick={() => { setShowChatMenu(false); setShowThemeSheet(true); }}>
+              <Palette className="w-4 h-4" aria-hidden /> Chat theme
+            </button>
+            {isSupabaseConfigured() && !blockStatus.blocked && (
+              <button type="button" className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+                onClick={() => { setShowChatMenu(false); setShowTimerSheet(true); }}>
+                <Timer className="w-4 h-4" aria-hidden /> Disappearing messages
+                <span className="ml-auto text-xs text-vault-400">{disappearAfter ? timerLabel(disappearAfter) : 'Off'}</span>
+              </button>
+            )}
+            <button type="button" className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+              onClick={() => { setShowChatMenu(false); setShowReportModal(true); }}>
+              <Flag className="w-4 h-4" aria-hidden /> Report {partner.display_name}
+            </button>
+            {blockStatus.iBlocked ? (
+              <button type="button" className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+                onClick={() => void toggleBlock()}>
+                <Ban className="w-4 h-4" aria-hidden /> Unblock {partner.display_name}
+              </button>
+            ) : confirmBlock ? (
+              <div className="px-4 py-2 space-y-2">
+                <p className="text-xs text-vault-300 m-0">
+                  {partner.display_name} won't be able to message you, see when you're online, or play games with you. They aren't told you blocked them.
+                </p>
+                <button type="button" className="btn btn-sm w-full min-h-[44px] bg-rose-600 text-white" onClick={() => void toggleBlock()}>
+                  Block {partner.display_name}
+                </button>
+              </div>
+            ) : (
+              <button type="button" className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-rose-400 hover:bg-vault-800 rounded-xl"
+                onClick={() => setConfirmBlock(true)}>
+                <Ban className="w-4 h-4" aria-hidden /> Block {partner.display_name}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {showExtras && (
         <ChatExtrasSheet
           canPlayGames={isSupabaseConfigured()}
@@ -1107,6 +1258,12 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           conversationId={conversationId}
           partnerMessages={messages.filter(m => m.sender_id === partner.id && !m.deleted_at && !isSystem(m.content))}
           onClose={() => setShowReportModal(false)}
+          canBlock={!blockStatus.iBlocked}
+          onBlock={async () => {
+            if (!userId) return;
+            await blockUser(userId, partner.id);
+            setBlockStatus(await getBlockStatus(partner.id));
+          }}
         />
       )}
 
@@ -1145,6 +1302,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 };
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
+/** Messages loaded at a time (newest first, then older pages as you scroll up). */
+const PAGE_SIZE = 50;
 
 /** An outbox entry shown in the thread before the server has it. */
 function outboxToMessage(item: OutboxItem, status: MessageItem['status']): MessageItem {
@@ -1359,14 +1518,17 @@ function MessageBubble({
           Photo unavailable
         </span>
       ) : (
-        <img
-          src={imageUrl}
+        <ChatImage
+          url={imageUrl}
           alt="Shared photo"
           loading="lazy"
           decoding="async"
           onLoad={onMediaLoaded}
           onError={() => setImageFailed(true)}
           className="absolute inset-0 w-full h-full object-cover"
+          fallback={
+            <span className="absolute inset-0 flex items-center justify-center text-center text-xs p-3 opacity-80">Photo unavailable</span>
+          }
         />
       )}
     </span>
@@ -1396,7 +1558,7 @@ function MessageBubble({
               }`}
             >
               <div className="font-bold opacity-90">{replyTarget ? (replyTargetIsMe ? 'You' : partnerName) : 'Original message'}</div>
-              <div className="truncate opacity-80">{replyTarget ? previewText(replyTarget.content) : 'Not available'}</div>
+              <div className="truncate opacity-80">{replyTarget ? previewText(replyTarget.content) : 'Earlier message'}</div>
             </div>
           )}
 
@@ -1434,7 +1596,12 @@ function MessageBubble({
             <ChatGameCard gameId={gameRef.id} myUserId={myUserId} partnerName={partnerName} onRematch={onRematch} />
           ) : isImage ? (
             onOpenMedia && !imageFailed ? (
-              <button type="button" onClick={() => onOpenMedia(imageUrl)} className="block p-0 border-0 bg-transparent cursor-pointer" aria-label="Open photo">
+              <button
+                type="button"
+                onClick={() => void resolveChatMediaUrl(imageUrl).then(src => { if (src) onOpenMedia(src); })}
+                className="block p-0 border-0 bg-transparent cursor-pointer"
+                aria-label="Open photo"
+              >
                 {image}
               </button>
             ) : (

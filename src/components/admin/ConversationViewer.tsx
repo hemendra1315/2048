@@ -1,3 +1,5 @@
+import { ChatImage, ChatAudio } from '../common/ChatMedia';
+import { extraPreview, parseSticker, parseVoiceNote } from '../../lib/chatExtras';
 import type { User360Tab } from './User360View';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -367,17 +369,7 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
                           }`}
                         >
                           {/* Photo attachment preview if message is image */}
-                          {msg.content.startsWith('http') && (msg.content.includes('.jpg') || msg.content.includes('.png') || msg.content.includes('.webp') || msg.content.includes('supabase.co/storage')) ? (
-                            <div className="space-y-2">
-                              <img
-                                src={msg.content}
-                                alt="Attachment"
-                                className="max-w-xs rounded-xl object-cover max-h-64 border border-vault-700"
-                              />
-                            </div>
-                          ) : (
-                            <p className="m-0 break-words whitespace-pre-wrap">{msg.content}</p>
-                          )}
+                          <AdminMessageContent content={msg.content} />
                         </div>
 
                         {/* Message Actions (Visible on hover or if highlighted) */}
@@ -437,3 +429,36 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
     </div>
   );
 };
+
+/** Renders a stored message for moderators: photos and voice notes through signed links. */
+function AdminMessageContent({ content }: { content: string }) {
+  if (content.startsWith('[IMAGE]')) {
+    const url = content.slice('[IMAGE]'.length);
+    return (
+      <ChatImage
+        url={url}
+        alt="Photo"
+        className="max-w-xs rounded-xl object-cover max-h-64 border border-vault-700"
+        fallback={<span className="text-xs text-vault-400">Photo unavailable</span>}
+      />
+    );
+  }
+  const voice = parseVoiceNote(content);
+  if (voice) {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-xs text-vault-300">🎤 Voice message ({voice.duration})</span>
+        <ChatAudio url={voice.url} className="h-8 max-w-[260px]" />
+      </div>
+    );
+  }
+  const sticker = parseSticker(content);
+  if (sticker) return <span className="text-3xl" title={sticker.label}>{sticker.art}</span>;
+  if (content === '[DELETED]') return <p className="m-0 italic text-vault-400">Deleted by sender</p>;
+  if (content.startsWith('[SYSTEM:disappearing:')) {
+    return <p className="m-0 italic text-vault-300">{content.includes(':off') ? 'Turned off disappearing messages' : 'Turned on disappearing messages'}</p>;
+  }
+  const extra = extraPreview(content);
+  if (extra) return <p className="m-0 text-vault-200">{extra}</p>;
+  return <p className="m-0 break-words whitespace-pre-wrap">{content}</p>;
+}

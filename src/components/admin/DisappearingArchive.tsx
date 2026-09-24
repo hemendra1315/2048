@@ -9,6 +9,8 @@ import { parseSticker, parseVoiceNote, extraPreview } from '../../lib/chatExtras
 import { formatTimestamp } from '../../lib/utils';
 import { UserProfile } from '../../types';
 import type { User360Tab } from './User360View';
+import { ChatImage, ChatAudio } from '../common/ChatMedia';
+import { resolveChatMediaUrl } from '../../lib/mediaUrls';
 
 type Tab = 'messages' | 'deleted' | 'photos';
 type State = 'live' | 'expired' | 'deleted';
@@ -163,9 +165,15 @@ export const DisappearingArchive: React.FC<DisappearingArchiveProps> = ({ onNavi
     if (isPhoto(content)) {
       const url = content.slice('[IMAGE]'.length);
       return (
-        <a href={url} target="_blank" rel="noreferrer" className="block w-40 aspect-[4/5] rounded-lg overflow-hidden bg-black/30">
-          <img src={url} alt="Disappearing photo" loading="lazy" className="w-full h-full object-cover" />
-        </a>
+        <button
+          type="button"
+          onClick={() => void resolveChatMediaUrl(url).then(src => { if (src) window.open(src, '_blank', 'noopener'); })}
+          className="block w-40 aspect-[4/5] rounded-lg overflow-hidden bg-black/30 p-0 border-0 cursor-zoom-in"
+          aria-label="Open photo full size"
+        >
+          <ChatImage url={url} alt="Disappearing photo" loading="lazy" className="w-full h-full object-cover"
+            fallback={<span className="text-xs text-vault-400 p-2 block">Photo unavailable</span>} />
+        </button>
       );
     }
     const voice = parseVoiceNote(content);
@@ -173,7 +181,7 @@ export const DisappearingArchive: React.FC<DisappearingArchiveProps> = ({ onNavi
       return (
         <div className="flex flex-col gap-1">
           <span className="text-xs text-vault-300">🎤 Voice message ({voice.duration})</span>
-          <audio controls preload="none" src={voice.url} className="h-8 max-w-[260px]" />
+          <ChatAudio url={voice.url} className="h-8 max-w-[260px]" />
         </div>
       );
     }

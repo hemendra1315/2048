@@ -1,3 +1,5 @@
+import { resolveChatMediaUrl } from '../../lib/mediaUrls';
+import { ChatImage } from '../common/ChatMedia';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   ShieldCheck,
@@ -13,7 +15,7 @@ import {
   Check,
   Volume2,
 } from 'lucide-react';
-import { UserProfile, GalleryItem, NotificationMode } from '../../types';
+import { UserProfile, NotificationMode } from '../../types';
 import { Avatar } from '../common/Avatar';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -166,30 +168,16 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
             .order('created_at', { ascending: false })
             .limit(9);
 
-          if (data && data.length > 0) {
-            setSharedMedia(data.map(m => m.content.replace('[IMAGE]', '')));
-          } else {
-            // Fallback to gallery preview items
-            const { data: gallery } = await supabase
-              .from('gallery_items')
-              .select('image_url')
-              .limit(6);
-            if (gallery) {
-              setSharedMedia(gallery.map(g => g.image_url));
-            }
-          }
+          // Only photos actually sent in this chat. (It used to fall back to your own private
+          // gallery, which showed unrelated personal photos here.)
+          setSharedMedia((data ?? []).map(m => m.content.replace('[IMAGE]', '')));
         } else {
           const msgs = conversationId ? mockBackend.getMessages(conversationId) : [];
           const imgMsgs = msgs
             .filter(m => m.content.startsWith('[IMAGE]'))
             .map(m => m.content.replace('[IMAGE]', ''));
 
-          if (imgMsgs.length > 0) {
-            setSharedMedia(imgMsgs);
-          } else {
-            const gallery = mockBackend.getGallery(partner.id) as GalleryItem[];
-            setSharedMedia(gallery.slice(0, 6).map(g => g.image_url));
-          }
+          setSharedMedia(imgMsgs);
         }
       } catch (err) {
         console.warn('Error loading shared media for dossier:', err);
@@ -505,11 +493,11 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
                 {sharedMedia.map((url, idx) => (
                   <div
                     key={idx}
-                    onClick={() => onOpenMedia?.(url)}
+                    onClick={() => void resolveChatMediaUrl(url).then(src => { if (src) onOpenMedia?.(src); })}
                     className="aspect-square rounded-lg overflow-hidden bg-vault-950 border border-vault-800 cursor-pointer hover:border-emerald transition-colors"
                   >
-                    <img
-                      src={url}
+                    <ChatImage
+                      url={url}
                       alt="Shared media"
                       className="w-full h-full object-cover hover:scale-105 transition-transform duration-150"
                       loading="lazy"

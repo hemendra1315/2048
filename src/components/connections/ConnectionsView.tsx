@@ -1,3 +1,4 @@
+import { blockUser } from '../../lib/blocks';
 import React, { useState, useEffect, useCallback } from 'react';
 import { Users, UserCheck, MessageSquare, Plus, Check, X, Clock, Ban } from 'lucide-react';
 import { ConnectionItem, ConnectionRequestItem, UserProfile } from '../../types';
@@ -147,11 +148,16 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
     }
   };
 
-  const handleBlock = (targetId: string, name: string) => {
+  const handleBlock = async (targetId: string, name: string) => {
     if (!user) return;
-    mockBackend.blockUser(user.id, targetId);
-    showToast(`Blocked ${name}. Communication closed.`, 'info');
-    loadData();
+    try {
+      // Real block on the server (demo mode keeps using the local mock).
+      await blockUser(user.id, targetId);
+      showToast(`Blocked ${name}. They can't message you. Unblock in Settings → Privacy.`, 'info');
+      loadData();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not block', 'error');
+    }
   };
 
   return (
@@ -260,7 +266,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
                     <MessageSquare className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => handleBlock(conn.partner.id, conn.partner.display_name)}
+                    onClick={() => void handleBlock(conn.partner.id, conn.partner.display_name)}
                     className="p-2.5 bg-vault-950 hover:bg-rose-950 text-vault-500 hover:text-rose-400 rounded-xl border border-vault-800"
                     title="Block User"
                   >

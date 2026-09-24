@@ -173,3 +173,81 @@ export function useGalleryUrls(items: GalleryItem[]): {
 
   return { urls, retry };
 }
+
+// ---------------------------------------------------------------------------
+// Chat photos and voice notes (private `chat-media` bucket, files under <conversation_id>/).
+// Messages store the file's storage URL as an identifier; every view turns it into a
+// short-lived signed link. Only the two people in the chat and super admins can sign it.
+// ---------------------------------------------------------------------------
+export const CHAT_MEDIA_BUCKET = 'chat-media';
+
+/** The storage path inside chat-media for a stored URL, or null if it isn't one of ours. */
+export function chatMediaPath(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const m = url.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/chat-media\/([^?#]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+// Requests made in the same moment are signed together in one call.
+let pending: { path: string; resolve: (url: string | null) => void }[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushChatMediaQueue() {
+  const batch = pending;
+  pending = [];
+  flushTimer = null;
+  const paths = [...new Set(batch.map(b => b.path))];
+  signStoragePaths(CHAT_MEDIA_BUCKET, paths)
+    .then(map => batch.forEach(b => b.resolve(map.get(b.path) ?? null)))
+    .catch(() => batch.forEach(b => b.resolve(null)));
+}
+
+function signChatMediaPath(path: string): Promise<string | null> {
+  const cached = readCache(CHAT_MEDIA_BUCKET, path);
+  if (cached) return Promise.resolve(cached);
+  return new Promise(resolve => {
+    pending.push({ path, resolve });
+    if (!flushTimer) flushTimer = setTimeout(flushChatMediaQueue, 0);
+  });
+}
+
+/** A URL the browser can load for a chat photo/voice note (data:/blob:/external URLs pass through). */
+export async function resolveChatMediaUrl(url: string): Promise<string | null> {
+  const path = isSupabaseConfigured() ? chatMediaPath(url) : null;
+  if (!path) return url || null;
+  return signChatMediaPath(path);
+}
+
+/** Forget a cached link (e.g. it expired while the screen was open) so the next request re-signs. */
+export function forgetChatMediaUrl(url: string): void {
+  const path = chatMediaPath(url);
+  if (path) signedUrlCache.delete(cacheKey(CHAT_MEDIA_BUCKET, path));
+}
+
+/** Signed URL for a chat photo or voice note. `retry()` re-signs after a load error. */
+export function useChatMediaUrl(url: string | null | undefined): { src?: string; failed: boolean; retry: () => void } {
+  const [state, setState] = useState<{ src?: string; failed: boolean }>({ failed: false });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!url) {
+      setState({ failed: false });
+      return;
+    }
+    let cancelled = false;
+    setState(prev => (prev.src ? prev : { failed: false }));
+    void resolveChatMediaUrl(url).then(src => {
+      if (!cancelled) setState(src ? { src, failed: false } : { failed: true });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [url, attempt]);
+
+  const retry = useCallback(() => {
+    if (url) forgetChatMediaUrl(url);
+    setAttempt(a => a + 1);
+  }, [url]);
+
+  return { ...state, retry };
+}
