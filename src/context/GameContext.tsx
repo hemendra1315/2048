@@ -3,11 +3,12 @@ import { CoverGameType, CoverGameMeta } from '../types';
 import { useAuth } from './AuthContext';
 import { useVault } from './VaultContext';
 import { mockBackend } from '../lib/mockBackend';
+import { playTone, vibrateDevice } from '../lib/sound';
 
 export const COVER_GAMES: CoverGameMeta[] = [
   {
     id: 'game_2048',
-    name: '2048 Vault',
+    name: '2048',
     tagline: 'Join the numbers and reach 2048!',
     icon: 'Grid',
     color: 'from-amber-500 to-orange-600',
@@ -15,16 +16,16 @@ export const COVER_GAMES: CoverGameMeta[] = [
   },
   {
     id: 'snake',
-    name: 'Cyber Snake',
-    tagline: 'Classic retro snake with neon grid and speed ramps',
+    name: 'Snake',
+    tagline: 'Eat, grow, and avoid the walls',
     icon: 'Activity',
     color: 'from-emerald-500 to-teal-600',
     implemented: true,
   },
   {
     id: 'tic_tac_toe',
-    name: 'Tic-Tac-Toe AI',
-    tagline: 'Battle against unbeatable Minimax logic or local 2P',
+    name: 'Tic-Tac-Toe',
+    tagline: 'Play against a friend or the computer',
     icon: 'Hash',
     color: 'from-cyan-500 to-blue-600',
     implemented: true,
@@ -40,10 +41,10 @@ export const COVER_GAMES: CoverGameMeta[] = [
   {
     id: 'minesweeper',
     name: 'Minesweeper',
-    tagline: 'Flag mines and clear the danger grid',
+    tagline: 'Flag the mines and clear the board',
     icon: 'ShieldAlert',
     color: 'from-rose-500 to-red-600',
-    implemented: false,
+    implemented: true,
   },
   {
     id: 'brick_breaker',
@@ -56,10 +57,10 @@ export const COVER_GAMES: CoverGameMeta[] = [
   {
     id: 'memory_match',
     name: 'Memory Match',
-    tagline: 'Flip and pair matching cyber tiles under time pressure',
+    tagline: 'Flip cards and find the matching pairs',
     icon: 'Layers',
     color: 'from-purple-500 to-pink-500',
-    implemented: false,
+    implemented: true,
   },
   {
     id: 'bubble_shooter',
@@ -97,6 +98,8 @@ interface GameContextType {
   hapticsEnabled: boolean;
   toggleSound: () => void;
   toggleHaptics: () => void;
+  playFeedback: (freq?: number) => void;
+  vibrateFeedback: (pattern?: number | number[]) => void;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -156,8 +159,35 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }));
   };
 
-  const toggleSound = () => setSoundEnabled(v => !v);
-  const toggleHaptics = () => setHapticsEnabled(v => !v);
+  const toggleSound = () => {
+    setSoundEnabled(v => {
+      const next = !v;
+      if (next) playTone(660, 90);
+      return next;
+    });
+  };
+
+  const toggleHaptics = () => {
+    setHapticsEnabled(v => {
+      const next = !v;
+      if (next) vibrateDevice(20);
+      return next;
+    });
+  };
+
+  const playFeedback = useCallback(
+    (freq = 440) => {
+      if (soundEnabled) playTone(freq);
+    },
+    [soundEnabled]
+  );
+
+  const vibrateFeedback = useCallback(
+    (pattern: number | number[] = 15) => {
+      if (hapticsEnabled) vibrateDevice(pattern);
+    },
+    [hapticsEnabled]
+  );
 
   return (
     <GameContext.Provider
@@ -171,6 +201,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         hapticsEnabled,
         toggleSound,
         toggleHaptics,
+        playFeedback,
+        vibrateFeedback,
       }}
     >
       {children}

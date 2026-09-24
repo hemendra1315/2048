@@ -12,7 +12,7 @@ interface Tile {
 }
 
 export const Game2048: React.FC = () => {
-  const { getHighScore, saveHighScore } = useGame();
+  const { getHighScore, saveHighScore, playFeedback, vibrateFeedback } = useGame();
   const [grid, setGrid] = useState<(Tile | null)[][]>(() =>
     Array(4).fill(null).map(() => Array(4).fill(null))
   );
@@ -159,6 +159,8 @@ export const Game2048: React.FC = () => {
       if (moved) {
         const gridWithNew = addRandomTile(nextGrid);
         setGrid(gridWithNew);
+        vibrateFeedback(10);
+        playFeedback(gainedScore > 0 ? 660 : 440);
 
         const newScore = score + gainedScore;
         setScore(newScore);
@@ -168,6 +170,8 @@ export const Game2048: React.FC = () => {
 
         if (won && !gameWon) {
           setGameWon(true);
+          playFeedback(880);
+          vibrateFeedback([20, 40, 20]);
         }
 
         if (!movesAvailable(gridWithNew)) {
@@ -175,7 +179,7 @@ export const Game2048: React.FC = () => {
         }
       }
     },
-    [grid, gameOver, gameWon, keepPlaying, score, highScore, saveHighScore, addRandomTile, movesAvailable]
+    [grid, gameOver, gameWon, keepPlaying, score, highScore, saveHighScore, addRandomTile, movesAvailable, playFeedback, vibrateFeedback]
   );
 
   // Keyboard controls
