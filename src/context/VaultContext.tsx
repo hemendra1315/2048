@@ -16,16 +16,16 @@ function unlockErrorMessage(result: UnlockResult | null): string {
       const mins = result.locked_until
         ? Math.max(1, Math.ceil((new Date(result.locked_until).getTime() - Date.now()) / 60000))
         : 15;
-      return `Too many wrong passwords. Try again in ${mins} minute(s).`;
+      return `Too many wrong PIN attempts. Try again in ${mins} minute(s).`;
     }
     case 'too_short':
-      return 'Unlock password must be at least 4 characters';
+      return 'Unlock PIN must be at least 4 digits';
     case 'too_long':
-      return 'Unlock password is too long';
+      return 'Unlock PIN is too long';
     case 'not_authenticated':
       return 'Session expired. Sign in again.';
     default:
-      return 'Incorrect password';
+      return 'Incorrect PIN';
   }
 }
 import { useToast } from './ToastContext';
@@ -38,6 +38,7 @@ interface VaultContextType {
   openUnlockModal: () => void;
   closeUnlockModal: () => void;
   verifyAndUnlock: (secret: string) => Promise<boolean>;
+  unlockWithBiometric: () => void;
   panicLock: () => void;
   updatePreferences: (updates: Partial<UserPreferences>) => Promise<void>;
   updateSecret: (oldSecret: string, newSecret: string) => Promise<void>;
@@ -145,12 +146,12 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           showToast('Vault security cleared', 'success');
           return true;
         }
-        showToast('Incorrect password', 'error');
+        showToast('Incorrect PIN', 'error');
         return false;
       } else if (user && isMockBackendAllowed()) {
         const ok = await mockBackend.verifyUnlockSecret(user.id, secret);
         if (!ok) {
-          showToast('Incorrect password', 'error');
+          showToast('Incorrect PIN', 'error');
           return false;
         }
       } else if (user) {
@@ -158,7 +159,7 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         return false;
       } else {
         if (secret !== '2048') {
-          showToast('Incorrect password (Default: 2048)', 'error');
+          showToast('Incorrect PIN (Default: 2048)', 'error');
           return false;
         }
       }
@@ -173,6 +174,12 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return false;
     }
   };
+
+  const unlockWithBiometric = useCallback(() => {
+    setIsUnlocked(true);
+    setUnlockModalOpen(false);
+    showToast('Vault security cleared', 'success');
+  }, [showToast]);
 
   const updatePreferences = async (updates: Partial<UserPreferences>) => {
     if (!user) return;
@@ -210,9 +217,9 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       } else {
         throw new Error('Server is not configured');
       }
-      showToast('Unlock password updated securely', 'success');
+      showToast('Unlock PIN updated securely', 'success');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to update password';
+      const msg = err instanceof Error ? err.message : 'Failed to update PIN';
       showToast(msg, 'error');
       throw err;
     }
@@ -227,6 +234,7 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         openUnlockModal,
         closeUnlockModal,
         verifyAndUnlock,
+        unlockWithBiometric,
         panicLock,
         updatePreferences,
         updateSecret,

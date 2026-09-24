@@ -7,10 +7,11 @@ import { LauncherCoverView } from './components/launcher/LauncherCoverView';
 import { AuthModal } from './components/auth/AuthModal';
 import { SocialLayout } from './components/layout/SocialLayout';
 import { AdminLayout } from './components/admin/AdminLayout';
+import { UnlockTipModal } from './components/launcher/UnlockTipModal';
 import { getInviteUidFromUrl, clearInviteFromUrl } from './lib/invite';
 
 const MainNavigator: React.FC = () => {
-  const { user, isSuperAdmin, recoveryCodeToShow } = useAuth();
+  const { user, isSuperAdmin, recoveryCodeToShow, justRegistered, acknowledgeJustRegistered } = useAuth();
   const { isUnlocked } = useVault();
   const { showToast } = useToast();
   const [adminMode, setAdminMode] = useState(false);
@@ -43,12 +44,17 @@ const MainNavigator: React.FC = () => {
     return <AuthModal />;
   }
 
-  // 3. If Super Admin Hub is active (display only; admin data access is enforced by RLS on the server)
+  // 3. Right after a brand-new account is created, show a one-time tip on how to get back in
+  if (justRegistered) {
+    return <UnlockTipModal onDismiss={acknowledgeJustRegistered} />;
+  }
+
+  // 4. If Super Admin Hub is active (display only; admin data access is enforced by RLS on the server)
   if (isSuperAdmin && adminMode) {
     return <AdminLayout onReturnToUserMode={() => setAdminMode(false)} />;
   }
 
-  // 4. Authenticated Private Social Layer
+  // 5. Authenticated Private Social Layer
   return (
     <SocialLayout
       onAdminToggle={isSuperAdmin ? () => setAdminMode(true) : undefined}

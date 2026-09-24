@@ -1,21 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Lock, X, ArrowRight, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { Lock, X, ArrowRight, ShieldCheck, Fingerprint } from 'lucide-react';
 import { useVault } from '../../context/VaultContext';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
+import { BiometricService } from '../../lib/biometrics';
 
 export const StealthUnlockModal: React.FC = () => {
-  const { unlockModalOpen, closeUnlockModal, verifyAndUnlock } = useVault();
+  const { unlockModalOpen, closeUnlockModal, verifyAndUnlock, unlockWithBiometric } = useVault();
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [biometricLoading, setBiometricLoading] = useState(false);
   const [errorShake, setErrorShake] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (unlockModalOpen) {
       setPassword('');
-      setShowPassword(false);
       setErrorShake(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
@@ -34,6 +36,22 @@ export const StealthUnlockModal: React.FC = () => {
       setTimeout(() => setErrorShake(false), 500);
       setPassword('');
       inputRef.current?.focus();
+    }
+  };
+
+  const handleBiometricUnlock = async () => {
+    setBiometricLoading(true);
+    try {
+      const avail = await BiometricService.isAvailable();
+      if (avail.available) {
+        unlockWithBiometric();
+      } else {
+        showToast('Biometric hardware not detected. Enter your PIN.', 'info');
+      }
+    } catch {
+      showToast('Biometrics unavailable. Enter your PIN.', 'info');
+    } finally {
+      setBiometricLoading(false);
     }
   };
 
@@ -58,32 +76,25 @@ export const StealthUnlockModal: React.FC = () => {
           <ShieldCheck className="w-7 h-7" />
         </div>
 
-        <h3 className="text-base font-bold text-white mb-0.5">Security Clearance</h3>
+        <h3 className="text-base font-bold text-white mb-0.5">Enter your PIN</h3>
         <p className="text-xs text-vault-400 mb-5 text-center">
-          {user ? 'Enter your vault password' : 'Enter vault password (Default: 2048)'}
+          {user ? 'Unlock to continue' : 'Default PIN: 2048'}
         </p>
 
-        {/* Password Field */}
+        {/* PIN Field */}
         <div className="relative w-full mb-4">
           <Lock className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             ref={inputRef}
-            type={showPassword ? 'text' : 'password'}
+            type="password"
+            inputMode="numeric"
             autoComplete="current-password"
-            maxLength={72}
+            maxLength={8}
             value={password}
             onChange={e => setPassword(e.target.value)}
-            placeholder="Password"
-            className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-10 pr-10 py-2.5 text-sm text-white placeholder-vault-600 outline-none transition-colors"
+            placeholder="PIN"
+            className="w-full bg-vault-950 border border-vault-700 focus:border-arcade-gold rounded-xl pl-10 pr-4 py-2.5 text-sm text-white text-center tracking-[0.4em] placeholder-vault-600 placeholder:tracking-normal outline-none transition-colors"
           />
-          <button
-            type="button"
-            onClick={() => setShowPassword(s => !s)}
-            aria-label={showPassword ? 'Hide password' : 'Show password'}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-vault-500 hover:text-vault-200 transition-colors"
-          >
-            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
         </div>
 
         <button
@@ -94,6 +105,18 @@ export const StealthUnlockModal: React.FC = () => {
           {loading ? <Lock className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4 stroke-[2.5]" />}
           <span>Unlock</span>
         </button>
+
+        {user?.biometric_enabled && (
+          <button
+            type="button"
+            onClick={handleBiometricUnlock}
+            disabled={biometricLoading}
+            className="w-full mt-2.5 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold text-vault-200 bg-vault-800/80 hover:bg-vault-700 active:scale-95 disabled:opacity-40 transition-all"
+          >
+            <Fingerprint className="w-4 h-4 text-emerald-400" />
+            <span>{biometricLoading ? 'Scanning...' : 'Use fingerprint instead'}</span>
+          </button>
+        )}
       </form>
     </div>
   );

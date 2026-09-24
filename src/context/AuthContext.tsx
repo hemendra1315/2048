@@ -30,6 +30,9 @@ interface AuthContextType {
   /** Set after sign-up or a recovery reset until the user confirms they saved the new key. */
   recoveryCodeToShow: string | null;
   acknowledgeRecoveryCode: () => void;
+  /** True right after a brand-new account is created, until the unlock tip is dismissed. */
+  justRegistered: boolean;
+  acknowledgeJustRegistered: () => void;
   loginWithPassword: (identifier: string, password: string) => Promise<UserProfile>;
   loginWithBiometrics: (identifier?: string) => Promise<UserProfile>;
   registerFrictionless: (params: RegisterParams) => Promise<{ user: UserProfile; recoveryCode: string }>;
@@ -50,6 +53,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [loading, setLoading] = useState(true);
   const [isBiometricsSupported, setIsBiometricsSupported] = useState(false);
   const [recoveryCodeToShow, setRecoveryCodeToShow] = useState<string | null>(null);
+  const [justRegistered, setJustRegistered] = useState(false);
   const { showToast } = useToast();
   const useMock = isMockBackendAllowed();
 
@@ -290,12 +294,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         }
         showToast('Vault identity activated', 'success');
+        setJustRegistered(true);
         return { user: profile, recoveryCode: result.recoveryCode ?? '' };
       }
       if (!useMock) throw new Error(NOT_CONFIGURED);
       const res = await mockBackend.registerFrictionless(params);
       setRecoveryCodeToShow(res.recoveryCode);
       setUser(res.user);
+      setJustRegistered(true);
       return res;
     });
 
@@ -329,6 +335,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       setUser(null);
       setRecoveryCodeToShow(null);
+      setJustRegistered(false);
       showToast('Vault locked & session cleared', 'info');
     } catch (err) {
       console.error('Logout error:', err);
@@ -372,6 +379,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isBiometricsSupported,
         recoveryCodeToShow,
         acknowledgeRecoveryCode: () => setRecoveryCodeToShow(null),
+        justRegistered,
+        acknowledgeJustRegistered: () => setJustRegistered(false),
         loginWithPassword,
         loginWithBiometrics,
         registerFrictionless,
