@@ -120,12 +120,11 @@ export const CameraView: React.FC<CameraViewProps> = ({
       ctx.fillStyle = '#10b981';
       ctx.font = 'bold 32px Inter, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('SOVEREIGN ENCRYPTED CAPTURE', 400, 380);
+      ctx.fillText('Photo', 400, 380);
 
       ctx.fillStyle = '#a1a1aa';
-      ctx.font = '20px JetBrains Mono, monospace';
-      ctx.fillText(`TIMESTAMP: ${new Date().toISOString()}`, 400, 440);
-      ctx.fillText(`CLEARANCE: ${user?.uid || 'SECURE-NODE'}`, 400, 480);
+      ctx.font = '20px Inter, sans-serif';
+      ctx.fillText(new Date().toLocaleString(), 400, 440);
 
       const dataUrl = fallbackCanvas.toDataURL('image/jpeg', 0.9);
       setCapturedMedia(dataUrl);
@@ -151,12 +150,12 @@ export const CameraView: React.FC<CameraViewProps> = ({
           'Captured via Camera'
         );
       }
-      showToast('Saved to Personal Gallery', 'success');
+      showToast('Saved to Photos', 'success');
       setCapturedMedia(null);
       if (onSavedToGallery) onSavedToGallery();
     } catch (err) {
       console.error('Failed to save to gallery:', err);
-      showToast('Error saving to gallery', 'error');
+      showToast('Could not save photo', 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -181,12 +180,12 @@ export const CameraView: React.FC<CameraViewProps> = ({
           '[ENCRYPTED_VAULT_ITEM]'
         );
       }
-      showToast('Encrypted & Locked in Private Vault', 'success');
+      showToast('Saved to Vault', 'success');
       setCapturedMedia(null);
       if (onSavedToVault) onSavedToVault();
     } catch (err) {
       console.error('Failed to save to vault:', err);
-      showToast('Error encrypting to vault', 'error');
+      showToast('Could not save to Vault', 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -196,7 +195,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     if (!capturedMedia) return;
     if (onSendToChat) {
       onSendToChat(capturedMedia);
-      showToast('Media attached to active chat', 'success');
+      showToast('Photo added to chat', 'success');
     } else {
       showToast('Open a chat to send directly', 'info');
     }

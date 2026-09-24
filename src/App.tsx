@@ -20,10 +20,10 @@ const MainNavigator: React.FC = () => {
   // Network disconnect/reconnect detector
   useEffect(() => {
     const handleOnline = () => {
-      showToast('Network connection restored. Sovereign sync resumed.', 'success');
+      showToast('Back online', 'success');
     };
     const handleOffline = () => {
-      showToast('Network disconnected. Operating in local sandbox mode.', 'error');
+      showToast("You're offline", 'error');
     };
 
     window.addEventListener('online', handleOnline);

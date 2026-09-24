@@ -20,6 +20,7 @@ import { useVault } from '../../context/VaultContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { mockBackend } from '../../lib/mockBackend';
 import { BiometricService } from '../../lib/biometrics';
+import { handleImageError } from '../../lib/utils';
 
 type VaultCategory = 'all' | 'photos' | 'videos' | 'documents' | 'notes';
 
@@ -49,7 +50,7 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
       setAutoLockSeconds(prev => {
         if (prev <= 1) {
           setIsUnlocked(false);
-          showToast('Vault auto-locked due to inactivity', 'info');
+          showToast('Locked due to inactivity', 'info');
           return preferences.auto_lock_seconds || 60;
         }
         return prev - 1;
@@ -112,7 +113,7 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
       if (avail.available) {
         setIsUnlocked(true);
         setAutoLockSeconds(preferences.auto_lock_seconds || 60);
-        showToast('Secondary Biometric Clearance Granted', 'success');
+        showToast('Unlocked with fingerprint', 'success');
       } else {
         showToast('Biometric hardware not detected. Enter PIN.', 'info');
       }
@@ -141,7 +142,7 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
     setIsUnlocked(false);
     setSelectedItem(null);
     setAutoLockSeconds(preferences.auto_lock_seconds || 60);
-    showToast('Vault Locked & Memory Wiped', 'info');
+    showToast('Vault locked', 'info');
   };
 
   const handleDeleteItem = async (item: GalleryItem) => {
@@ -153,7 +154,7 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
         mockBackend.deleteGalleryItem(item.id, user.id);
       }
       setSelectedItem(null);
-      showToast('Item purged from encrypted vault', 'info');
+      showToast('Item deleted', 'info');
       loadVaultItems();
     } catch (err) {
       console.error('Delete error:', err);
@@ -180,9 +181,9 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
           </div>
         </div>
 
-        <h2 className="text-xl font-bold text-white tracking-tight">ENCRYPTED VAULT</h2>
+        <h2 className="text-xl font-bold text-white tracking-tight">Private Vault</h2>
         <p className="text-xs text-[#A1A1AA] max-w-sm mt-2 mb-6">
-          Secondary security challenge required. Zero-knowledge encrypted storage with zero thumbnail leakage.
+          Enter your PIN or use your fingerprint to view what's inside.
         </p>
 
         {/* Biometric Trigger */}
@@ -208,7 +209,7 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
               type="password"
               inputMode="numeric"
               maxLength={8}
-              placeholder="Enter Vault PIN (Default: 2048)"
+              placeholder="Enter PIN (Default: 2048)"
               value={pinInput}
               onChange={e => {
                 setPinInput(e.target.value);
@@ -225,13 +226,13 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
             type="submit"
             className="w-full py-3 bg-[#10B981] hover:bg-emerald-400 active:scale-98 text-black text-sm font-bold rounded-xl shadow-lg transition-all"
           >
-            Authenticate Clearance
+            Unlock
           </button>
         </form>
 
-        <div className="mt-8 flex items-center gap-2 text-[11px] text-zinc-500 font-mono">
+        <div className="mt-8 flex items-center gap-2 text-[11px] text-zinc-500">
           <FolderLock className="w-3.5 h-3.5 text-[#10B981]" />
-          <span>ZERO-THUMBNAIL LEAK DEFENSE ACTIVE</span>
+          <span>Hidden from Photos and the rest of the app</span>
         </div>
       </div>
     );
@@ -256,7 +257,7 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-white tracking-wide">SECURE ROOM</h2>
+              <h2 className="text-sm font-bold text-white tracking-wide">Vault</h2>
               <span className="px-2 py-0.5 bg-emerald-950 text-[#10B981] border border-[#10B981]/30 rounded text-[10px] font-mono font-bold">
                 ENCRYPTED
               </span>
@@ -341,7 +342,7 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
           <FolderLock className="w-10 h-10 text-zinc-600 mx-auto" />
           <p className="text-sm font-semibold text-white">Vault is Empty</p>
           <p className="text-xs text-[#A1A1AA] max-w-xs mx-auto">
-            Use the Camera tab or Gallery to encrypt and transfer sensitive media into this zero-knowledge room.
+            Move a photo here from the camera or your Photos to keep it private.
           </p>
         </div>
       ) : (
@@ -356,6 +357,8 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
                 src={item.image_url}
                 alt={item.caption || 'Vault Item'}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                loading="lazy"
+                onError={handleImageError}
               />
               <div className="absolute top-1.5 right-1.5 p-1 rounded-md bg-black/70 backdrop-blur-sm border border-[#262626]">
                 <ShieldCheck className="w-3 h-3 text-[#10B981]" />
@@ -371,8 +374,8 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
           {/* Top Bar */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-1 bg-[#111111] border border-[#262626] rounded-full text-xs font-mono text-[#10B981]">
-                🔒 ZERO-KNOWLEDGE ENCRYPTED
+              <span className="px-2.5 py-1 bg-[#111111] border border-[#262626] rounded-full text-xs text-[#10B981]">
+                🔒 Encrypted
               </span>
             </div>
 
@@ -399,6 +402,7 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
               src={selectedItem.image_url}
               alt="Vault Media"
               className="max-h-[70vh] max-w-full rounded-2xl object-contain shadow-2xl border border-[#262626]"
+              onError={handleImageError}
             />
           </div>
 

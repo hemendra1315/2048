@@ -16,6 +16,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useVault } from '../../context/VaultContext';
 import { CoverGameType } from '../../types';
+import { getAvatarUrl } from '../../lib/utils';
 
 interface ProfileViewProps {
   onOpenVault?: () => void;
@@ -59,7 +60,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
   const handleLogout = () => {
     logout();
     panicLock();
-    showToast('Secure session terminated', 'info');
+    showToast('Signed out', 'info');
   };
 
   return (
@@ -68,7 +69,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
       <div className="p-5 bg-[#111111] border border-[#262626] rounded-2xl relative overflow-hidden">
         <div className="flex items-center gap-4">
           <img
-            src={user?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.uid || 'vault'}`}
+            src={user?.avatar_url || getAvatarUrl(user?.uid || 'vault')}
             alt="Avatar"
             className="w-16 h-16 rounded-2xl bg-[#171717] border border-[#262626] object-cover"
           />
@@ -76,7 +77,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h2 className="text-base font-bold text-white truncate">
-                {user?.display_name || 'Sovereign Node'}
+                {user?.display_name || 'Account'}
               </h2>
               {isSuperAdmin && (
                 <span className="px-2 py-0.5 bg-amber-950 text-amber-300 border border-amber-600/50 rounded text-[10px] font-bold">
@@ -85,7 +86,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
               )}
             </div>
 
-            {/* Sovereign UID Pill */}
+            {/* UID Pill */}
             <button
               onClick={copyUid}
               className="mt-1.5 flex items-center gap-1.5 px-2.5 py-1 bg-[#171717] hover:bg-[#222222] border border-[#262626] rounded-lg text-xs font-mono text-[#10B981] transition-all active:scale-95"
@@ -102,9 +103,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
         <div className="mt-4 pt-4 border-t border-[#262626] flex items-center justify-between text-xs">
           <div className="flex items-center gap-1.5 text-zinc-400">
             <CheckCircle2 className="w-4 h-4 text-[#10B981]" />
-            <span>Cryptographic Proof: Active</span>
+            <span>Account verified</span>
           </div>
-          <span className="font-mono text-[11px] text-zinc-500">Tier: Zero-Knowledge</span>
+          <span className="font-mono text-[11px] text-zinc-500">Encrypted</span>
         </div>
       </div>
 

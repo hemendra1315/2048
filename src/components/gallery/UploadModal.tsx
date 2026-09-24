@@ -85,7 +85,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         mockBackend.uploadGalleryItem(user.id, previewUrl, caption.trim() || undefined);
       }
 
-      showToast('Photo securely stored in private gallery', 'success');
+      showToast('Photo saved', 'success');
       onUploadSuccess();
       onClose();
     } catch (err) {

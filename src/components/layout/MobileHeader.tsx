@@ -3,6 +3,7 @@ import { Copy, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { PanicButton } from '../launcher/PanicButton';
+import { getAvatarUrl } from '../../lib/utils';
 
 interface MobileHeaderProps {
   title?: string;
@@ -24,14 +25,14 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({ title, onAdminToggle
     <header className="sticky top-0 z-30 bg-[#0A0A0A]/95 backdrop-blur-xl border-b border-[#262626] px-4 py-3 flex items-center justify-between select-none">
       <div className="flex items-center gap-2.5">
         <img
-          src={user?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.uid || 'vault'}`}
+          src={user?.avatar_url || getAvatarUrl(user?.uid || 'vault')}
           alt="Avatar"
           className="w-9 h-9 rounded-xl bg-[#171717] border border-[#262626] object-cover"
         />
         <div>
           <div className="flex items-center gap-1.5">
             <h2 className="text-sm font-bold text-white leading-tight">
-              {title || user?.display_name || 'Sovereign Node'}
+              {title || user?.display_name || 'Account'}
             </h2>
             {isSuperAdmin && (
               <span className="px-1.5 py-0.2 bg-amber-950 text-amber-300 border border-amber-600/50 rounded text-[9px] font-bold">

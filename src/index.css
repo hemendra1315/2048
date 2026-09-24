@@ -15,18 +15,33 @@
   }
 
   /* Custom Scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #262626 transparent;
+  }
   ::-webkit-scrollbar {
     width: 5px;
     height: 5px;
   }
   ::-webkit-scrollbar-track {
-    background: #0d0f14;
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #3d4455;
+    background: #262626;
     border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #6f7c97;
+    background: #10B981;
+  }
+}
+
+@layer utilities {
+  /* Hides the scrollbar while keeping the element scrollable. */
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 }

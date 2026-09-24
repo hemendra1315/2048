@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { getAvatarUrl } from '../../lib/utils';
 import { AddPersonModal } from './AddPersonModal';
 
 interface ConnectionsViewProps {
@@ -149,7 +150,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
   const handleBlock = (targetId: string, name: string) => {
     if (!user) return;
     mockBackend.blockUser(user.id, targetId);
-    showToast(`Blocked ${name}. Communication closed.`, 'info');
+    showToast(`Blocked ${name}`, 'info');
     loadData();
   };
 
@@ -236,7 +237,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
               >
                 <div className="flex items-center gap-3">
                   <img
-                    src={conn.partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${conn.partner.uid}`}
+                    src={conn.partner.avatar_url || getAvatarUrl(conn.partner.uid)}
                     alt="Avatar"
                     className="w-11 h-11 rounded-xl bg-vault-800 border border-vault-700 object-cover"
                   />
@@ -285,7 +286,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
               >
                 <div className="flex items-center gap-3">
                   <img
-                    src={req.sender?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${req.sender?.uid || 'req'}`}
+                    src={req.sender?.avatar_url || getAvatarUrl(req.sender?.uid || 'req')}
                     alt="Sender"
                     className="w-11 h-11 rounded-xl bg-vault-800 border border-vault-700 object-cover"
                   />
@@ -334,7 +335,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
               >
                 <div className="flex items-center gap-3">
                   <img
-                    src={req.receiver?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${req.receiver?.uid || 'out'}`}
+                    src={req.receiver?.avatar_url || getAvatarUrl(req.receiver?.uid || 'out')}
                     alt="Receiver"
                     className="w-11 h-11 rounded-xl bg-vault-800 border border-vault-700 object-cover"
                   />

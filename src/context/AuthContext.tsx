@@ -237,7 +237,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } else {
         throw new Error(NOT_CONFIGURED);
       }
-      showToast('Fingerprint verified: Vault unlocked', 'success');
+      showToast('Unlocked with fingerprint', 'success');
       return profile;
     });
 
@@ -293,7 +293,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             showToast(`Fingerprint not enabled: ${err instanceof Error ? err.message : 'cancelled'}`, 'info');
           }
         }
-        showToast('Vault identity activated', 'success');
+        showToast('Account created', 'success');
         setJustRegistered(true);
         return { user: profile, recoveryCode: result.recoveryCode ?? '' };
       }
@@ -336,7 +336,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(null);
       setRecoveryCodeToShow(null);
       setJustRegistered(false);
-      showToast('Vault locked & session cleared', 'info');
+      showToast('Signed out', 'info');
     } catch (err) {
       console.error('Logout error:', err);
     }

@@ -17,7 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { formatTimestamp } from '../../lib/utils';
+import { formatTimestamp, getAvatarUrl } from '../../lib/utils';
 import { buildInviteLink, extractUidFromInput } from '../../lib/invite';
 import { ChatRoom } from './ChatRoom';
 
@@ -388,7 +388,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               >
                 <div className="relative">
                   <img
-                    src={c.partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${c.partner.uid}`}
+                    src={c.partner.avatar_url || getAvatarUrl(c.partner.uid)}
                     alt={c.partner.display_name}
                     className="w-11 h-11 rounded-xl bg-[#171717] border border-[#262626] object-cover"
                   />
@@ -443,7 +443,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="relative">
                       <img
-                        src={c.partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${c.partner.uid}`}
+                        src={c.partner.avatar_url || getAvatarUrl(c.partner.uid)}
                         alt={c.partner.display_name}
                         className="w-11 h-11 rounded-xl bg-[#171717] border border-[#262626] object-cover"
                       />

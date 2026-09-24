@@ -1,4 +1,5 @@
-﻿import { type ClassValue, clsx } from 'clsx';
+﻿import type { SyntheticEvent } from 'react';
+import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 export function cn(...inputs: ClassValue[]) {
@@ -34,6 +35,29 @@ export function formatDetailedDate(isoString: string): string {
     minute: '2-digit',
     second: '2-digit'
   });
+}
+
+// Fallback avatar for a user with no uploaded photo, keyed by a stable seed (their UID).
+export function getAvatarUrl(seed: string): string {
+  return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(seed)}`;
+}
+
+// A subtle placeholder shown in place of a broken/failed-to-load photo thumbnail.
+export const BROKEN_IMAGE_PLACEHOLDER =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 24 24">` +
+      `<rect width="24" height="24" fill="#171717"/>` +
+      `<path d="M4 16l4.5-6 3 4 2.5-3L20 16" stroke="#3f3f46" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>` +
+      `<circle cx="8" cy="8" r="1.6" fill="#3f3f46"/>` +
+      `</svg>`
+  );
+
+// Swaps a broken <img> to the placeholder once, instead of leaving the browser's broken-image icon.
+export function handleImageError(e: SyntheticEvent<HTMLImageElement>): void {
+  const img = e.currentTarget;
+  img.onerror = null;
+  img.src = BROKEN_IMAGE_PLACEHOLDER;
 }
 
 // Generate unique, human-readable UID (e.g. CIPHER-4921)

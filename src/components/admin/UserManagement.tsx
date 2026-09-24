@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { listProfiles, getConnectionCounts, setUserStatus } from '../../lib/adminApi';
 import { UserProfile } from '../../types';
-import { formatDetailedDate } from '../../lib/utils';
+import { formatDetailedDate, getAvatarUrl } from '../../lib/utils';
 import { UserDetailView } from './UserDetailView';
 
 export const UserManagement: React.FC = () => {
@@ -143,7 +143,7 @@ export const UserManagement: React.FC = () => {
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
                     <img
-                      src={u.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${u.uid}`}
+                      src={u.avatar_url || getAvatarUrl(u.uid)}
                       alt="Avatar"
                       className="w-12 h-12 rounded-xl bg-vault-800 border border-vault-700 object-cover"
                     />

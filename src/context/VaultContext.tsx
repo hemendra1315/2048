@@ -94,7 +94,7 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const panicLock = useCallback(() => {
     setIsUnlocked(false);
     setUnlockModalOpen(false);
-    showToast('Cover mode engaged', 'info');
+    showToast('Locked', 'info');
   }, [showToast]);
 
   // Global auto-lock inactivity timer
@@ -109,7 +109,7 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       timer = setTimeout(() => {
         setIsUnlocked(false);
         setUnlockModalOpen(false);
-        showToast('Vault auto-locked due to inactivity', 'info');
+        showToast('Locked due to inactivity', 'info');
       }, timeoutSecs * 1000);
     };
 
@@ -133,7 +133,7 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           if (!error && result && result.ok) {
             setIsUnlocked(true);
             setUnlockModalOpen(false);
-            showToast('Vault security cleared', 'success');
+            showToast('Unlocked', 'success');
             return true;
           }
         } catch {
@@ -143,7 +143,7 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         if (secret === '2048' || secret.length >= 4) {
           setIsUnlocked(true);
           setUnlockModalOpen(false);
-          showToast('Vault security cleared', 'success');
+          showToast('Unlocked', 'success');
           return true;
         }
         showToast('Incorrect PIN', 'error');
@@ -166,11 +166,11 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       setIsUnlocked(true);
       setUnlockModalOpen(false);
-      showToast('Vault security cleared', 'success');
+      showToast('Unlocked', 'success');
       return true;
     } catch (err) {
       console.error('Unlock verification failed:', err);
-      showToast('Unlock verification error', 'error');
+      showToast('Something went wrong. Try again.', 'error');
       return false;
     }
   };
@@ -178,7 +178,7 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const unlockWithBiometric = useCallback(() => {
     setIsUnlocked(true);
     setUnlockModalOpen(false);
-    showToast('Vault security cleared', 'success');
+    showToast('Unlocked', 'success');
   }, [showToast]);
 
   const updatePreferences = async (updates: Partial<UserPreferences>) => {
@@ -194,7 +194,7 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         mockBackend.updateUserPreferences(user.id, updates);
       }
       setPreferences(prev => ({ ...prev, ...updates }));
-      showToast('App customization saved', 'success');
+      showToast('Settings saved', 'success');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Preferences update failed';
       showToast(msg, 'error');
@@ -217,7 +217,7 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       } else {
         throw new Error('Server is not configured');
       }
-      showToast('Unlock PIN updated securely', 'success');
+      showToast('PIN updated', 'success');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to update PIN';
       showToast(msg, 'error');

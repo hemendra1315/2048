@@ -17,6 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { mockBackend } from '../../lib/mockBackend';
+import { handleImageError } from '../../lib/utils';
 import { UploadModal } from './UploadModal';
 
 type GalleryTab = 'all' | 'photos' | 'videos' | 'albums' | 'shared';
@@ -257,6 +258,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ onOpenCamera }) => {
                       alt={item.caption || 'Media item'}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                       loading="lazy"
+                      onError={handleImageError}
                     />
                   </div>
                 ))}
@@ -302,6 +304,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ onOpenCamera }) => {
               src={selectedItem.image_url}
               alt="Expanded Media"
               className="max-h-[72vh] max-w-full rounded-2xl object-contain shadow-2xl border border-[#262626]"
+              onError={handleImageError}
             />
           </div>
 

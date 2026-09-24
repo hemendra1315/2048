@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { getAvatarUrl } from '../../lib/utils';
 
 interface AddPersonModalProps {
   isOpen: boolean;
@@ -150,7 +151,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           <div className="bg-vault-950/80 border border-vault-700/80 rounded-2xl p-4 animate-slide-up">
             <div className="flex items-center gap-3 mb-3">
               <img
-                src={targetProfile.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${targetProfile.uid}`}
+                src={targetProfile.avatar_url || getAvatarUrl(targetProfile.uid)}
                 alt="Target"
                 className="w-12 h-12 rounded-xl bg-vault-800 border border-vault-700 object-cover"
               />

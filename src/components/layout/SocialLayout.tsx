@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { SocialTab, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { useVault } from '../../context/VaultContext';
 import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
@@ -21,6 +22,8 @@ import { GalleryView } from '../gallery/GalleryView';
 import { VaultView } from '../vault/VaultView';
 import { ProfileView } from '../profile/ProfileView';
 import { PanicButton } from '../launcher/PanicButton';
+import { updateUnreadBadge } from '../../lib/badge';
+import { getAvatarUrl } from '../../lib/utils';
 
 interface SocialLayoutProps {
   onAdminToggle?: () => void;
@@ -30,6 +33,7 @@ interface SocialLayoutProps {
 
 export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle, pendingInviteUid, onInviteConsumed }) => {
   const { user, isSuperAdmin } = useAuth();
+  const { preferences } = useVault();
   const { showToast } = useToast();
 
   // Chats is the default landing page
@@ -83,6 +87,11 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle, pendi
   useEffect(() => {
     void refreshStats();
   }, [refreshStats, currentTab]);
+
+  useEffect(() => {
+    updateUnreadBadge(stats.unreadCount);
+    return () => updateUnreadBadge(0);
+  }, [stats.unreadCount]);
 
   // Resolve an invite link's UID into a conversation the moment the user is signed in.
   useEffect(() => {
@@ -164,8 +173,8 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle, pendi
                 <ShieldCheck className="w-6 h-6" />
               </div>
               <div>
-                <h1 className="text-sm font-bold text-white tracking-wider">SOVEREIGN</h1>
-                <p className="text-[10px] font-mono text-zinc-500">E2E VAULT & MESSENGER</p>
+                <h1 className="text-sm font-bold text-white tracking-wider">Messenger</h1>
+                <p className="text-[10px] text-zinc-500">Private &amp; encrypted</p>
               </div>
             </div>
 
@@ -215,7 +224,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle, pendi
             <div className="p-3 bg-[#111111] border border-[#262626] rounded-xl flex items-center justify-between">
               <div className="flex items-center gap-2.5 min-w-0">
                 <img
-                  src={user?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.uid || 'vault'}`}
+                  src={user?.avatar_url || getAvatarUrl(user?.uid || 'vault')}
                   alt="Avatar"
                   className="w-8 h-8 rounded-lg bg-[#171717] object-cover"
                 />
@@ -258,9 +267,9 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle, pendi
         <aside className="hidden xl:flex flex-col w-72 p-5 bg-[#0A0A0A] border-l border-[#262626] select-none space-y-5">
           <div className="p-4 bg-[#111111] border border-[#262626] rounded-2xl text-center space-y-2">
             <ShieldCheck className="w-8 h-8 text-[#10B981] mx-auto" />
-            <h4 className="text-xs font-bold text-white uppercase tracking-wider">Zero-Knowledge Node</h4>
+            <h4 className="text-xs font-bold text-white uppercase tracking-wider">Private &amp; Secure</h4>
             <p className="text-[11px] text-[#A1A1AA]">
-              All communication and media storage are hardware-sealed and isolated.
+              Your messages and photos are end-to-end encrypted.
             </p>
           </div>
 
@@ -269,7 +278,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle, pendi
               <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Active Contact</h4>
               <div className="flex items-center gap-3">
                 <img
-                  src={selectedDesktopPartner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${selectedDesktopPartner.uid}`}
+                  src={selectedDesktopPartner.avatar_url || getAvatarUrl(selectedDesktopPartner.uid)}
                   alt="Partner"
                   className="w-10 h-10 rounded-xl bg-[#171717] object-cover"
                 />
@@ -278,26 +287,25 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle, pendi
                   <p className="text-[11px] font-mono text-[#10B981]">{selectedDesktopPartner.uid}</p>
                 </div>
               </div>
-              <div className="text-[11px] text-zinc-500 font-mono space-y-1 pt-2 border-t border-[#262626]">
-                <p>Status: Verified Peer 🟢</p>
-                <p>Channel: 1-to-1 Direct</p>
+              <div className="text-[11px] text-zinc-500 space-y-1 pt-2 border-t border-[#262626]">
+                <p>🟢 Online</p>
               </div>
             </div>
           ) : (
             <div className="p-4 bg-[#111111] border border-[#262626] rounded-2xl space-y-3">
-              <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">System Status</h4>
+              <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Status</h4>
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between text-zinc-400">
-                  <span>Vault Mode:</span>
-                  <span className="text-[#10B981] font-mono font-semibold">Decrypted</span>
+                  <span>App:</span>
+                  <span className="text-[#10B981] font-semibold">Unlocked</span>
                 </div>
                 <div className="flex justify-between text-zinc-400">
-                  <span>Cover Camouflage:</span>
-                  <span className="text-white font-mono">2048 Game</span>
+                  <span>Disguised as:</span>
+                  <span className="text-white">{preferences.custom_app_name || '2048'}</span>
                 </div>
                 <div className="flex justify-between text-zinc-400">
-                  <span>Auto-Lock:</span>
-                  <span className="text-white font-mono">Active (60s)</span>
+                  <span>Auto-lock:</span>
+                  <span className="text-white">{preferences.auto_lock_seconds ?? 60}s</span>
                 </div>
               </div>
             </div>

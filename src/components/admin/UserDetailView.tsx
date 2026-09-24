@@ -38,7 +38,7 @@ import {
   deleteGalleryItem,
   logAdminAction,
 } from '../../lib/adminApi';
-import { formatDetailedDate } from '../../lib/utils';
+import { formatDetailedDate, getAvatarUrl } from '../../lib/utils';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 
@@ -309,7 +309,7 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
       <div className="bg-vault-900 border border-vault-800 rounded-3xl p-4.5 shadow-md flex items-center justify-between">
         <div className="flex items-center gap-3.5">
           <img
-            src={currentUser.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`}
+            src={currentUser.avatar_url || getAvatarUrl(currentUser.uid)}
             alt="Avatar"
             className="w-14 h-14 rounded-2xl bg-vault-800 border-2 border-arcade-gold/40 object-cover shadow-sm"
           />
@@ -540,7 +540,7 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
                       <img
                         src={
                           c.partnerProfile.avatar_url ||
-                          `https://api.dicebear.com/7.x/bottts/svg?seed=${c.partnerProfile.uid}`
+                          getAvatarUrl(c.partnerProfile.uid)
                         }
                         alt="Partner"
                         className="w-10 h-10 rounded-xl bg-vault-800 object-cover border border-vault-700"
@@ -765,7 +765,7 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
                       <img
                         src={
                           conn.partner.avatar_url ||
-                          `https://api.dicebear.com/7.x/bottts/svg?seed=${conn.partner.uid}`
+                          getAvatarUrl(conn.partner.uid)
                         }
                         alt="Partner"
                         className="w-8 h-8 rounded-lg object-cover"

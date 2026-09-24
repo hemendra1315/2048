@@ -3,6 +3,7 @@ import { Shield, Users, MessageSquare, Image, Copy, Plus, QrCode, Lock, CheckCir
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { SocialTab } from '../../types';
+import { getAvatarUrl } from '../../lib/utils';
 
 interface HomeViewProps {
   onNavigateTab: (tab: SocialTab) => void;
@@ -38,7 +39,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <img
-              src={user?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.uid || 'vault'}`}
+              src={user?.avatar_url || getAvatarUrl(user?.uid || 'vault')}
               alt="Avatar"
               className="w-14 h-14 rounded-2xl bg-vault-800 border-2 border-arcade-gold/40 object-cover shadow-md"
             />

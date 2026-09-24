@@ -20,7 +20,7 @@ import { MessageItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { formatTimestamp } from '../../lib/utils';
+import { formatTimestamp, getAvatarUrl, handleImageError } from '../../lib/utils';
 import { useToast } from '../../context/ToastContext';
 
 interface ChatRoomProps {
@@ -144,7 +144,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   useEffect(() => {
     if (initialAttachment) {
       handleSend(`[IMAGE]${initialAttachment}`);
-      showToast('Camera snapshot sent to chat', 'success');
+      showToast('Photo sent', 'success');
       if (onClearInitialAttachment) onClearInitialAttachment();
     }
   }, [initialAttachment]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -237,7 +237,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     reader.onload = () => {
       const dataUrl = reader.result as string;
       handleSend(`[IMAGE]${dataUrl}`);
-      showToast('Encrypted photo shared', 'success');
+      showToast('Photo sent', 'success');
     };
     reader.readAsDataURL(file);
   };
@@ -281,7 +281,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         reader.onloadend = () => {
           const dataUrl = reader.result as string;
           handleSend(`[VOICE_NOTE:${audioSeconds || 1}s]${dataUrl}`);
-          showToast('Voice note transmitted securely', 'success');
+          showToast('Voice note sent', 'success');
         };
         reader.readAsDataURL(blob);
       };
@@ -352,7 +352,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           </span>
 
           <img
-            src={partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${partner.uid}`}
+            src={partner.avatar_url || getAvatarUrl(partner.uid)}
             alt="Partner"
             className="w-10 h-10 rounded-xl bg-[#171717] border border-[#262626] object-cover"
           />
@@ -439,6 +439,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                         src={msg.content.replace('[IMAGE]', '')}
                         alt="Attachment"
                         className="max-h-40 w-full object-cover"
+                        loading="lazy"
+                        onError={handleImageError}
                       />
                       <span className="absolute bottom-1 right-1.5 text-[10px] font-medium text-white bg-black/50 px-1.5 py-0.5 rounded-md">
                         {formatTimestamp(msg.created_at)}
@@ -657,7 +659,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
             <div className="flex flex-col items-center gap-2 py-2">
               <img
-                src={partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${partner.uid}`}
+                src={partner.avatar_url || getAvatarUrl(partner.uid)}
                 alt={partner.display_name}
                 className="w-20 h-20 rounded-2xl bg-[#171717] border border-[#262626] object-cover"
               />
