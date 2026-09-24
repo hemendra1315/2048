@@ -8,6 +8,7 @@ import { AuthModal } from './components/auth/AuthModal';
 import { SocialLayout } from './components/layout/SocialLayout';
 import { AdminLayout } from './components/admin/AdminLayout';
 import { UnlockTipModal } from './components/launcher/UnlockTipModal';
+import { ErrorBoundary } from './components/system/ErrorBoundary';
 import { getInviteUidFromUrl, clearInviteFromUrl } from './lib/invite';
 
 const MainNavigator: React.FC = () => {
@@ -69,15 +70,17 @@ const MainNavigator: React.FC = () => {
 
 export function App() {
   return (
-    <ToastProvider>
-      <AuthProvider>
-        <VaultProvider>
-          <GameProvider>
-            <MainNavigator />
-          </GameProvider>
-        </VaultProvider>
-      </AuthProvider>
-    </ToastProvider>
+    <ErrorBoundary>
+      <ToastProvider>
+        <AuthProvider>
+          <VaultProvider>
+            <GameProvider>
+              <MainNavigator />
+            </GameProvider>
+          </VaultProvider>
+        </AuthProvider>
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }
 
