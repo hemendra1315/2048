@@ -7,6 +7,9 @@ import {
   UserPlus,
   ShieldCheck,
   X,
+  Pin,
+  PinOff,
+  Timer,
 } from 'lucide-react';
 import { ConversationItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -18,6 +21,8 @@ import { ChatRoom } from './ChatRoom';
 import { ContactDossier } from './ContactDossier';
 import { Avatar } from '../common/Avatar';
 import { useMediaQuery, DESKTOP_QUERY } from '../../lib/useMediaQuery';
+import { usePresence } from '../../lib/presence';
+import { useToast } from '../../context/ToastContext';
 
 interface MessagesViewProps {
   initialPartnerId?: string | null;
@@ -45,6 +50,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [newChatUidInput, setNewChatUidInput] = useState('');
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
+  const { showToast } = useToast();
+  const [pinTarget, setPinTarget] = useState<ConversationItem | null>(null);
+  const presence = usePresence(conversations.map(c => c.partner.id));
 
   // The parent passes an inline callback. Keeping it in a ref stops every parent re-render from
   // changing loadConversations, which would re-run the realtime effect (unsubscribe/resubscribe).
@@ -79,30 +87,32 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     setLoading(true);
     try {
       if (isSupabaseConfigured()) {
-        const { data: rawConvs } = await supabase
-          .from('conversations')
-          .select('*')
-          .or(`user_a.eq.${user.id},user_b.eq.${user.id}`)
-          .order('updated_at', { ascending: false });
+        // One call returns every chat with its last message, unread count, pin and timer.
+        const { data: rows, error } = await supabase.rpc('get_chat_list');
+        if (error) throw error;
+        const list = (rows ?? []) as unknown as {
+          conversation_id: string;
+          partner_id: string;
+          created_at: string;
+          updated_at: string;
+          last_message_id: string | null;
+          last_message_content: string | null;
+          last_message_sender_id: string | null;
+          last_message_at: string | null;
+          last_message_is_read: boolean | null;
+          unread_count: number;
+          pinned_at: string | null;
+          disappear_after_seconds: number | null;
+        }[];
 
-        const convs = (rawConvs || []) as unknown as { id: string; user_a: string; user_b: string; created_at: string; updated_at: string }[];
-
-        if (convs.length > 0) {
-          const partnerIds = convs.map(c => (c.user_a === user.id ? c.user_b : c.user_a));
-          const convIds = convs.map(c => c.id);
-
-          const [{ data: rawProfiles }, { data: rawMessages }] = await Promise.all([
-            supabase.from('profiles').select('*').in('id', partnerIds),
-            supabase.from('messages').select('*').in('conversation_id', convIds).order('created_at', { ascending: false }),
-          ]);
-
+        if (list.length > 0) {
+          const partnerIds = [...new Set(list.map(r => r.partner_id))];
+          const { data: rawProfiles } = await supabase.from('profiles').select('*').in('id', partnerIds);
           const profiles = (rawProfiles || []) as unknown as UserProfile[];
-          const messages = (rawMessages || []) as unknown as { id: string; conversation_id: string; sender_id: string; content: string; is_read: boolean; created_at: string }[];
 
-          const formatted: ConversationItem[] = convs.map(c => {
-            const pId = c.user_a === user.id ? c.user_b : c.user_a;
-            const partner = profiles?.find(p => p.id === pId) || {
-              id: pId,
+          const formatted: ConversationItem[] = list.map(r => {
+            const partner = profiles.find(p => p.id === r.partner_id) || {
+              id: r.partner_id,
               uid: 'UNKNOWN',
               display_name: 'Contact',
               avatar_url: null,
@@ -111,20 +121,26 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               created_at: '',
               updated_at: '',
             };
-
-            const convMessages = messages.filter(m => m.conversation_id === c.id);
-            const lastMsg = convMessages[0] as ConversationItem['lastMessage'];
-            const unreadCount = convMessages.filter(m => !m.is_read && m.sender_id !== user.id).length;
-
             return {
-              id: c.id,
-              user_a: c.user_a,
-              user_b: c.user_b,
-              created_at: c.created_at,
-              updated_at: c.updated_at,
+              id: r.conversation_id,
+              user_a: user.id,
+              user_b: r.partner_id,
+              created_at: r.created_at,
+              updated_at: r.updated_at,
               partner: partner as ConversationItem['partner'],
-              lastMessage: lastMsg,
-              unreadCount,
+              lastMessage: r.last_message_id
+                ? {
+                    id: r.last_message_id,
+                    conversation_id: r.conversation_id,
+                    sender_id: r.last_message_sender_id ?? '',
+                    content: r.last_message_content ?? '',
+                    is_read: Boolean(r.last_message_is_read),
+                    created_at: r.last_message_at ?? r.updated_at,
+                  }
+                : undefined,
+              unreadCount: r.unread_count,
+              pinnedAt: r.pinned_at,
+              disappearAfterSeconds: r.disappear_after_seconds,
             };
           });
           setConversations(formatted);
@@ -151,13 +167,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       const unsub = mockBackend.subscribe('messages:updated', () => loadConversations());
       return unsub;
     } else {
+      let reloadTimer: ReturnType<typeof setTimeout> | undefined;
       const channel = supabase
         .channel(uniqueChannelName('conversations_messages'))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
-          loadConversations();
+          // Several changes often arrive together (message + read receipt); reload once.
+          if (reloadTimer) clearTimeout(reloadTimer);
+          reloadTimer = setTimeout(() => void loadConversations(), 400);
         })
         .subscribe();
       return () => {
+        if (reloadTimer) clearTimeout(reloadTimer);
         supabase.removeChannel(channel);
       };
     }
@@ -285,6 +305,18 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
   };
 
+  const togglePin = async (c: ConversationItem) => {
+    setPinTarget(null);
+    const pin = !c.pinnedAt;
+    const { error } = await supabase.rpc('set_chat_pinned', { p_conversation_id: c.id, p_pinned: pin });
+    if (error) {
+      showToast(error.message || 'Could not update pin', 'error');
+      return;
+    }
+    showToast(pin ? `Pinned ${c.partner.display_name}` : 'Chat unpinned', 'success');
+    void loadConversations();
+  };
+
   const filteredConversations = conversations.filter(c => {
     const q = searchQuery.toLowerCase();
     return (
@@ -295,6 +327,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
   const previewText = (content?: string) => {
     if (!content) return 'Say hi';
+    if (content === '[DELETED]') return 'Message deleted';
+    if (content.startsWith('[SYSTEM:disappearing:off')) return 'Disappearing messages turned off';
+    if (content.startsWith('[SYSTEM:disappearing:')) return 'Disappearing messages turned on';
     if (content.startsWith('[IMAGE]')) return 'Photo';
     if (content.startsWith('[VOICE_NOTE')) return 'Voice message';
     return content;
@@ -361,20 +396,35 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               const preview = previewText(c.lastMessage?.content);
               const time = c.lastMessage ? formatTimestamp(c.lastMessage.created_at) : '';
               return (
-                <li key={c.id}>
+                <li key={c.id} className="relative group">
                   <button
                     type="button"
                     onClick={() => handleStartDirectChat(c.partner, c.id)}
+                    onContextMenu={e => {
+                      if (!isSupabaseConfigured()) return;
+                      e.preventDefault();
+                      setPinTarget(c);
+                    }}
                     aria-current={isSelected ? 'true' : undefined}
                     aria-label={`${c.partner.display_name}. ${preview}. ${time}${unread ? `. ${c.unreadCount} unread` : ''}`}
                     className={`row w-full text-left p-2.5 rounded-xl transition-colors ${
                       isSelected ? 'bg-vault-850 border border-vault-750' : 'hover:bg-vault-900 border border-transparent'
                     }`}
                   >
-                    <Avatar name={c.partner.display_name} seed={c.partner.uid} src={c.partner.avatar_url} size={48} />
+                    <Avatar
+                      name={c.partner.display_name}
+                      seed={c.partner.uid}
+                      src={c.partner.avatar_url}
+                      size={48}
+                      online={presence[c.partner.id]?.isOnline ?? false}
+                    />
                     <span className="flex-1 min-w-0 flex flex-col gap-0.5 ml-1">
                       <span className="flex justify-between items-baseline gap-2">
-                        <span className="t-body font-bold text-white truncate">{c.partner.display_name}</span>
+                        <span className="t-body font-bold text-white truncate flex items-center gap-1 min-w-0">
+                          <span className="truncate">{c.partner.display_name}</span>
+                          {c.pinnedAt && <Pin className="w-3 h-3 text-emerald shrink-0" aria-label="Pinned" />}
+                          {c.disappearAfterSeconds ? <Timer className="w-3 h-3 text-vault-400 shrink-0" aria-label="Disappearing messages on" /> : null}
+                        </span>
                         <span className={`t-cap mono whitespace-nowrap text-[11px] ${unread ? 'cem' : 'c3'}`}>{time}</span>
                       </span>
                       <span className="flex items-center gap-1.5 min-h-[20px]">
@@ -385,6 +435,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                       </span>
                     </span>
                   </button>
+                  {isSupabaseConfigured() && (
+                    <button
+                      type="button"
+                      onClick={() => void togglePin(c)}
+                      className="hidden md:flex absolute right-1.5 top-1.5 w-7 h-7 rounded-full items-center justify-center bg-vault-900 border border-vault-750 text-vault-300 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                      aria-label={c.pinnedAt ? `Unpin ${c.partner.display_name}` : `Pin ${c.partner.display_name}`}
+                      title={c.pinnedAt ? 'Unpin chat' : 'Pin chat'}
+                    >
+                      {c.pinnedAt ? <PinOff className="w-3.5 h-3.5" aria-hidden /> : <Pin className="w-3.5 h-3.5" aria-hidden />}
+                    </button>
+                  )}
                 </li>
               );
             })}
@@ -405,8 +466,32 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     />
   ) : null;
 
+  const pinSheet = pinTarget ? (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Chat options"
+      className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center anim-fade"
+      onClick={() => setPinTarget(null)}
+      onKeyDown={e => { if (e.key === 'Escape') setPinTarget(null); }}
+    >
+      <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <p className="px-4 pt-2 pb-2 text-xs text-vault-400 truncate">{pinTarget.partner.display_name}</p>
+        <button
+          type="button"
+          onClick={() => void togglePin(pinTarget)}
+          className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+        >
+          {pinTarget.pinnedAt ? <PinOff className="w-4 h-4" aria-hidden /> : <Pin className="w-4 h-4" aria-hidden />}
+          {pinTarget.pinnedAt ? 'Unpin chat' : 'Pin to top'}
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="animate-fade-in w-full h-full">
+      {pinSheet}
       {isDesktop ? (
         /* Desktop 3-Column Balanced Layout (Nav/Chats 260px | Dossier 350px | Active Chat Fluid min-720px) */
         <div className="flex h-full w-full overflow-hidden rounded-2xl border border-vault-800 bg-vault-950 shadow-2xl">

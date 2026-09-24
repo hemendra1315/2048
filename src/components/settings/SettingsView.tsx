@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
+  Radio,
   ArrowLeft,
   Shield,
   KeyRound,
@@ -16,6 +17,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useVault } from '../../context/VaultContext';
 import { useGame, COVER_GAMES } from '../../context/GameContext';
 import { useToast } from '../../context/ToastContext';
+import { getPresenceSharing, setPresenceSharing } from '../../lib/presence';
+import { isSupabaseConfigured } from '../../lib/supabase';
 import { CoverGameType } from '../../types';
 
 interface SettingsViewProps {
@@ -34,6 +37,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordUpdating, setPasswordUpdating] = useState(false);
   const [readReceipts, setReadReceipts] = useState(true);
+  const [shareOnline, setShareOnline] = useState(true);
+  const [shareOnlineSaving, setShareOnlineSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getPresenceSharing().then(v => { if (!cancelled) setShareOnline(v); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleToggleShareOnline = async () => {
+    const next = !shareOnline;
+    setShareOnline(next);
+    setShareOnlineSaving(true);
+    try {
+      await setPresenceSharing(next);
+      showToast(next ? 'Your online status is visible to your chats' : 'Online status hidden. You also won’t see others’', 'info');
+    } catch {
+      setShareOnline(!next);
+      showToast('Could not change online status', 'error');
+    } finally {
+      setShareOnlineSaving(false);
+    }
+  };
   const [biometricsLoading, setBiometricsLoading] = useState(false);
 
   const handleSaveAppName = async (e: React.FormEvent) => {
@@ -306,6 +332,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
       <section className="flex flex-col gap-2">
         <h2 className="t-over px-1 m-0">Privacy</h2>
         <div className="card overflow-hidden">
+          {isSupabaseConfigured() && (
+            <>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={shareOnline}
+                disabled={shareOnlineSaving}
+                onClick={() => void handleToggleShareOnline()}
+                className="set-row w-full text-left"
+              >
+                <Radio className="i c2" aria-hidden />
+                <div className="flex-1 min-w-0">
+                  <span className="t-body block">Online status & last seen</span>
+                  <span className="t-cap c3">
+                    Show people you chat with when you're online. If you turn this off, you won't see theirs either.
+                  </span>
+                </div>
+                <span className={shareOnline ? 'switch switch-on' : 'switch'} aria-hidden="true" />
+              </button>
+              <div className="divider ml-[52px]" />
+            </>
+          )}
           <button
             type="button"
             role="switch"

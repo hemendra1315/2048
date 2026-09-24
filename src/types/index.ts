@@ -62,6 +62,8 @@ export interface ConversationItem {
   lastMessage?: MessageItem;
   unreadCount: number;
   isPartnerTyping?: boolean;
+  pinnedAt?: string | null;
+  disappearAfterSeconds?: number | null;
 }
 
 export interface MessageItem {
@@ -72,6 +74,23 @@ export interface MessageItem {
   is_read: boolean;
   created_at: string;
   sender?: UserProfile;
+  /** Id generated on the device, so a retried send is stored once. */
+  client_id?: string | null;
+  reply_to_id?: string | null;
+  edited_at?: string | null;
+  deleted_at?: string | null;
+  /** Set when the chat has disappearing messages on. */
+  expires_at?: string | null;
+  /** Local only: not yet confirmed by the server. */
+  status?: 'sending' | 'queued' | 'failed';
+}
+
+export type ReactionEmoji = '❤️' | '😂' | '👍' | '😮' | '😢' | '🔥';
+export const REACTION_EMOJIS: ReactionEmoji[] = ['❤️', '😂', '👍', '😮', '😢', '🔥'];
+
+export interface MessageReaction {
+  user_id: string;
+  emoji: ReactionEmoji;
 }
 
 export interface GalleryItem {

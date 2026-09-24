@@ -338,6 +338,19 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
                           <span className="text-[10px] font-mono text-vault-500">
                             {formatTimestamp(msg.created_at)}
                           </span>
+                          {msg.expires_at && new Date(msg.expires_at).getTime() <= Date.now() && (
+                            <span
+                              className="px-1.5 py-0.5 rounded bg-vault-800 text-vault-300 text-[10px] font-bold"
+                              title={`Disappeared for both users ${formatTimestamp(msg.expires_at)}`}
+                            >
+                              Expired for users
+                            </span>
+                          )}
+                          {msg.expires_at && new Date(msg.expires_at).getTime() > Date.now() && (
+                            <span className="px-1.5 py-0.5 rounded bg-vault-800 text-vault-400 text-[10px]" title={`Disappears for users ${formatTimestamp(msg.expires_at)}`}>
+                              Disappearing
+                            </span>
+                          )}
                           {isHighlighted && (
                             <span className="px-1.5 py-0.5 rounded bg-emerald text-black text-[9px] font-bold uppercase tracking-wider">
                               Target Context

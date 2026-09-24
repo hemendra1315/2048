@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import { usePresenceHeartbeat } from '../../lib/presence';
 import {
   MessageSquare,
   Camera,
@@ -45,6 +46,7 @@ interface SocialLayoutProps {
 
 export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => {
   const { user, isSuperAdmin } = useAuth();
+  usePresenceHeartbeat(user?.id);
   const { showToast } = useToast();
 
   // Chats is the default landing page

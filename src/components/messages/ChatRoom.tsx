@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, memo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, memo } from 'react';
 import {
   ArrowLeft,
   Send,
@@ -14,8 +14,26 @@ import {
   SlidersHorizontal,
   X,
   Flag,
+  Reply,
+  Pencil,
+  Trash2,
+  Copy,
+  Clock,
+  AlertCircle,
+  Timer,
 } from 'lucide-react';
-import { MessageItem, UserProfile } from '../../types';
+import { MessageItem, MessageReaction, ReactionEmoji, REACTION_EMOJIS, UserProfile } from '../../types';
+import type { RealtimeChannel } from '@supabase/supabase-js';
+import {
+  deliver,
+  enqueue,
+  flushOutbox,
+  newClientId,
+  onOutboxEvent,
+  pendingFor,
+  startOutboxSync,
+  OutboxItem,
+} from '../../lib/chatOutbox';
 import { useAuth } from '../../context/AuthContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
@@ -26,6 +44,7 @@ import { useToast } from '../../context/ToastContext';
 import { Avatar } from '../common/Avatar';
 import { ContactDossier } from './ContactDossier';
 import { ReportUserModal } from './ReportUserModal';
+import { describePresence, usePresence } from '../../lib/presence';
 
 interface ChatRoomProps {
   conversationId: string;
@@ -53,6 +72,20 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [showContactModal, setShowContactModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({});
+  const [replyTo, setReplyTo] = useState<MessageItem | null>(null);
+  const [editing, setEditing] = useState<MessageItem | null>(null);
+  const [actionMsg, setActionMsg] = useState<MessageItem | null>(null);
+  const messagesRef = useRef<MessageItem[]>([]);
+  messagesRef.current = messages;
+  const typingChannelRef = useRef<RealtimeChannel | null>(null);
+  const lastTypingSentRef = useRef(0);
+  const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [disappearAfter, setDisappearAfter] = useState<number | null>(null);
+  const [showTimerSheet, setShowTimerSheet] = useState(false);
+  const partnerPresence = usePresence([partner.id])[partner.id];
+  const presenceLabel = describePresence(partnerPresence);
   const listRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userId = user?.id;
@@ -91,6 +124,64 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
   }, []);
 
+  const loadReactions = useCallback(async () => {
+    if (!isSupabaseConfigured()) return;
+    const { data, error } = await supabase
+      .from('message_reactions')
+      .select('message_id, user_id, emoji, messages!inner(conversation_id)')
+      .eq('messages.conversation_id', conversationId);
+    if (error) {
+      console.warn('[chat] reactions load failed:', error.code);
+      return;
+    }
+    const map: Record<string, MessageReaction[]> = {};
+    for (const r of (data ?? []) as unknown as { message_id: string; user_id: string; emoji: ReactionEmoji }[]) {
+      (map[r.message_id] ??= []).push({ user_id: r.user_id, emoji: r.emoji });
+    }
+    setReactions(map);
+  }, [conversationId]);
+
+  // Disappearing-messages setting for this chat.
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    let cancelled = false;
+    void supabase
+      .from('conversations')
+      .select('disappear_after_seconds')
+      .eq('id', conversationId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setDisappearAfter((data as { disappear_after_seconds?: number | null } | null)?.disappear_after_seconds ?? null);
+      });
+    return () => { cancelled = true; };
+  }, [conversationId]);
+
+  // Drop messages from the screen as they expire (the server already hides them).
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      if (messagesRef.current.some(m => m.expires_at && new Date(m.expires_at).getTime() <= now)) {
+        setMessages(prev => prev.filter(m => !m.expires_at || new Date(m.expires_at).getTime() > now));
+      }
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const changeDisappearing = async (seconds: number | null) => {
+    setShowTimerSheet(false);
+    if (seconds === disappearAfter) return;
+    const before = disappearAfter;
+    setDisappearAfter(seconds);
+    const { error } = await supabase.rpc('set_disappearing_messages', {
+      p_conversation_id: conversationId,
+      p_seconds: seconds,
+    });
+    if (error) {
+      setDisappearAfter(before);
+      showToast(error.message || 'Could not change the timer', 'error');
+    }
+  };
+
   const loadMessages = useCallback(async () => {
     if (!userId) return;
     try {
@@ -103,7 +194,14 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
         if (error) throw error;
         if (data) {
-          setMessages(data as unknown as MessageItem[]);
+          const stored = data as unknown as MessageItem[];
+          // Messages still waiting in the outbox (sent while offline) show as queued.
+          const storedClientIds = new Set(stored.map(m => m.client_id).filter(Boolean));
+          const waiting = pendingFor(conversationId, userId)
+            .filter(item => !storedClientIds.has(item.client_id))
+            .map(item => outboxToMessage(item, 'queued'));
+          setMessages([...stored, ...waiting]);
+          void loadReactions();
           // Read receipts go through an RPC: messages has no UPDATE policy (by design).
           const { error: readError } = await supabase.rpc('mark_conversation_read', {
             p_conversation_id: conversationId,
@@ -118,7 +216,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     } catch (err) {
       console.error('Error loading messages:', err);
     }
-  }, [conversationId, userId]);
+  }, [conversationId, userId, loadReactions]);
 
   useEffect(() => {
     loadMessages();
@@ -147,6 +245,15 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             const newMsg = payload.new as unknown as MessageItem;
             setMessages(prev => {
               if (prev.some(m => m.id === newMsg.id)) return prev;
+              // Replace our own optimistic copy instead of showing the message twice.
+              if (newMsg.client_id) {
+                const i = prev.findIndex(m => m.client_id === newMsg.client_id && m.sender_id === newMsg.sender_id);
+                if (i >= 0) {
+                  const next = prev.slice();
+                  next[i] = newMsg;
+                  return next;
+                }
+              }
               return [...prev, newMsg];
             });
             // The chat is open, so a message from the other person is read on arrival.
@@ -165,10 +272,41 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               const index = prev.findIndex(m => m.id === updated.id);
               if (index === -1) return prev;
               const current = prev[index];
-              if (current.is_read === updated.is_read && current.content === updated.content) return prev;
+              if (
+                current.is_read === updated.is_read &&
+                current.content === updated.content &&
+                current.deleted_at === updated.deleted_at
+              ) return prev;
               const next = prev.slice();
               next[index] = { ...current, ...updated };
               return next;
+            });
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `id=eq.${conversationId}` },
+          payload => {
+            const row = payload.new as { disappear_after_seconds?: number | null };
+            setDisappearAfter(row.disappear_after_seconds ?? null);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'message_reactions' },
+          payload => {
+            const row = (payload.eventType === 'DELETE' ? payload.old : payload.new) as {
+              message_id?: string;
+              user_id?: string;
+              emoji?: ReactionEmoji;
+            };
+            const messageId = row?.message_id;
+            const reactor = row?.user_id;
+            if (!messageId || !reactor || !messagesRef.current.some(m => m.id === messageId)) return;
+            setReactions(prev => {
+              const list = (prev[messageId] ?? []).filter(r => r.user_id !== reactor);
+              if (payload.eventType !== 'DELETE' && row.emoji) list.push({ user_id: reactor, emoji: row.emoji });
+              return { ...prev, [messageId]: list };
             });
           }
         )
@@ -180,47 +318,247 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     }
   }, [conversationId, loadMessages, userId]);
 
+  // ---------------------------------------------------------------------------
+  // Sending: the message shows at once; the outbox delivers it (and retries offline).
+  // ---------------------------------------------------------------------------
+  const applyOutboxResult = useCallback((clientId: string, patch: Partial<MessageItem> | MessageItem, replace = false) => {
+    setMessages(prev => {
+      const i = prev.findIndex(m => m.client_id === clientId && m.sender_id === userId);
+      if (i < 0) return prev;
+      const next = prev.slice();
+      if (replace) {
+        const stored = patch as MessageItem;
+        // Realtime may already have added the stored copy; keep one.
+        if (prev.some((m, j) => j !== i && m.id === stored.id)) {
+          next.splice(i, 1);
+          return next;
+        }
+        next[i] = stored;
+      } else {
+        next[i] = { ...next[i], ...patch };
+      }
+      return next;
+    });
+  }, [userId]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !userId) return;
+    startOutboxSync(() => userId);
+    const off = onOutboxEvent(e => {
+      if (e.type === 'sent') applyOutboxResult(e.clientId, e.message, true);
+      else if (e.type === 'queued') applyOutboxResult(e.clientId, { status: 'queued' });
+      else {
+        applyOutboxResult(e.clientId, { status: 'failed' });
+        showToast('Message not sent: ' + e.error, 'error');
+      }
+    });
+    void flushOutbox(userId);
+    return off;
+  }, [userId, applyOutboxResult, showToast]);
+
+  // ---------------------------------------------------------------------------
+  // Typing indicator (Realtime broadcast: nothing is written to the database)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !userId) return;
+    let cancelled = false;
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const name = `typing:${conversationId}`;
+    (async () => {
+      // Both people must join the same channel name, so remove a stale copy first.
+      const stale = supabase.getChannels().find(c => c.topic === `realtime:${name}`);
+      if (stale) await supabase.removeChannel(stale);
+      if (cancelled) return;
+      const channel = supabase.channel(name, { config: { broadcast: { self: false } } });
+      channel
+        .on('broadcast', { event: 'typing' }, ({ payload }) => {
+          if (!payload || payload.user_id !== partner.id) return;
+          if (hideTimer) clearTimeout(hideTimer);
+          setIsTyping(Boolean(payload.typing));
+          // If the "stopped" signal is lost, don't show "typing" forever.
+          if (payload.typing) hideTimer = setTimeout(() => setIsTyping(false), 6000);
+        })
+        .subscribe();
+      typingChannelRef.current = channel;
+    })();
+    return () => {
+      cancelled = true;
+      if (hideTimer) clearTimeout(hideTimer);
+      const channel = typingChannelRef.current;
+      typingChannelRef.current = null;
+      if (channel) void supabase.removeChannel(channel);
+      setIsTyping(false);
+    };
+  }, [conversationId, userId, partner.id]);
+
+  const sendTyping = useCallback((typing: boolean) => {
+    const channel = typingChannelRef.current;
+    if (!channel || !userId) return;
+    const now = Date.now();
+    if (typing && now - lastTypingSentRef.current < 2500) return; // at most one "typing" every 2.5 s
+    if (!typing && lastTypingSentRef.current === 0) return;
+    lastTypingSentRef.current = typing ? now : 0;
+    void channel.send({ type: 'broadcast', event: 'typing', payload: { user_id: userId, typing } });
+  }, [userId]);
+
+  const handleInputChange = (value: string) => {
+    setInputContent(value);
+    if (editing) return;
+    sendTyping(value.trim().length > 0);
+    if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+    typingIdleTimerRef.current = setTimeout(() => sendTyping(false), 4000);
+  };
+
+  useEffect(() => () => {
+    if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+  }, []);
+
   const handleSend = async (contentToSend?: string) => {
     const content = (contentToSend || inputContent).trim();
     if (!content || !user) return;
 
     if (!contentToSend) setInputContent('');
+    sendTyping(false);
+
+    if (editing && !contentToSend) {
+      await saveEdit(editing, content);
+      return;
+    }
+
+    const replyId = replyTo?.id ?? null;
+    setReplyTo(null);
+
+    if (isSupabaseConfigured()) {
+      const item: OutboxItem = {
+        client_id: newClientId(),
+        conversation_id: conversationId,
+        sender_id: user.id,
+        content,
+        reply_to_id: replyId,
+        created_at: new Date().toISOString(),
+      };
+      enqueue(item);
+      setMessages(prev => [...prev, outboxToMessage(item, 'sending')]);
+      stickToBottomRef.current = true;
+      await deliver(item);
+      return;
+    }
 
     try {
-      if (isSupabaseConfigured()) {
-        const { error } = await supabase.from('messages').insert({
-          conversation_id: conversationId,
-          sender_id: user.id,
-          content,
-        } as unknown as { conversation_id: string; sender_id: string; content: string });
-        if (error) throw error;
-      } else {
-        const msg = mockBackend.sendMessage(conversationId, user.id, content);
-        setMessages(prev => [...prev, msg]);
+      const msg = { ...mockBackend.sendMessage(conversationId, user.id, content), reply_to_id: replyId };
+      setMessages(prev => [...prev, msg]);
 
-        // Simulated auto-reply in demo mode
-        if (partner.uid === 'SOLAR-8120' || partner.uid === 'VORTEX-3391') {
+      // Simulated auto-reply in demo mode
+      if (partner.uid === 'SOLAR-8120' || partner.uid === 'VORTEX-3391') {
+        setTimeout(() => {
+          setIsTyping(true);
           setTimeout(() => {
-            setIsTyping(true);
-            setTimeout(() => {
-              setIsTyping(false);
-              const responses = [
-                'Received, thanks!',
-                'Looks good to me.',
-                'Got it, will check it out shortly.',
-                'Message confirmed.',
-              ];
-              const autoReply = responses[Math.floor(Math.random() * responses.length)];
-              mockBackend.sendMessage(conversationId, partner.id, autoReply);
-            }, 1200);
-          }, 500);
-        }
+            setIsTyping(false);
+            const responses = [
+              'Received, thanks!',
+              'Looks good to me.',
+              'Got it, will check it out shortly.',
+              'Message confirmed.',
+            ];
+            const autoReply = responses[Math.floor(Math.random() * responses.length)];
+            mockBackend.sendMessage(conversationId, partner.id, autoReply);
+          }, 1200);
+        }, 500);
       }
     } catch (err) {
       console.error('Send message error:', err);
       showToast('Message send failed', 'error');
     }
   };
+
+  const retrySend = useCallback((msg: MessageItem) => {
+    if (!msg.client_id || !userId) return;
+    const item: OutboxItem = {
+      client_id: msg.client_id,
+      conversation_id: conversationId,
+      sender_id: userId,
+      content: msg.content,
+      reply_to_id: msg.reply_to_id ?? null,
+      created_at: msg.created_at,
+    };
+    enqueue(item);
+    applyOutboxResult(msg.client_id, { status: 'sending' });
+    void deliver(item);
+  }, [conversationId, userId, applyOutboxResult]);
+
+  const discardFailed = (msg: MessageItem) => {
+    setMessages(prev => prev.filter(m => m !== msg));
+  };
+
+  // ---------------------------------------------------------------------------
+  // Reactions, edit, delete
+  // ---------------------------------------------------------------------------
+  const toggleReaction = useCallback(async (msg: MessageItem, emoji: ReactionEmoji) => {
+    if (!userId || msg.status || msg.deleted_at) return;
+    const mine = (reactions[msg.id] ?? []).find(r => r.user_id === userId);
+    const next: ReactionEmoji | null = mine?.emoji === emoji ? null : emoji;
+    const before = reactions[msg.id] ?? [];
+    const updated = before.filter(r => r.user_id !== userId);
+    if (next) updated.push({ user_id: userId, emoji: next });
+    setReactions(prev => ({ ...prev, [msg.id]: updated }));
+    if (!isSupabaseConfigured()) return;
+    const { error } = await supabase.rpc('set_reaction', { p_message_id: msg.id, p_emoji: next });
+    if (error) {
+      setReactions(prev => ({ ...prev, [msg.id]: before }));
+      showToast('Could not save reaction', 'error');
+    }
+  }, [reactions, userId, showToast]);
+
+  const saveEdit = async (msg: MessageItem, text: string) => {
+    setEditing(null);
+    if (text === msg.content) return;
+    const previous = msg.content;
+    const edited = new Date().toISOString();
+    setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, content: text, edited_at: edited } : m)));
+    if (!isSupabaseConfigured()) return;
+    const { error } = await supabase.rpc('edit_message', { p_message_id: msg.id, p_content: text });
+    if (error) {
+      setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, content: previous, edited_at: msg.edited_at } : m)));
+      showToast(error.message || 'Could not edit message', 'error');
+    }
+  };
+
+  const deleteForEveryone = async (msg: MessageItem) => {
+    const before = msg;
+    setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, content: '[DELETED]', deleted_at: new Date().toISOString() } : m)));
+    setReactions(prev => ({ ...prev, [msg.id]: [] }));
+    if (!isSupabaseConfigured()) return;
+    const { error } = await supabase.rpc('delete_message_for_everyone', { p_message_id: msg.id });
+    if (error) {
+      setMessages(prev => prev.map(m => (m.id === msg.id ? before : m)));
+      showToast(error.message || 'Could not delete message', 'error');
+    }
+  };
+
+  const startReply = (msg: MessageItem) => {
+    setEditing(null);
+    setReplyTo(msg);
+    inputRef.current?.focus();
+  };
+
+  const startEdit = (msg: MessageItem) => {
+    setReplyTo(null);
+    setEditing(msg);
+    setInputContent(msg.content);
+    inputRef.current?.focus();
+  };
+
+  const cancelComposerMode = () => {
+    if (editing) setInputContent('');
+    setEditing(null);
+    setReplyTo(null);
+  };
+
+  const messagesById = useMemo(() => {
+    const map: Record<string, MessageItem> = {};
+    for (const m of messages) map[m.id] = m;
+    return map;
+  }, [messages]);
 
   // Process initial media attachment from camera
   useEffect(() => {
@@ -269,6 +607,10 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [audioSeconds, setAudioSeconds] = useState(0);
+  // The recorder's onstop handler is created when recording starts, so it can't read audioSeconds
+  // (it would always see 0, which is why voice notes were never sent). The length is captured
+  // here when the user presses Send, before the counter resets.
+  const recordedSecondsRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
@@ -300,9 +642,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
       recorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const dur = `${Math.floor(audioSeconds / 60)}:${(audioSeconds % 60).toString().padStart(2, '0')}`;
+        stream.getTracks().forEach(t => t.stop());
+        const seconds = recordedSecondsRef.current;
+        const dur = `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`;
 
-        if (audioSeconds >= 1) {
+        if (seconds >= 1) {
           try {
             setIsUploadingMedia(true);
             const audioFile = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
@@ -329,6 +673,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const handleStopVoiceRecord = (send: boolean) => {
     if (mediaRecorderRef.current && isRecordingAudio) {
       if (send) {
+        recordedSecondsRef.current = audioSeconds;
         mediaRecorderRef.current.stop();
       } else {
         mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
@@ -380,7 +725,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             seed={partner.uid}
             src={partner.avatar_url}
             size={40}
-            online={true}
+            online={partnerPresence?.isOnline ?? false}
           />
 
           <div className="min-w-0">
@@ -392,12 +737,29 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             <div className="flex items-center gap-1.5 text-[11px] font-mono text-emerald leading-tight mt-0.5">
               <ShieldCheck className="w-3.5 h-3.5" aria-hidden />
               <span>{partner.uid}</span>
-              <span className="text-vault-500 font-sans hidden sm:inline">• Private Channel</span>
+              {isTyping ? (
+                <span className="text-emerald font-sans">typing…</span>
+              ) : presenceLabel ? (
+                <span className={`font-sans ${partnerPresence?.isOnline ? 'text-emerald' : 'text-vault-400'}`}>• {presenceLabel}</span>
+              ) : (
+                <span className="text-vault-500 font-sans hidden sm:inline">• Private Channel</span>
+              )}
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5">
+          {isSupabaseConfigured() && (
+            <button
+              type="button"
+              onClick={() => setShowTimerSheet(true)}
+              className={`ib ib-s rounded-xl ${disappearAfter ? 'text-emerald' : ''}`}
+              aria-label={disappearAfter ? `Disappearing messages: ${timerLabel(disappearAfter)}` : 'Disappearing messages: off'}
+              title="Disappearing messages"
+            >
+              <Timer className="i" aria-hidden />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowReportModal(true)}
@@ -441,7 +803,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             const nextMsg = messages[index + 1];
             return (
               <MessageRow
-                key={msg.id}
+                key={msg.client_id ?? msg.id}
                 msg={msg}
                 isMe={msg.sender_id === userId}
                 isFirstInGroup={!prevMsg || prevMsg.sender_id !== msg.sender_id}
@@ -450,6 +812,14 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 onToggleAudio={toggleAudio}
                 onOpenMedia={onOpenMedia}
                 onMediaLoaded={handleMediaLoaded}
+                reactions={reactions[msg.id]}
+                replyTarget={msg.reply_to_id ? messagesById[msg.reply_to_id] ?? null : undefined}
+                replyTargetIsMe={msg.reply_to_id ? messagesById[msg.reply_to_id]?.sender_id === userId : false}
+                partnerName={partner.display_name}
+                myUserId={userId}
+                onOpenActions={setActionMsg}
+                onToggleReaction={toggleReaction}
+                onRetry={retrySend}
               />
             );
           })
@@ -475,6 +845,21 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           className="hidden"
           aria-label="File upload"
         />
+
+        {(replyTo || editing) && !isRecordingAudio && (
+          <div className="flex items-center gap-2 mb-2 pl-3 pr-1 py-1.5 rounded-xl bg-vault-950 border-l-2 border-emerald">
+            {editing ? <Pencil className="w-4 h-4 text-emerald shrink-0" aria-hidden /> : <Reply className="w-4 h-4 text-emerald shrink-0" aria-hidden />}
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-bold text-emerald">
+                {editing ? 'Editing message' : `Replying to ${replyTo?.sender_id === userId ? 'yourself' : partner.display_name}`}
+              </div>
+              <div className="text-xs text-vault-300 truncate">{previewText((editing ?? replyTo)!.content)}</div>
+            </div>
+            <button type="button" onClick={cancelComposerMode} className="ib ib-s rounded-full" aria-label={editing ? 'Cancel editing' : 'Cancel reply'}>
+              <X className="i" />
+            </button>
+          </div>
+        )}
 
         {isRecordingAudio ? (
           <div className="flex items-center justify-between bg-red-950/80 border border-red-600/50 rounded-xl px-4 py-2.5 text-red-300 animate-pulse">
@@ -534,10 +919,15 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               className="flex-1 flex items-center gap-2"
             >
               <input
+                ref={inputRef}
                 type="text"
                 value={inputContent}
-                onChange={e => setInputContent(e.target.value)}
-                placeholder={`Message ${partner.display_name}...`}
+                onChange={e => handleInputChange(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Escape' && (replyTo || editing)) cancelComposerMode();
+                }}
+                maxLength={4000}
+                placeholder={editing ? 'Edit message…' : `Message ${partner.display_name}...`}
                 className="inp flex-1 text-sm h-11"
               />
               <button
@@ -553,11 +943,66 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         )}
       </footer>
 
+      {showTimerSheet && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Disappearing messages"
+          className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center anim-fade"
+          onClick={() => setShowTimerSheet(false)}
+          onKeyDown={e => { if (e.key === 'Escape') setShowTimerSheet(false); }}
+        >
+          <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="px-4 pt-2 pb-3">
+              <h3 className="t-body font-bold text-white m-0 flex items-center gap-2"><Timer className="w-4 h-4 text-emerald" aria-hidden /> Disappearing messages</h3>
+              <p className="text-xs text-vault-400 mt-1 mb-0">
+                New messages in this chat disappear for both of you after the time you pick. {partner.display_name} will see that you changed it.
+                The app's moderators can still review disappeared messages for safety reasons.
+              </p>
+            </div>
+            {([null, 86400, 604800] as (number | null)[]).map(opt => (
+              <button
+                key={String(opt)}
+                type="button"
+                role="radio"
+                aria-checked={disappearAfter === opt}
+                onClick={() => void changeDisappearing(opt)}
+                className="w-full flex items-center justify-between px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+              >
+                <span>{opt ? timerLabel(opt) : 'Off'}</span>
+                {disappearAfter === opt && <Check className="w-4 h-4 text-emerald" aria-hidden />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {actionMsg && (
+        <MessageActionSheet
+          msg={actionMsg}
+          isMe={actionMsg.sender_id === userId}
+          myReaction={(reactions[actionMsg.id] ?? []).find(r => r.user_id === userId)?.emoji}
+          onClose={() => setActionMsg(null)}
+          onReact={emoji => { void toggleReaction(actionMsg, emoji); setActionMsg(null); }}
+          onReply={() => { startReply(actionMsg); setActionMsg(null); }}
+          onCopy={() => {
+            void navigator.clipboard?.writeText(actionMsg.content).then(
+              () => showToast('Copied', 'success'),
+              () => showToast('Could not copy', 'error'),
+            );
+            setActionMsg(null);
+          }}
+          onEdit={() => { startEdit(actionMsg); setActionMsg(null); }}
+          onDelete={() => { void deleteForEveryone(actionMsg); setActionMsg(null); }}
+          onDiscard={() => { discardFailed(actionMsg); setActionMsg(null); }}
+        />
+      )}
+
       {showReportModal && (
         <ReportUserModal
           partner={partner}
           conversationId={conversationId}
-          partnerMessages={messages.filter(m => m.sender_id === partner.id)}
+          partnerMessages={messages.filter(m => m.sender_id === partner.id && !m.deleted_at && !isSystem(m.content))}
           onClose={() => setShowReportModal(false)}
         />
       )}
@@ -596,6 +1041,51 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   );
 };
 
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
+
+/** An outbox entry shown in the thread before the server has it. */
+function outboxToMessage(item: OutboxItem, status: MessageItem['status']): MessageItem {
+  return {
+    id: `local:${item.client_id}`,
+    conversation_id: item.conversation_id,
+    sender_id: item.sender_id,
+    content: item.content,
+    is_read: false,
+    created_at: item.created_at,
+    client_id: item.client_id,
+    reply_to_id: item.reply_to_id,
+    status,
+  };
+}
+
+const isDeleted = (m: MessageItem) => Boolean(m.deleted_at) || m.content === '[DELETED]';
+
+const isSystem = (content: string) => content.startsWith('[SYSTEM:');
+
+function timerLabel(seconds: number): string {
+  return seconds >= 604800 ? '7 days' : '24 hours';
+}
+
+/** "[SYSTEM:disappearing:86400]" → "turned on disappearing messages (24 hours)". */
+function systemText(content: string): string {
+  const m = content.match(/^\[SYSTEM:disappearing:(\w+)\]$/);
+  if (m) {
+    return m[1] === 'off'
+      ? 'turned off disappearing messages'
+      : `turned on disappearing messages (${timerLabel(Number(m[1]))})`;
+  }
+  return 'updated the chat';
+}
+
+/** One-line description of a message, for reply quotes and banners. */
+function previewText(content: string): string {
+  if (content === '[DELETED]') return 'Deleted message';
+  if (isSystem(content)) return 'Chat setting changed';
+  if (content.startsWith('[IMAGE]')) return '📷 Photo';
+  if (content.startsWith('[VOICE_NOTE')) return '🎤 Voice message';
+  return content;
+}
+
 interface MessageRowProps {
   msg: MessageItem;
   isMe: boolean;
@@ -605,12 +1095,23 @@ interface MessageRowProps {
   onToggleAudio: (msgId: string, audioUrl: string) => void;
   onOpenMedia?: (url: string) => void;
   onMediaLoaded: () => void;
+  reactions?: MessageReaction[];
+  /** undefined: not a reply. null: a reply whose original isn't loaded or was removed. */
+  replyTarget?: MessageItem | null;
+  replyTargetIsMe: boolean;
+  partnerName: string;
+  myUserId?: string;
+  onOpenActions: (msg: MessageItem) => void;
+  onToggleReaction: (msg: MessageItem, emoji: ReactionEmoji) => void;
+  onRetry: (msg: MessageItem) => void;
 }
 
 /**
  * One message. Memoised: typing in the composer or a change to another message does not
  * re-render every bubble. Image bubbles reserve their box before the image arrives, so the
  * thread does not jump when photos finish loading.
+ *
+ * Long-press (touch) or right-click opens the actions: react, reply, copy, edit, delete.
  */
 const MessageRow = memo(function MessageRow({
   msg,
@@ -621,14 +1122,113 @@ const MessageRow = memo(function MessageRow({
   onToggleAudio,
   onOpenMedia,
   onMediaLoaded,
+  reactions,
+  replyTarget,
+  replyTargetIsMe,
+  partnerName,
+  myUserId,
+  onOpenActions,
+  onToggleReaction,
+  onRetry,
+}: MessageRowProps) {
+  if (isSystem(msg.content)) {
+    return (
+      <div className="flex justify-center my-3" role="note">
+        <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-vault-900 border border-vault-800 text-xs text-vault-300">
+          <Timer className="w-3.5 h-3.5 text-emerald" aria-hidden />
+          {isMe ? 'You' : partnerName} {systemText(msg.content)}
+        </span>
+      </div>
+    );
+  }
+  return <MessageBubble {...{ msg, isMe, isFirstInGroup, isLastInGroup, isPlaying, onToggleAudio, onOpenMedia, onMediaLoaded, reactions, replyTarget, replyTargetIsMe, partnerName, myUserId, onOpenActions, onToggleReaction, onRetry }} />;
+});
+
+function MessageBubble({
+  msg,
+  isMe,
+  isFirstInGroup,
+  isLastInGroup,
+  isPlaying,
+  onToggleAudio,
+  onOpenMedia,
+  onMediaLoaded,
+  reactions,
+  replyTarget,
+  replyTargetIsMe,
+  partnerName,
+  myUserId,
+  onOpenActions,
+  onToggleReaction,
+  onRetry,
 }: MessageRowProps) {
   const [imageFailed, setImageFailed] = useState(false);
-  const isImage = msg.content.startsWith('[IMAGE]');
-  const isVoice = msg.content.startsWith('[VOICE_NOTE');
+  const deleted = isDeleted(msg);
+  const isImage = !deleted && msg.content.startsWith('[IMAGE]');
+  const isVoice = !deleted && msg.content.startsWith('[VOICE_NOTE');
   const imageUrl = isImage ? msg.content.slice('[IMAGE]'.length) : '';
   const voiceMatch = isVoice ? msg.content.match(/^\[VOICE_NOTE:(.*?)\](.*)$/) : null;
   const voiceDuration = voiceMatch ? voiceMatch[1] : '0:00';
   const voiceUrl = voiceMatch ? voiceMatch[2] : '';
+
+  // Long-press detection. Moving the finger (scrolling) cancels it; a completed long-press
+  // swallows the following click so it doesn't also open the photo.
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressStart = useRef<{ x: number; y: number } | null>(null);
+  const longPressed = useRef(false);
+  const cancelPress = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+    pressStart.current = null;
+  };
+  const canAct = !msg.status || msg.status === 'failed';
+  const pressHandlers = canAct
+    ? {
+        onPointerDown: (e: React.PointerEvent) => {
+          if (e.pointerType === 'mouse') return;
+          longPressed.current = false;
+          pressStart.current = { x: e.clientX, y: e.clientY };
+          pressTimer.current = setTimeout(() => {
+            longPressed.current = true;
+            navigator.vibrate?.(15);
+            onOpenActions(msg);
+          }, 450);
+        },
+        onPointerMove: (e: React.PointerEvent) => {
+          const start = pressStart.current;
+          if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) cancelPress();
+        },
+        onPointerUp: cancelPress,
+        onPointerCancel: cancelPress,
+        onContextMenu: (e: React.MouseEvent) => {
+          e.preventDefault();
+          cancelPress();
+          onOpenActions(msg);
+        },
+        onClickCapture: (e: React.MouseEvent) => {
+          if (longPressed.current) {
+            e.stopPropagation();
+            e.preventDefault();
+            longPressed.current = false;
+          }
+        },
+      }
+    : {};
+
+  // Group identical emojis: "❤️ 2".
+  const reactionGroups = useMemo(() => {
+    const groups: { emoji: ReactionEmoji; count: number; mine: boolean }[] = [];
+    for (const r of reactions ?? []) {
+      const g = groups.find(x => x.emoji === r.emoji);
+      if (g) {
+        g.count += 1;
+        g.mine ||= r.user_id === myUserId;
+      } else {
+        groups.push({ emoji: r.emoji, count: 1, mine: r.user_id === myUserId });
+      }
+    }
+    return groups;
+  }, [reactions, myUserId]);
 
   const image = (
     <span className="relative block w-56 max-w-full aspect-[4/5] rounded-lg overflow-hidden bg-black/20">
@@ -651,53 +1251,118 @@ const MessageRow = memo(function MessageRow({
   );
 
   return (
-    <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isFirstInGroup ? 'mt-3' : 'mt-0.5'}`}>
-      <div
-        className={`max-w-[70%] ${isImage ? 'p-1.5' : 'p-3'} text-[15px] leading-[22px] break-words shadow-sm ${
-          isMe
-            ? `bg-[#10B981] text-[#04120C] font-medium ${isLastInGroup ? 'rounded-2xl rounded-br-xs' : 'rounded-2xl'}`
-            : `bg-[#1B1D21] border border-[#1E2025] text-[#F4F5F6] ${isLastInGroup ? 'rounded-2xl rounded-bl-xs' : 'rounded-2xl'}`
-        }`}
-      >
-        {isImage ? (
-          onOpenMedia && !imageFailed ? (
-            <button type="button" onClick={() => onOpenMedia(imageUrl)} className="block p-0 border-0 bg-transparent cursor-pointer" aria-label="Open photo">
-              {image}
-            </button>
-          ) : (
-            image
-          )
-        ) : isVoice ? (
-          <div className="flex items-center gap-3 min-w-[200px] py-1">
-            <button
-              type="button"
-              onClick={() => onToggleAudio(msg.id, voiceUrl)}
-              className={`w-11 h-11 rounded-full flex items-center justify-center ${
-                isMe ? 'bg-[#04120C] text-[#10B981]' : 'bg-[#10B981] text-[#04120C]'
-              } active:scale-90 transition-transform`}
-              aria-label={isPlaying ? 'Pause voice message' : 'Play voice message'}
+    <div className={`group flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isFirstInGroup ? 'mt-3' : 'mt-0.5'} ${reactionGroups.length ? 'mb-2' : ''}`}>
+      <div className={`relative flex items-center gap-1 max-w-[80%] ${isMe ? 'flex-row-reverse' : ''}`}>
+        <div
+          {...pressHandlers}
+          className={`relative min-w-0 ${isImage ? 'p-1.5' : 'p-3'} text-[15px] leading-[22px] break-words shadow-sm select-text ${
+            msg.status ? 'opacity-70' : ''
+          } ${
+            deleted
+              ? 'bg-transparent border border-vault-750 text-vault-400 italic rounded-2xl'
+              : isMe
+              ? `bg-[#10B981] text-[#04120C] font-medium ${isLastInGroup ? 'rounded-2xl rounded-br-xs' : 'rounded-2xl'}`
+              : `bg-[#1B1D21] border border-[#1E2025] text-[#F4F5F6] ${isLastInGroup ? 'rounded-2xl rounded-bl-xs' : 'rounded-2xl'}`
+          }`}
+        >
+          {replyTarget !== undefined && !deleted && (
+            <div
+              className={`mb-1.5 px-2 py-1 rounded-lg border-l-2 text-xs ${
+                isMe ? 'bg-black/10 border-[#04120C]/60' : 'bg-black/20 border-emerald'
+              }`}
             >
-              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
-            </button>
-            <div className="flex-1 space-y-1">
-              <div className="h-2 rounded-full bg-black/20 overflow-hidden">
-                <div className={`h-full ${isMe ? 'bg-[#04120C]' : 'bg-[#10B981]'} ${isPlaying ? 'w-3/4 animate-pulse' : 'w-1/4'}`} />
-              </div>
-              <span className={`text-[11px] font-mono ${isMe ? 'text-[#04120C]/75' : 'text-vault-400'}`}>
-                Voice message ({voiceDuration})
-              </span>
+              <div className="font-bold opacity-90">{replyTarget ? (replyTargetIsMe ? 'You' : partnerName) : 'Original message'}</div>
+              <div className="truncate opacity-80">{replyTarget ? previewText(replyTarget.content) : 'Not available'}</div>
             </div>
-          </div>
-        ) : (
-          <span>{msg.content}</span>
+          )}
+
+          {deleted ? (
+            <span>This message was deleted</span>
+          ) : isImage ? (
+            onOpenMedia && !imageFailed ? (
+              <button type="button" onClick={() => onOpenMedia(imageUrl)} className="block p-0 border-0 bg-transparent cursor-pointer" aria-label="Open photo">
+                {image}
+              </button>
+            ) : (
+              image
+            )
+          ) : isVoice ? (
+            <div className="flex items-center gap-3 min-w-[200px] py-1">
+              <button
+                type="button"
+                onClick={() => onToggleAudio(msg.id, voiceUrl)}
+                className={`w-11 h-11 rounded-full flex items-center justify-center ${
+                  isMe ? 'bg-[#04120C] text-[#10B981]' : 'bg-[#10B981] text-[#04120C]'
+                } active:scale-90 transition-transform`}
+                aria-label={isPlaying ? 'Pause voice message' : 'Play voice message'}
+              >
+                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+              </button>
+              <div className="flex-1 space-y-1">
+                <div className="h-2 rounded-full bg-black/20 overflow-hidden">
+                  <div className={`h-full ${isMe ? 'bg-[#04120C]' : 'bg-[#10B981]'} ${isPlaying ? 'w-3/4 animate-pulse' : 'w-1/4'}`} />
+                </div>
+                <span className={`text-[11px] font-mono ${isMe ? 'text-[#04120C]/75' : 'text-vault-400'}`}>
+                  Voice message ({voiceDuration})
+                </span>
+              </div>
+            </div>
+          ) : (
+            <span className="whitespace-pre-wrap">{msg.content}</span>
+          )}
+
+          {reactionGroups.length > 0 && (
+            <div className={`absolute -bottom-3.5 ${isMe ? 'right-2' : 'left-2'} flex gap-1`}>
+              {reactionGroups.map(g => (
+                <button
+                  key={g.emoji}
+                  type="button"
+                  onClick={() => onToggleReaction(msg, g.emoji)}
+                  className={`h-6 px-1.5 rounded-full text-xs flex items-center gap-0.5 border shadow ${
+                    g.mine ? 'bg-emerald/20 border-emerald' : 'bg-vault-900 border-vault-750'
+                  }`}
+                  aria-label={`${g.emoji} ${g.count}${g.mine ? ', including you. Tap to remove' : ''}`}
+                >
+                  <span>{g.emoji}</span>
+                  {g.count > 1 && <span className="text-vault-200">{g.count}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Desktop: a visible button for the same actions (long-press isn't available with a mouse). */}
+        {canAct && !deleted && (
+          <button
+            type="button"
+            onClick={() => onOpenActions(msg)}
+            className="hidden md:flex opacity-0 group-hover:opacity-100 focus:opacity-100 w-8 h-8 rounded-full items-center justify-center text-vault-400 hover:text-white hover:bg-vault-800 shrink-0"
+            aria-label="Message actions"
+          >
+            <Reply className="w-4 h-4" aria-hidden />
+          </button>
         )}
       </div>
 
-      {isLastInGroup && (
+      {msg.status === 'failed' ? (
+        <button
+          type="button"
+          onClick={() => onRetry(msg)}
+          className="flex items-center gap-1 text-[11px] text-rose-400 mt-1 px-1 min-h-[24px]"
+        >
+          <AlertCircle className="w-3.5 h-3.5" aria-hidden /> Not sent. Tap to retry
+        </button>
+      ) : (isLastInGroup || msg.status) && (
         <div className={`flex items-center gap-1.5 text-[11px] text-vault-500 font-mono mt-1 px-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+          {msg.edited_at && !deleted && <span className="font-sans italic">edited</span>}
           <span>{formatTimestamp(msg.created_at)}</span>
           {isMe &&
-            (msg.is_read ? (
+            (msg.status ? (
+              <span className="flex items-center gap-1" aria-label={msg.status === 'queued' ? 'Waiting for connection' : 'Sending'}>
+                <Clock className="w-3.5 h-3.5" aria-hidden />
+                {msg.status === 'queued' && <span className="font-sans">Waiting for connection</span>}
+              </span>
+            ) : msg.is_read ? (
               <CheckCheck className="w-3.5 h-3.5 text-emerald" aria-label="Read" />
             ) : (
               <Check className="w-3.5 h-3.5 text-vault-500" aria-label="Sent" />
@@ -706,4 +1371,115 @@ const MessageRow = memo(function MessageRow({
       )}
     </div>
   );
-});
+}
+
+interface MessageActionSheetProps {
+  msg: MessageItem;
+  isMe: boolean;
+  myReaction?: ReactionEmoji;
+  onClose: () => void;
+  onReact: (emoji: ReactionEmoji) => void;
+  onReply: () => void;
+  onCopy: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onDiscard: () => void;
+}
+
+/** Bottom sheet with reactions and message actions. */
+function MessageActionSheet({
+  msg,
+  isMe,
+  myReaction,
+  onClose,
+  onReact,
+  onReply,
+  onCopy,
+  onEdit,
+  onDelete,
+  onDiscard,
+}: MessageActionSheetProps) {
+  const failed = msg.status === 'failed';
+  const deleted = isDeleted(msg);
+  const withinWindow = Date.now() - new Date(msg.created_at).getTime() < EDIT_WINDOW_MS;
+  const isText = !msg.content.startsWith('[');
+  const canEdit = isMe && !failed && !deleted && isText && withinWindow;
+  const canDelete = isMe && !failed && !deleted && withinWindow;
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const item = 'w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl';
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Message actions"
+      className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center anim-fade"
+      onClick={onClose}
+      onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
+    >
+      <div
+        className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-4 shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <p className="px-4 pt-2 pb-3 text-xs text-vault-400 truncate">{previewText(msg.content)}</p>
+
+        {!failed && !deleted && (
+          <div className="flex justify-around px-2 pb-2 mb-1 border-b border-vault-800">
+            {REACTION_EMOJIS.map(e => (
+              <button
+                key={e}
+                type="button"
+                onClick={() => onReact(e)}
+                className={`w-11 h-11 rounded-full text-2xl flex items-center justify-center transition-transform active:scale-90 ${
+                  myReaction === e ? 'bg-emerald/25 ring-1 ring-emerald' : 'hover:bg-vault-800'
+                }`}
+                aria-label={myReaction === e ? `Remove ${e}` : `React ${e}`}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {failed ? (
+          <button type="button" className={item} onClick={onDiscard}>
+            <Trash2 className="w-4 h-4 text-rose-400" aria-hidden /> Remove unsent message
+          </button>
+        ) : (
+          <>
+            {!deleted && (
+              <button type="button" className={item} onClick={onReply}>
+                <Reply className="w-4 h-4" aria-hidden /> Reply
+              </button>
+            )}
+            {!deleted && isText && (
+              <button type="button" className={item} onClick={onCopy}>
+                <Copy className="w-4 h-4" aria-hidden /> Copy text
+              </button>
+            )}
+            {canEdit && (
+              <button type="button" className={item} onClick={onEdit}>
+                <Pencil className="w-4 h-4" aria-hidden /> Edit
+              </button>
+            )}
+            {canDelete && (
+              confirmDelete ? (
+                <button type="button" className={`${item} text-rose-400`} onClick={onDelete}>
+                  <Trash2 className="w-4 h-4" aria-hidden /> Tap again to delete for everyone
+                </button>
+              ) : (
+                <button type="button" className={`${item} text-rose-400`} onClick={() => setConfirmDelete(true)}>
+                  <Trash2 className="w-4 h-4" aria-hidden /> Delete for everyone
+                </button>
+              )
+            )}
+            {isMe && !deleted && !withinWindow && (
+              <p className="px-4 pt-1 text-xs text-vault-500">Edit and delete are available for 15 minutes after sending.</p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
