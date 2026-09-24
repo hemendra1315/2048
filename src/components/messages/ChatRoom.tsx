@@ -21,8 +21,11 @@ import {
   Clock,
   AlertCircle,
   Timer,
+  Smile,
+  Palette,
+  Trophy,
 } from 'lucide-react';
-import { MessageItem, MessageReaction, ReactionEmoji, REACTION_EMOJIS, UserProfile } from '../../types';
+import { CoverGameType, MessageItem, MessageReaction, ReactionEmoji, REACTION_EMOJIS, UserProfile } from '../../types';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import {
   deliver,
@@ -45,6 +48,20 @@ import { Avatar } from '../common/Avatar';
 import { ContactDossier } from './ContactDossier';
 import { ReportUserModal } from './ReportUserModal';
 import { describePresence, usePresence } from '../../lib/presence';
+import {
+  ChatThemeId,
+  computeWaveform,
+  extraPreview,
+  parseGame,
+  parseScore,
+  parseSticker,
+  parseVoiceNote,
+  themeById,
+  WAVEFORM_BARS,
+} from '../../lib/chatExtras';
+import { ChatGameCard } from './ChatGameCard';
+import { ChatExtrasSheet, ChatThemeSheet } from './ChatExtrasSheet';
+import { COVER_GAMES, useGame } from '../../context/GameContext';
 
 interface ChatRoomProps {
   conversationId: string;
@@ -84,6 +101,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const [disappearAfter, setDisappearAfter] = useState<number | null>(null);
   const [showTimerSheet, setShowTimerSheet] = useState(false);
+  const [showExtras, setShowExtras] = useState(false);
+  const [showThemeSheet, setShowThemeSheet] = useState(false);
+  const [themeId, setThemeId] = useState<ChatThemeId>('default');
+  const [audioProgress, setAudioProgress] = useState(0);
+  const theme = themeById(themeId);
   const partnerPresence = usePresence([partner.id])[partner.id];
   const presenceLabel = describePresence(partnerPresence);
   const listRef = useRef<HTMLDivElement>(null);
@@ -181,6 +203,42 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       showToast(error.message || 'Could not change the timer', 'error');
     }
   };
+
+  // Your theme for this chat (private to you).
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !userId) return;
+    let cancelled = false;
+    void supabase
+      .from('conversation_members')
+      .select('chat_theme')
+      .eq('conversation_id', conversationId)
+      .eq('user_id', userId)
+      .maybeSingle()
+      .then(({ data }) => {
+        const t = (data as { chat_theme?: ChatThemeId } | null)?.chat_theme;
+        if (!cancelled && t) setThemeId(t);
+      });
+    return () => { cancelled = true; };
+  }, [conversationId, userId]);
+
+  const pickTheme = async (id: ChatThemeId) => {
+    setShowThemeSheet(false);
+    const before = themeId;
+    setThemeId(id);
+    if (!isSupabaseConfigured()) return;
+    const { error } = await supabase.rpc('set_chat_theme', { p_conversation_id: conversationId, p_theme: id });
+    if (error) {
+      setThemeId(before);
+      showToast('Could not save theme', 'error');
+    }
+  };
+
+  const startGame = useCallback(async () => {
+    setShowExtras(false);
+    const { error } = await supabase.rpc('start_chat_game', { p_conversation_id: conversationId });
+    if (error) showToast(error.message || 'Could not start a game', 'error');
+    else stickToBottomRef.current = true;
+  }, [conversationId, showToast]);
 
   const loadMessages = useCallback(async () => {
     if (!userId) return;
@@ -650,8 +708,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           try {
             setIsUploadingMedia(true);
             const audioFile = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
-            const mediaUrl = await uploadChatMedia(audioFile, conversationId);
-            await handleSend(`[VOICE_NOTE:${dur}]${mediaUrl}`);
+            const [mediaUrl, levels] = await Promise.all([
+              uploadChatMedia(audioFile, conversationId),
+              computeWaveform(audioBlob),
+            ]);
+            await handleSend(`[VOICE_NOTE:${dur}${levels ? `|w=${levels}` : ''}]${mediaUrl}`);
             showToast('Voice note shared', 'success');
           } catch (err) {
             console.error('Voice note upload error:', err);
@@ -698,8 +759,15 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     const audio = new Audio(audioUrl);
     audioElementRef.current = audio;
     setPlayingAudioId(msgId);
+    setAudioProgress(0);
 
-    audio.onended = () => setPlayingAudioId(null);
+    audio.ontimeupdate = () => {
+      if (audio.duration && Number.isFinite(audio.duration)) setAudioProgress(audio.currentTime / audio.duration);
+    };
+    audio.onended = () => {
+      setPlayingAudioId(null);
+      setAudioProgress(0);
+    };
     audio.onerror = () => setPlayingAudioId(null);
     audio.play().catch(() => setPlayingAudioId(null));
   }, []);
@@ -749,6 +817,15 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowThemeSheet(true)}
+            className="ib ib-s rounded-xl"
+            aria-label="Chat theme"
+            title="Chat theme"
+          >
+            <Palette className="i" aria-hidden />
+          </button>
           {isSupabaseConfigured() && (
             <button
               type="button"
@@ -785,7 +862,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       <div
         ref={listRef}
         onScroll={handleListScroll}
-        className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 bg-vault-950 min-h-0 [-webkit-overflow-scrolling:touch]"
+        className={`flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 ${theme.wallpaper} min-h-0 [-webkit-overflow-scrolling:touch]`}
       >
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 text-xs text-vault-500 gap-2">
@@ -820,6 +897,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 onOpenActions={setActionMsg}
                 onToggleReaction={toggleReaction}
                 onRetry={retrySend}
+                mineClass={theme.mine}
+                playProgress={playingAudioId === msg.id ? audioProgress : 0}
+                onRematch={startGame}
               />
             );
           })
@@ -888,6 +968,15 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => setShowExtras(true)}
+              className="ib ib-s rounded-xl"
+              aria-label="Stickers and games"
+              title="Stickers and games"
+            >
+              <Smile className="w-5 h-5 text-vault-300" />
+            </button>
+            <button
+              type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploadingMedia}
               className="ib ib-s rounded-xl"
@@ -942,6 +1031,20 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           </div>
         )}
       </footer>
+
+      {showExtras && (
+        <ChatExtrasSheet
+          canPlayGames={isSupabaseConfigured()}
+          onClose={() => setShowExtras(false)}
+          onSticker={id => { setShowExtras(false); void handleSend(`[STICKER:${id}]`); }}
+          onStartGame={() => void startGame()}
+          onShareScore={(gameId, score) => { setShowExtras(false); void handleSend(`[SCORE:${gameId}:${score}]`); }}
+        />
+      )}
+
+      {showThemeSheet && (
+        <ChatThemeSheet current={themeId} onPick={id => void pickTheme(id)} onClose={() => setShowThemeSheet(false)} />
+      )}
 
       {showTimerSheet && (
         <div
@@ -1081,6 +1184,8 @@ function systemText(content: string): string {
 function previewText(content: string): string {
   if (content === '[DELETED]') return 'Deleted message';
   if (isSystem(content)) return 'Chat setting changed';
+  const extra = extraPreview(content);
+  if (extra) return extra;
   if (content.startsWith('[IMAGE]')) return '📷 Photo';
   if (content.startsWith('[VOICE_NOTE')) return '🎤 Voice message';
   return content;
@@ -1104,6 +1209,11 @@ interface MessageRowProps {
   onOpenActions: (msg: MessageItem) => void;
   onToggleReaction: (msg: MessageItem, emoji: ReactionEmoji) => void;
   onRetry: (msg: MessageItem) => void;
+  /** Colour classes for your own bubbles (chat theme). */
+  mineClass: string;
+  /** 0..1 while this voice note plays. */
+  playProgress: number;
+  onRematch: () => void;
 }
 
 /**
@@ -1130,6 +1240,9 @@ const MessageRow = memo(function MessageRow({
   onOpenActions,
   onToggleReaction,
   onRetry,
+  mineClass,
+  playProgress,
+  onRematch,
 }: MessageRowProps) {
   if (isSystem(msg.content)) {
     return (
@@ -1141,7 +1254,7 @@ const MessageRow = memo(function MessageRow({
       </div>
     );
   }
-  return <MessageBubble {...{ msg, isMe, isFirstInGroup, isLastInGroup, isPlaying, onToggleAudio, onOpenMedia, onMediaLoaded, reactions, replyTarget, replyTargetIsMe, partnerName, myUserId, onOpenActions, onToggleReaction, onRetry }} />;
+  return <MessageBubble {...{ msg, isMe, isFirstInGroup, isLastInGroup, isPlaying, onToggleAudio, onOpenMedia, onMediaLoaded, reactions, replyTarget, replyTargetIsMe, partnerName, myUserId, onOpenActions, onToggleReaction, onRetry, mineClass, playProgress, onRematch }} />;
 });
 
 function MessageBubble({
@@ -1161,15 +1274,24 @@ function MessageBubble({
   onOpenActions,
   onToggleReaction,
   onRetry,
+  mineClass,
+  playProgress,
+  onRematch,
 }: MessageRowProps) {
   const [imageFailed, setImageFailed] = useState(false);
+  const { getHighScore } = useGame();
   const deleted = isDeleted(msg);
   const isImage = !deleted && msg.content.startsWith('[IMAGE]');
-  const isVoice = !deleted && msg.content.startsWith('[VOICE_NOTE');
+  const voice = deleted ? undefined : parseVoiceNote(msg.content);
+  const isVoice = Boolean(voice);
   const imageUrl = isImage ? msg.content.slice('[IMAGE]'.length) : '';
-  const voiceMatch = isVoice ? msg.content.match(/^\[VOICE_NOTE:(.*?)\](.*)$/) : null;
-  const voiceDuration = voiceMatch ? voiceMatch[1] : '0:00';
-  const voiceUrl = voiceMatch ? voiceMatch[2] : '';
+  const voiceDuration = voice?.duration ?? '0:00';
+  const voiceUrl = voice?.url ?? '';
+  const sticker = deleted ? undefined : parseSticker(msg.content);
+  const score = deleted ? undefined : parseScore(msg.content);
+  const gameRef = deleted ? undefined : parseGame(msg.content);
+  // Stickers, games and score cards sit on the wallpaper, not in a bubble.
+  const bare = Boolean(sticker || score || gameRef);
 
   // Long-press detection. Moving the finger (scrolling) cancels it; a completed long-press
   // swallows the following click so it doesn't also open the photo.
@@ -1255,13 +1377,15 @@ function MessageBubble({
       <div className={`relative flex items-center gap-1 max-w-[80%] ${isMe ? 'flex-row-reverse' : ''}`}>
         <div
           {...pressHandlers}
-          className={`relative min-w-0 ${isImage ? 'p-1.5' : 'p-3'} text-[15px] leading-[22px] break-words shadow-sm select-text ${
+          className={`relative min-w-0 ${bare ? 'p-0' : isImage ? 'p-1.5' : 'p-3'} text-[15px] leading-[22px] break-words ${bare ? '' : 'shadow-sm'} select-text ${
             msg.status ? 'opacity-70' : ''
           } ${
-            deleted
+            bare
+              ? 'bg-transparent'
+              : deleted
               ? 'bg-transparent border border-vault-750 text-vault-400 italic rounded-2xl'
               : isMe
-              ? `bg-[#10B981] text-[#04120C] font-medium ${isLastInGroup ? 'rounded-2xl rounded-br-xs' : 'rounded-2xl'}`
+              ? `${mineClass} font-medium ${isLastInGroup ? 'rounded-2xl rounded-br-xs' : 'rounded-2xl'}`
               : `bg-[#1B1D21] border border-[#1E2025] text-[#F4F5F6] ${isLastInGroup ? 'rounded-2xl rounded-bl-xs' : 'rounded-2xl'}`
           }`}
         >
@@ -1278,6 +1402,36 @@ function MessageBubble({
 
           {deleted ? (
             <span>This message was deleted</span>
+          ) : sticker ? (
+            sticker.kind === 'emoji' ? (
+              <span className="block text-7xl leading-none animate-slide-up" role="img" aria-label={`Sticker: ${sticker.label}`}>{sticker.art}</span>
+            ) : (
+              <span
+                className="block px-4 py-3 rounded-2xl bg-vault-900 border-2 border-emerald text-emerald text-2xl font-black tracking-wider -rotate-3 animate-slide-up"
+                role="img"
+                aria-label={`Sticker: ${sticker.label}`}
+              >
+                {sticker.art}
+              </span>
+            )
+          ) : score ? (
+            <div className="w-[216px] rounded-2xl bg-vault-900 border border-amber-500/40 p-3 text-white">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                <Trophy className="w-4 h-4" aria-hidden /> {COVER_GAMES.find(g => g.id === score.gameId)?.name ?? 'Game'}
+              </div>
+              <div className="text-3xl font-black font-mono mt-1">{score.score}</div>
+              <div className="text-xs text-vault-300 mt-1">
+                {isMe
+                  ? 'Your best score. Can they beat it?'
+                  : (() => {
+                      const mine = getHighScore(score.gameId as CoverGameType);
+                      if (!mine) return 'Beat that! Play it on the home screen.';
+                      return mine > score.score ? `Your best is ${mine}. You're ahead.` : `Your best is ${mine}. Time to beat it!`;
+                    })()}
+              </div>
+            </div>
+          ) : gameRef ? (
+            <ChatGameCard gameId={gameRef.id} myUserId={myUserId} partnerName={partnerName} onRematch={onRematch} />
           ) : isImage ? (
             onOpenMedia && !imageFailed ? (
               <button type="button" onClick={() => onOpenMedia(imageUrl)} className="block p-0 border-0 bg-transparent cursor-pointer" aria-label="Open photo">
@@ -1291,18 +1445,27 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={() => onToggleAudio(msg.id, voiceUrl)}
-                className={`w-11 h-11 rounded-full flex items-center justify-center ${
-                  isMe ? 'bg-[#04120C] text-[#10B981]' : 'bg-[#10B981] text-[#04120C]'
+                className={`w-11 h-11 shrink-0 rounded-full flex items-center justify-center ${
+                  isMe ? 'bg-black/80 text-white' : 'bg-[#10B981] text-[#04120C]'
                 } active:scale-90 transition-transform`}
                 aria-label={isPlaying ? 'Pause voice message' : 'Play voice message'}
               >
                 {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
               </button>
               <div className="flex-1 space-y-1">
-                <div className="h-2 rounded-full bg-black/20 overflow-hidden">
-                  <div className={`h-full ${isMe ? 'bg-[#04120C]' : 'bg-[#10B981]'} ${isPlaying ? 'w-3/4 animate-pulse' : 'w-1/4'}`} />
+                <div className="flex items-center gap-[2px] h-7" aria-hidden>
+                  {(voice?.levels ?? Array.from({ length: WAVEFORM_BARS }, (_, i) => 0.25 + 0.2 * Math.abs(Math.sin(i * 1.7)))).map((level, i, all) => {
+                    const played = isPlaying && i / all.length < playProgress;
+                    return (
+                      <span
+                        key={i}
+                        className={`flex-1 rounded-full ${isMe ? 'bg-current' : 'bg-[#10B981]'} ${played ? 'opacity-100' : 'opacity-35'}`}
+                        style={{ height: `${Math.max(12, Math.round(level * 100))}%` }}
+                      />
+                    );
+                  })}
                 </div>
-                <span className={`text-[11px] font-mono ${isMe ? 'text-[#04120C]/75' : 'text-vault-400'}`}>
+                <span className={`text-[11px] font-mono ${isMe ? 'opacity-75' : 'text-vault-400'}`}>
                   Voice message ({voiceDuration})
                 </span>
               </div>

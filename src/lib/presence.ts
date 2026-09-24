@@ -124,3 +124,17 @@ export function describePresence(p: PresenceInfo | undefined): string | null {
   if (seen.toDateString() === yesterday.toDateString()) return `last seen yesterday at ${time}`;
   return `last seen ${seen.toLocaleDateString([], { day: 'numeric', month: 'short' })}`;
 }
+
+/** Whether you send read receipts (blue ticks). Off works both ways: you won't see theirs either. */
+export async function getReadReceiptSharing(): Promise<boolean> {
+  if (!isSupabaseConfigured()) return true;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return true;
+  const { data } = await supabase.from('user_presence').select('share_read_receipts').eq('user_id', user.id).maybeSingle();
+  return (data as { share_read_receipts?: boolean } | null)?.share_read_receipts ?? true;
+}
+
+export async function setReadReceiptSharing(share: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_read_receipts', { p_share: share });
+  if (error) throw new Error(error.message);
+}

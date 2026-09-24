@@ -17,7 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useVault } from '../../context/VaultContext';
 import { useGame, COVER_GAMES } from '../../context/GameContext';
 import { useToast } from '../../context/ToastContext';
-import { getPresenceSharing, setPresenceSharing } from '../../lib/presence';
+import { getPresenceSharing, setPresenceSharing, getReadReceiptSharing, setReadReceiptSharing } from '../../lib/presence';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import { CoverGameType } from '../../types';
 
@@ -43,8 +43,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   useEffect(() => {
     let cancelled = false;
     void getPresenceSharing().then(v => { if (!cancelled) setShareOnline(v); });
+    void getReadReceiptSharing().then(v => { if (!cancelled) setReadReceipts(v); });
     return () => { cancelled = true; };
   }, []);
+
+  const handleToggleReadReceipts = async () => {
+    const next = !readReceipts;
+    setReadReceipts(next);
+    if (!isSupabaseConfigured()) return;
+    try {
+      await setReadReceiptSharing(next);
+      showToast(next ? 'Read receipts on' : 'Read receipts off. You also won’t see when others read yours', 'info');
+    } catch {
+      setReadReceipts(!next);
+      showToast('Could not change read receipts', 'error');
+    }
+  };
 
   const handleToggleShareOnline = async () => {
     const next = !shareOnline;
@@ -358,16 +372,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
             type="button"
             role="switch"
             aria-checked={readReceipts}
-            onClick={() => {
-              setReadReceipts(!readReceipts);
-              showToast(`Read receipts ${!readReceipts ? 'enabled' : 'disabled'}`, 'info');
-            }}
+            onClick={() => void handleToggleReadReceipts()}
             className="set-row w-full text-left"
           >
             <Eye className="i c2" aria-hidden />
             <div className="flex-1 min-w-0">
               <span className="t-body block">Read receipts</span>
-              <span className="t-cap c3">Show double-check indicators when messages are read</span>
+              <span className="t-cap c3">Let people see when you've read their messages. If off, you won't see theirs either.</span>
             </div>
             <span
               className={readReceipts ? 'switch switch-on' : 'switch'}

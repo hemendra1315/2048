@@ -22,6 +22,7 @@ import { ContactDossier } from './ContactDossier';
 import { Avatar } from '../common/Avatar';
 import { useMediaQuery, DESKTOP_QUERY } from '../../lib/useMediaQuery';
 import { usePresence } from '../../lib/presence';
+import { extraPreview } from '../../lib/chatExtras';
 import { useToast } from '../../context/ToastContext';
 
 interface MessagesViewProps {
@@ -330,6 +331,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     if (content === '[DELETED]') return 'Message deleted';
     if (content.startsWith('[SYSTEM:disappearing:off')) return 'Disappearing messages turned off';
     if (content.startsWith('[SYSTEM:disappearing:')) return 'Disappearing messages turned on';
+    const extra = extraPreview(content);
+    if (extra) return extra;
     if (content.startsWith('[IMAGE]')) return 'Photo';
     if (content.startsWith('[VOICE_NOTE')) return 'Voice message';
     return content;
