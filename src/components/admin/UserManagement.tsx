@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, X, Ban, ShieldAlert, Shield, RefreshCw, Eye } from 'lucide-react';
+import { Search, X, Ban, ShieldAlert, Shield, RefreshCw, Eye, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { listProfiles, getConnectionCounts, setUserStatus } from '../../lib/adminApi';
+import { listProfiles, getConnectionCounts, setUserStatus, logAdminAction } from '../../lib/adminApi';
 import { UserProfile } from '../../types';
 import { formatDetailedDate, getAvatarUrl } from '../../lib/utils';
 import { UserDetailView } from './UserDetailView';
@@ -17,7 +17,7 @@ export const UserManagement: React.FC = () => {
   const [selectedUserForDetail, setSelectedUserForDetail] = useState<UserProfile | null>(null);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [actionReason, setActionReason] = useState('');
-  const [modalMode, setModalMode] = useState<'suspend' | 'ban' | 'unban' | null>(null);
+  const [modalMode, setModalMode] = useState<'warn' | 'suspend' | 'ban' | 'unban' | null>(null);
   const [connectionCounts, setConnectionCounts] = useState<Record<string, number>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -49,6 +49,22 @@ export const UserManagement: React.FC = () => {
     } catch (err) {
       console.error('Moderation error:', err);
       showToast(err instanceof Error ? err.message : 'Action failed', 'error');
+    }
+  };
+
+  const handleWarnUser = async () => {
+    if (!user || !selectedUser) return;
+    try {
+      await logAdminAction(user.id, 'warn_user', selectedUser.id, null, {
+        reason: actionReason.trim() || 'No reason provided',
+      });
+      showToast(`Warning logged for ${selectedUser.display_name}`, 'success');
+      setModalMode(null);
+      setSelectedUser(null);
+      setActionReason('');
+    } catch (err) {
+      console.error('Warn user error:', err);
+      showToast(err instanceof Error ? err.message : 'Could not log warning', 'error');
     }
   };
 
@@ -242,6 +258,15 @@ export const UserManagement: React.FC = () => {
                             <button
                               onClick={() => {
                                 setSelectedUser(u);
+                                setModalMode('warn');
+                              }}
+                              className="px-2.5 py-1 bg-vault-800 hover:bg-vault-700 border border-vault-700 text-vault-200 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1"
+                            >
+                              <AlertTriangle className="w-3 h-3" /> Warn
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedUser(u);
                                 setModalMode('suspend');
                               }}
                               className="px-2.5 py-1 bg-amber-950 hover:bg-amber-900 border border-amber-600/50 text-amber-300 rounded-lg text-[11px] font-bold transition-all"
@@ -273,13 +298,17 @@ export const UserManagement: React.FC = () => {
       {modalMode && selectedUser && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-vault-900 border border-vault-700/80 rounded-3xl w-full max-w-sm p-6 flex flex-col shadow-2xl">
-            <div className="flex items-center gap-2 text-rose-400 font-bold mb-1">
+            <div className={`flex items-center gap-2 font-bold mb-1 ${modalMode === 'warn' ? 'text-amber-400' : 'text-rose-400'}`}>
               <ShieldAlert className="w-5 h-5" />
-              <span>Confirm Disciplinary Action</span>
+              <span>{modalMode === 'warn' ? 'Send a Warning' : 'Confirm Disciplinary Action'}</span>
             </div>
             <p className="text-xs text-vault-300 mb-4">
-              Apply <strong>{modalMode.toUpperCase()}</strong> to{' '}
-              <strong>{selectedUser.display_name}</strong> ({selectedUser.uid})
+              {modalMode === 'warn' ? (
+                <>Log a warning for <strong>{selectedUser.display_name}</strong> ({selectedUser.uid}). This does not suspend or ban the account.</>
+              ) : (
+                <>Apply <strong>{modalMode.toUpperCase()}</strong> to{' '}
+                <strong>{selectedUser.display_name}</strong> ({selectedUser.uid})</>
+              )}
             </p>
 
             <label className="block text-[10px] font-bold text-vault-400 uppercase tracking-wider mb-1">
@@ -306,15 +335,21 @@ export const UserManagement: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  handleApplyStatus(
-                    modalMode === 'ban' ? 'banned' : modalMode === 'suspend' ? 'suspended' : 'active'
-                  )
-                }
+                onClick={() => {
+                  if (modalMode === 'warn') {
+                    handleWarnUser();
+                  } else {
+                    handleApplyStatus(
+                      modalMode === 'ban' ? 'banned' : modalMode === 'suspend' ? 'suspended' : 'active'
+                    );
+                  }
+                }}
                 className={`flex-1 py-2 rounded-xl text-xs font-bold shadow-md ${
                   modalMode === 'unban'
                     ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                    : 'bg-rose-600 hover:bg-rose-500 text-white'
+                    : modalMode === 'warn'
+                      ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                      : 'bg-rose-600 hover:bg-rose-500 text-white'
                 }`}
               >
                 Confirm {modalMode.toUpperCase()}
