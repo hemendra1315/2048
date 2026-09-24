@@ -150,6 +150,9 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
     try {
       if (isSupabaseConfigured()) {
         await supabase.from('gallery_items').delete().eq('id', item.id);
+        if (item.storage_path) {
+          await supabase.storage.from('gallery').remove([item.storage_path]);
+        }
       } else {
         mockBackend.deleteGalleryItem(item.id, user.id);
       }
