@@ -390,3 +390,8 @@
   .btn, .ib, .card-interactive, .chip, .row, .tab { transition: none; }
 }
 
+
+/* Android 15+ draws the app behind the status bar (edge-to-edge); the WebView reports its height
+   as env(safe-area-inset-top). Full-screen overlays start below it so their top controls stay
+   tappable. Screens and sheets pad themselves with env(safe-area-inset-*) where they touch an edge. */
+.fixed.inset-0 { top: env(safe-area-inset-top); }

@@ -7,6 +7,7 @@ import { LauncherCoverView } from './components/launcher/LauncherCoverView';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { initializeNotificationService } from './lib/notifications';
 import { crashReporter } from './lib/crashReporting';
+import { useBackHandler } from './lib/backButton';
 
 // Dynamic code splitting for secondary & admin screens
 const AuthModal = React.lazy(() =>
@@ -52,6 +53,8 @@ const MainNavigator: React.FC = () => {
       window.removeEventListener('offline', handleOffline);
     };
   }, [showToast]);
+
+  useBackHandler(isSuperAdmin && adminMode, () => setAdminMode(false));
 
   // 1. If Vault is locked, display the customizable Cover Game Launcher
   if (!isUnlocked) {

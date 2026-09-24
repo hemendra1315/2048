@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Lock, X, Eye, EyeOff, RotateCcw } from 'lucide-react';
 import { useVault } from '../../context/VaultContext';
 import { useAuth } from '../../context/AuthContext';
+import { useBackHandler } from '../../lib/backButton';
 
 export const StealthUnlockModal: React.FC = () => {
   const { unlockModalOpen, closeUnlockModal, verifyAndUnlock, proceedToSignIn } = useVault();
@@ -33,6 +34,8 @@ export const StealthUnlockModal: React.FC = () => {
     };
   }, [unlockModalOpen, user, proceedToSignIn, closeUnlockModal]);
 
+  useBackHandler(unlockModalOpen && Boolean(user), closeUnlockModal);
+
   if (!unlockModalOpen || !user) return null;
 
   const handleVerify = async (e: React.FormEvent) => {
@@ -57,7 +60,7 @@ export const StealthUnlockModal: React.FC = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="unlock-title"
-        className={`sheet anim-sheet absolute left-0 right-0 bottom-0 mx-auto max-w-md px-5 pt-2.5 pb-7 flex flex-col gap-4 transition-transform ${
+        className={`sheet anim-sheet absolute left-0 right-0 bottom-0 mx-auto max-w-md px-5 pt-2.5 pb-[max(1.75rem,env(safe-area-inset-bottom))] flex flex-col gap-4 transition-transform ${
           errorShake ? 'translate-x-2' : ''
         }`}
       >

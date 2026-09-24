@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { Avatar } from '../common/Avatar';
 
 interface AddPersonModalProps {
   isOpen: boolean;
@@ -132,7 +133,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         {searching && (
           <div className="p-6 text-center text-xs text-vault-400 flex items-center justify-center gap-2">
             <div className="w-4 h-4 border-2 border-arcade-gold border-t-transparent rounded-full animate-spin" />
-            <span>Scanning Vault Registry...</span>
+            <span>Looking up ID…</span>
           </div>
         )}
 
@@ -149,11 +150,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         {!searching && targetProfile && (
           <div className="bg-vault-950/80 border border-vault-700/80 rounded-2xl p-4 animate-slide-up">
             <div className="flex items-center gap-3 mb-3">
-              <img
-                src={targetProfile.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${targetProfile.uid}`}
-                alt="Target"
-                className="w-12 h-12 rounded-xl bg-vault-800 border border-vault-700 object-cover"
-              />
+              <Avatar name={targetProfile.display_name ?? ''} seed={targetProfile.uid} src={targetProfile.avatar_url} size={48} />
               <div>
                 <h4 className="text-sm font-bold text-white leading-tight">
                   {targetProfile.display_name}

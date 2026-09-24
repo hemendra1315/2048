@@ -67,6 +67,9 @@ import { COVER_GAMES, useGame } from '../../context/GameContext';
 import { resolveChatMediaUrl } from '../../lib/mediaUrls';
 import { BlockStatus, blockUser, getBlockStatus, unblockUser } from '../../lib/blocks';
 import { ChatImage } from '../common/ChatMedia';
+import { useBackHandler } from '../../lib/backButton';
+import { expectExternalActivity } from '../../lib/externalActivity';
+import { getDraft, setDraft } from '../../lib/chatDrafts';
 
 interface ChatRoomProps {
   conversationId: string;
@@ -88,7 +91,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const { user } = useAuth();
   const { showToast } = useToast();
   const [messages, setMessages] = useState<MessageItem[]>([]);
-  const [inputContent, setInputContent] = useState('');
+  const [inputContent, setInputContent] = useState(() => getDraft(conversationId));
   const [isTyping, setIsTyping] = useState(false);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
@@ -103,7 +106,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const typingChannelRef = useRef<RealtimeChannel | null>(null);
   const lastTypingSentRef = useRef(0);
   const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [disappearAfter, setDisappearAfter] = useState<number | null>(null);
   const [showTimerSheet, setShowTimerSheet] = useState(false);
   const [showExtras, setShowExtras] = useState(false);
@@ -549,6 +552,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const handleInputChange = (value: string) => {
     setInputContent(value);
     if (editing) return;
+    setDraft(conversationId, value);
     sendTyping(value.trim().length > 0);
     if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
     typingIdleTimerRef.current = setTimeout(() => sendTyping(false), 4000);
@@ -562,7 +566,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     const content = (contentToSend || inputContent).trim();
     if (!content || !user) return;
 
-    if (!contentToSend) setInputContent('');
+    if (!contentToSend) {
+      // After an edit, bring back whatever was being typed before it.
+      if (!editing) setDraft(conversationId, '');
+      setInputContent(editing ? getDraft(conversationId) : '');
+    }
     sendTyping(false);
 
     if (editing && !contentToSend) {
@@ -694,7 +702,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   };
 
   const cancelComposerMode = () => {
-    if (editing) setInputContent('');
+    if (editing) setInputContent(getDraft(conversationId));
     setEditing(null);
     setReplyTo(null);
   };
@@ -868,6 +876,27 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   }, []);
 
   useEffect(() => () => audioElementRef.current?.pause(), []);
+
+  // The message box grows with its text, up to its max-height (then it scrolls).
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [inputContent]);
+
+  // Android back button: close whatever is open on top, otherwise leave the chat.
+  // (Later registrations take priority, so the chat itself comes first.)
+  useBackHandler(true, onBack);
+  useBackHandler(Boolean(replyTo || editing), cancelComposerMode);
+  useBackHandler(isRecordingAudio, () => handleStopVoiceRecord(false));
+  useBackHandler(showContactModal, () => setShowContactModal(false));
+  useBackHandler(showChatMenu, () => { setShowChatMenu(false); setConfirmBlock(false); });
+  useBackHandler(showTimerSheet, () => setShowTimerSheet(false));
+  useBackHandler(showThemeSheet, () => setShowThemeSheet(false));
+  useBackHandler(showExtras, () => setShowExtras(false));
+  useBackHandler(showReportModal, () => setShowReportModal(false));
+  useBackHandler(Boolean(actionMsg), () => setActionMsg(null));
 
   return (
     <div className="flex flex-col h-full bg-vault-950 border border-vault-800 rounded-2xl overflow-hidden select-none animate-fade-in">
@@ -1066,7 +1095,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             </div>
           </div>
         ) : (
-          <div className="flex items-center gap-2">
+          <div className="flex items-end gap-2">
             <button
               type="button"
               onClick={() => setShowExtras(true)}
@@ -1078,7 +1107,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => { expectExternalActivity(); fileInputRef.current?.click(); }}
               disabled={isUploadingMedia}
               className="ib ib-s rounded-xl"
               aria-label="Attach photo"
@@ -1106,19 +1135,26 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 e.preventDefault();
                 handleSend();
               }}
-              className="flex-1 flex items-center gap-2"
+              className="flex-1 min-w-0 flex items-end gap-2"
             >
-              <input
+              <textarea
                 ref={inputRef}
-                type="text"
+                rows={1}
                 value={inputContent}
                 onChange={e => handleInputChange(e.target.value)}
                 onKeyDown={e => {
                   if (e.key === 'Escape' && (replyTo || editing)) cancelComposerMode();
+                  // With a keyboard and mouse, Enter sends and Shift+Enter adds a line.
+                  // On a phone, Enter adds a line and the Send button sends.
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !isTouchDevice()) {
+                    e.preventDefault();
+                    void handleSend();
+                  }
                 }}
                 maxLength={4000}
-                placeholder={editing ? 'Edit message…' : `Message ${partner.display_name}...`}
-                className="inp flex-1 text-sm h-11"
+                enterKeyHint={isTouchDevice() ? 'enter' : 'send'}
+                placeholder={editing ? 'Edit message…' : 'Message'}
+                className="inp flex-1 min-w-0 text-sm min-h-[44px] max-h-[132px] py-[11px] leading-[20px] resize-none overflow-y-auto"
               />
               <button
                 type="submit"
@@ -1142,7 +1178,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           onClick={() => { setShowChatMenu(false); setConfirmBlock(false); }}
           onKeyDown={e => { if (e.key === 'Escape') { setShowChatMenu(false); setConfirmBlock(false); } }}
         >
-          <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl" onClick={e => e.stopPropagation()}>
             <p className="px-4 pt-2 pb-2 text-xs text-vault-400 truncate">{partner.display_name}</p>
             <button type="button" className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
               onClick={() => { setShowChatMenu(false); setShowThemeSheet(true); }}>
@@ -1206,7 +1242,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           onClick={() => setShowTimerSheet(false)}
           onKeyDown={e => { if (e.key === 'Escape') setShowTimerSheet(false); }}
         >
-          <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="px-4 pt-2 pb-3">
               <h3 className="t-body font-bold text-white m-0 flex items-center gap-2"><Timer className="w-4 h-4 text-emerald" aria-hidden /> Disappearing messages</h3>
               <p className="text-xs text-vault-400 mt-1 mb-0">
@@ -1302,6 +1338,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 };
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
+
+/** Phones and tablets: Enter adds a line in the message box instead of sending. */
+const isTouchDevice = () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
 /** Messages loaded at a time (newest first, then older pages as you scroll up). */
 const PAGE_SIZE = 50;
 
@@ -1749,7 +1788,7 @@ function MessageActionSheet({
       onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
     >
       <div
-        className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-4 shadow-2xl"
+        className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl"
         onClick={e => e.stopPropagation()}
       >
         <p className="px-4 pt-2 pb-3 text-xs text-vault-400 truncate">{previewText(msg.content)}</p>

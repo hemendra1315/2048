@@ -8,6 +8,8 @@ import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { uniqueChannelName } from '../../lib/realtime';
 import { AddPersonModal } from './AddPersonModal';
+import { useBackHandler } from '../../lib/backButton';
+import { Avatar } from '../common/Avatar';
 
 interface ConnectionsViewProps {
   onStartChat: (partnerId: string) => void;
@@ -160,6 +162,8 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
     }
   };
 
+  useBackHandler(addModalOpen, () => setAddModalOpen(false));
+
   return (
     <div className="space-y-4 pb-20 animate-fade-in">
       {/* Header with Add Button */}
@@ -242,11 +246,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
                 className="bg-vault-900 border border-vault-800 hover:border-vault-700 rounded-2xl p-3.5 flex items-center justify-between shadow-sm"
               >
                 <div className="flex items-center gap-3">
-                  <img
-                    src={conn.partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${conn.partner.uid}`}
-                    alt="Avatar"
-                    className="w-11 h-11 rounded-xl bg-vault-800 border border-vault-700 object-cover"
-                  />
+                  <Avatar name={conn.partner.display_name ?? ''} seed={conn.partner.uid} src={conn.partner.avatar_url} size={40} />
                   <div>
                     <h4 className="text-sm font-bold text-white leading-tight">
                       {conn.partner.display_name}
@@ -291,11 +291,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
                 className="bg-vault-900 border border-vault-700/80 rounded-2xl p-3.5 flex items-center justify-between shadow-md"
               >
                 <div className="flex items-center gap-3">
-                  <img
-                    src={req.sender?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${req.sender?.uid || 'req'}`}
-                    alt="Sender"
-                    className="w-11 h-11 rounded-xl bg-vault-800 border border-vault-700 object-cover"
-                  />
+                  <Avatar name={req.sender?.display_name ?? ''} seed={req.sender?.uid} src={req.sender?.avatar_url} size={40} />
                   <div>
                     <h4 className="text-sm font-bold text-white leading-tight">
                       {req.sender?.display_name || 'Anonymous User'}
@@ -340,11 +336,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
                 className="bg-vault-900 border border-vault-800 rounded-2xl p-3.5 flex items-center justify-between"
               >
                 <div className="flex items-center gap-3">
-                  <img
-                    src={req.receiver?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${req.receiver?.uid || 'out'}`}
-                    alt="Receiver"
-                    className="w-11 h-11 rounded-xl bg-vault-800 border border-vault-700 object-cover"
-                  />
+                  <Avatar name={req.receiver?.display_name ?? ''} seed={req.receiver?.uid} src={req.receiver?.avatar_url} size={40} />
                   <div>
                     <h4 className="text-sm font-bold text-white leading-tight">
                       {req.receiver?.display_name || 'Pending Recipient'}

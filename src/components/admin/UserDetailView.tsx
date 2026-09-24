@@ -41,6 +41,7 @@ import {
 import { formatDetailedDate } from '../../lib/utils';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { Avatar } from '../common/Avatar';
 
 interface UserDetailViewProps {
   user: UserProfile;
@@ -308,11 +309,7 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
       {/* User Header Summary Card */}
       <div className="bg-vault-900 border border-vault-800 rounded-3xl p-4.5 shadow-md flex items-center justify-between">
         <div className="flex items-center gap-3.5">
-          <img
-            src={currentUser.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`}
-            alt="Avatar"
-            className="w-14 h-14 rounded-2xl bg-vault-800 border-2 border-arcade-gold/40 object-cover shadow-sm"
-          />
+          <Avatar name={currentUser.display_name ?? ''} seed={currentUser.uid} src={currentUser.avatar_url} size={56} />
           <div>
             <div className="flex items-center gap-1.5">
               <h3 className="text-base font-bold text-white leading-tight">
@@ -537,14 +534,7 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
                     className="bg-vault-900 hover:bg-vault-850 border border-vault-800 rounded-2xl p-3.5 cursor-pointer transition-all shadow-sm flex items-center justify-between"
                   >
                     <div className="flex items-center gap-3">
-                      <img
-                        src={
-                          c.partnerProfile.avatar_url ||
-                          `https://api.dicebear.com/7.x/bottts/svg?seed=${c.partnerProfile.uid}`
-                        }
-                        alt="Partner"
-                        className="w-10 h-10 rounded-xl bg-vault-800 object-cover border border-vault-700"
-                      />
+                      <Avatar name={c.partnerProfile.display_name ?? ''} seed={c.partnerProfile.uid} src={c.partnerProfile.avatar_url} size={40} />
                       <div>
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs font-bold text-white">
@@ -762,14 +752,7 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
                     className="flex items-center justify-between p-2 rounded-xl bg-vault-950 border border-vault-800 text-xs"
                   >
                     <div className="flex items-center gap-2">
-                      <img
-                        src={
-                          conn.partner.avatar_url ||
-                          `https://api.dicebear.com/7.x/bottts/svg?seed=${conn.partner.uid}`
-                        }
-                        alt="Partner"
-                        className="w-8 h-8 rounded-lg object-cover"
-                      />
+                      <Avatar name={conn.partner.display_name ?? ''} seed={conn.partner.uid} src={conn.partner.avatar_url} size={32} />
                       <div>
                         <div className="font-bold text-white">{conn.partner.display_name}</div>
                         <div className="text-[10px] font-mono text-arcade-gold">{conn.partner.uid}</div>

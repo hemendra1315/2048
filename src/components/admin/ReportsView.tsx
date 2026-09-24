@@ -28,6 +28,7 @@ import {
 import { setUserStatus, listProfiles } from '../../lib/adminApi';
 import { UserProfile } from '../../types';
 import { formatDetailedDate } from '../../lib/utils';
+import { Avatar } from '../common/Avatar';
 
 interface ReportsViewProps {
   initialReportId?: string | null;
@@ -462,14 +463,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
                       {reportedUser ? (
                         <div className="flex items-center gap-3">
-                          <img
-                            src={
-                              reportedUser.avatar_url ||
-                              `https://api.dicebear.com/7.x/bottts/svg?seed=${reportedUser.uid}`
-                            }
-                            alt="Avatar"
-                            className="w-10 h-10 rounded-xl bg-vault-800 object-cover border border-vault-700"
-                          />
+                          <Avatar name={reportedUser.display_name ?? ''} seed={reportedUser.uid} src={reportedUser.avatar_url} size={40} />
                           <div className="min-w-0 flex-1">
                             <div className="text-xs font-bold text-white truncate">
                               {reportedUser.display_name}
@@ -517,14 +511,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
                       {reporter ? (
                         <div className="flex items-center gap-3">
-                          <img
-                            src={
-                              reporter.avatar_url ||
-                              `https://api.dicebear.com/7.x/bottts/svg?seed=${reporter.uid}`
-                            }
-                            alt="Avatar"
-                            className="w-10 h-10 rounded-xl bg-vault-800 object-cover border border-vault-700"
-                          />
+                          <Avatar name={reporter.display_name ?? ''} seed={reporter.uid} src={reporter.avatar_url} size={40} />
                           <div className="min-w-0 flex-1">
                             <div className="text-xs font-bold text-white truncate">
                               {reporter.display_name}

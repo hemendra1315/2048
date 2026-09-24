@@ -3,6 +3,8 @@
 // The browser only runs the ceremony. Challenges come from the vault-auth Edge Function, and the
 // signed results go back to it for verification. Nothing here decides whether a login succeeded.
 
+import { expectExternalActivity } from './externalActivity';
+
 export interface BiometricAvailability {
   available: boolean;
   platform: 'webauthn' | 'none';
@@ -107,6 +109,7 @@ export class BiometricService {
 
   /** Runs the enrollment ceremony for server-issued options. */
   static async createCredential(options: ServerCreationOptions): Promise<RegistrationCredential> {
+    expectExternalActivity();
     const credential = (await navigator.credentials.create({
       publicKey: {
         challenge: fromB64url(options.challenge),
@@ -138,6 +141,7 @@ export class BiometricService {
 
   /** Runs the login ceremony for a server-issued challenge and returns the signed assertion. */
   static async getAssertion(options: ServerRequestOptions): Promise<AssertionCredential> {
+    expectExternalActivity();
     const credential = (await navigator.credentials.get({
       publicKey: {
         challenge: fromB64url(options.challenge),

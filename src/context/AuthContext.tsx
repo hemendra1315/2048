@@ -234,7 +234,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } else {
         throw new Error(NOT_CONFIGURED);
       }
-      showToast('Fingerprint verified: Vault unlocked', 'success');
+      showToast('Signed in with fingerprint', 'success');
       return profile;
     });
 

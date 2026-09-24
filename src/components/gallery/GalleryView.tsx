@@ -15,6 +15,7 @@ import { useGalleryUrls } from '../../lib/mediaUrls';
 import { MediaImage } from '../common/MediaImage';
 import { UploadModal } from './UploadModal';
 import { LightboxViewer } from './LightboxViewer';
+import { useBackHandler } from '../../lib/backButton';
 
 type GalleryFilter = 'all' | 'photos' | 'videos';
 
@@ -134,6 +135,9 @@ export const GalleryView: React.FC = () => {
     acc[key].push(item);
     return acc;
   }, {} as Record<string, GalleryItem[]>);
+
+  useBackHandler(Boolean(selectedItem), () => setSelectedItem(null));
+  useBackHandler(uploadModalOpen, () => setUploadModalOpen(false));
 
   return (
     <div className="flex flex-col gap-4 pb-4 animate-fade-in select-none">

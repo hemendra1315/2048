@@ -111,15 +111,15 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
         });
       });
 
-      // 3. Vault Media Uploads
+      // 3. Gallery uploads
       gallery.forEach(g => {
         const owner = profileMap[g.user_id];
         const relatedConv = convs.find(c => c.user_a === g.user_id || c.user_b === g.user_id);
         combined.push({
           id: `med_${g.id}`,
           type: 'media_upload',
-          title: `Vault Photo Upload: ${owner?.display_name || 'User'}`,
-          description: g.caption ? `"${g.caption}"` : 'Uploaded encrypted image asset to Vault storage',
+          title: `Gallery upload: ${owner?.display_name || 'User'}`,
+          description: g.caption ? `"${g.caption}"` : 'Uploaded a photo',
           timestamp: g.created_at,
           user: owner,
           targetUserId: g.user_id,

@@ -163,7 +163,7 @@ export const ReportUserModal: React.FC<ReportUserModalProps> = ({
           </p>
         </div>
 
-        <div className="p-3 border-t border-vault-800 flex gap-2 justify-end">
+        <div className="p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-vault-800 flex gap-2 justify-end">
           <button type="button" onClick={onClose} className="btn btn-s min-h-[44px]">Cancel</button>
           <button type="submit" disabled={!category || submitting} className="btn btn-p min-h-[44px] disabled:opacity-50">
             {submitting ? 'Sending…' : 'Send report'}

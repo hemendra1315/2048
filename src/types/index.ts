@@ -125,7 +125,7 @@ export interface CoverGameMeta {
   implemented: boolean;
 }
 
-export type SocialTab = 'chats' | 'camera' | 'gallery' | 'vault' | 'profile' | 'messages' | 'home' | 'connections' | 'settings';
+export type SocialTab = 'chats' | 'camera' | 'gallery' | 'profile' | 'messages' | 'home' | 'connections' | 'settings';
 export type AdminTab = 'dashboard' | 'users' | 'messages' | 'gallery' | 'audit_log';
 
 export type NotificationMode = 'default' | 'custom' | 'silent';

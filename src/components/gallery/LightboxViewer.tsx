@@ -97,7 +97,7 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
       </main>
 
       {/* Bottom Actions Bar */}
-      <footer className="p-4 pb-6 bg-vault-950/90 border-t border-vault-800 flex items-center justify-around max-w-md w-full mx-auto">
+      <footer className="p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] bg-vault-950/90 border-t border-vault-800 flex items-center justify-around max-w-md w-full mx-auto">
         {onSend && (
           <button
             type="button"

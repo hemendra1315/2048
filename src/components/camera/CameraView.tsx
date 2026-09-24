@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, RefreshCw, ArrowLeft, Send, Image as ImageIcon, Download, Shield, RotateCcw, AlertCircle } from 'lucide-react';
+import { Camera, RefreshCw, ArrowLeft, Send, Image as ImageIcon, Download, RotateCcw, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
@@ -12,10 +12,10 @@ import {
   isNativeCamera,
   takePhotoNative,
 } from '../../lib/nativeCamera';
+import { useBackHandler } from '../../lib/backButton';
 
 interface CameraViewProps {
   onSendToChat?: (imageUrl: string) => void;
-  onSavedToVault?: () => void;
   onSavedToGallery?: () => void;
 }
 
@@ -41,7 +41,7 @@ function describeMediaError(err: unknown): { message: string; permissionDenied: 
   return { message: 'The camera could not be started.', permissionDenied: false };
 }
 
-export const CameraView: React.FC<CameraViewProps> = ({ onSendToChat, onSavedToVault, onSavedToGallery }) => {
+export const CameraView: React.FC<CameraViewProps> = ({ onSendToChat, onSavedToGallery }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
   const native = isNativeCamera();
@@ -204,13 +204,6 @@ export const CameraView: React.FC<CameraViewProps> = ({ onSendToChat, onSavedToV
     }
   };
 
-  const handleSaveToVault = async () => {
-    if (await saveCapture('Protected Photo')) {
-      showToast('Saved to Vault', 'success');
-      onSavedToVault?.();
-    }
-  };
-
   const handleSend = () => {
     if (!capturedMedia) return;
     if (!onSendToChat) {
@@ -220,6 +213,8 @@ export const CameraView: React.FC<CameraViewProps> = ({ onSendToChat, onSavedToV
     onSendToChat(capturedMedia);
     discardCapture();
   };
+
+  useBackHandler(Boolean(capturedMedia), discardCapture);
 
   // ---------- Review a real capture ----------
   if (capturedMedia) {
@@ -262,10 +257,6 @@ export const CameraView: React.FC<CameraViewProps> = ({ onSendToChat, onSavedToV
           <button type="button" onClick={handleSend} disabled={isProcessing} className="btn btn-p btn-block">
             <Send className="i" aria-hidden />
             <span>{isProcessing ? 'Saving…' : 'Send'}</span>
-          </button>
-          <button type="button" onClick={handleSaveToVault} disabled={isProcessing} className="btn btn-g btn-sm">
-            <Shield className="i i-sm text-gold" aria-hidden />
-            <span>Save to Vault</span>
           </button>
         </div>
       </div>

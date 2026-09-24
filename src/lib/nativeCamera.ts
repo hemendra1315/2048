@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { Camera, CameraDirection, MediaTypeSelection } from '@capacitor/camera';
+import { expectExternalActivity } from './externalActivity';
 
 /**
  * Photo capture and selection.
@@ -59,6 +60,7 @@ export async function takePhotoNative(options: CaptureOptions = {}): Promise<Blo
   if (!isNativeCamera()) throw new CameraError('unavailable', 'The system camera is only available in the app.');
   await ensureCameraPermission();
   try {
+    expectExternalActivity();
     const result = await Camera.takePhoto({
       quality: 85,
       correctOrientation: true,
@@ -82,6 +84,7 @@ export async function takePhotoNative(options: CaptureOptions = {}): Promise<Blo
 export async function chooseFromGalleryNative(): Promise<Blob | null> {
   if (!isNativeCamera()) throw new CameraError('unavailable', 'The system photo picker is only available in the app.');
   try {
+    expectExternalActivity();
     const { results } = await Camera.chooseFromGallery({
       mediaType: MediaTypeSelection.Photo,
       allowMultipleSelection: false,
@@ -119,6 +122,7 @@ export function pickImageFileWeb(capture?: 'user' | 'environment'): Promise<File
     input.addEventListener('change', () => finish(input.files?.[0] ?? null));
     input.addEventListener('cancel', () => finish(null));
     document.body.appendChild(input);
+    expectExternalActivity();
     input.click();
   });
 }

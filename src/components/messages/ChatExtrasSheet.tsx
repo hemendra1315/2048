@@ -29,7 +29,7 @@ export const ChatExtrasSheet: React.FC<ChatExtrasSheetProps> = ({ canPlayGames, 
       onClick={onClose}
       onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
     >
-      <div className="w-full sm:max-w-md bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-4 shadow-2xl max-h-[75vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="w-full sm:max-w-md bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl max-h-[75vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-1 p-1">
           <button type="button" className={tabClass(tab === 'stickers')} onClick={() => setTab('stickers')}>
             <Smile className="w-4 h-4" aria-hidden /> Stickers
@@ -120,7 +120,7 @@ export const ChatThemeSheet: React.FC<ThemeSheetProps> = ({ current, onPick, onC
     onClick={onClose}
     onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
   >
-    <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-3 pb-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+    <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl" onClick={e => e.stopPropagation()}>
       <h3 className="t-body font-bold text-white m-0 px-1">Chat theme</h3>
       <p className="text-xs text-vault-400 mt-1 mb-3 px-1">Only you see the theme you pick for this chat.</p>
       <div className="grid grid-cols-4 gap-3">

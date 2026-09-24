@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app';
 import { UserPreferences } from '../types';
+import { isAwayForExternalActivity, leavingForExternalActivity, returnedToApp } from '../lib/externalActivity';
 import { useAuth } from './AuthContext';
 import { mockBackend } from '../lib/mockBackend';
 import { supabase, isSupabaseConfigured, isMockBackendAllowed } from '../lib/supabase';
@@ -90,38 +93,64 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const openUnlockModal = useCallback(() => setUnlockModalOpen(true), []);
   const closeUnlockModal = useCallback(() => setUnlockModalOpen(false), []);
 
+  // Locking never shows a message: whatever appears next is on the games screen, where it would
+  // give the app away.
   const panicLock = useCallback(() => {
     setIsUnlocked(false);
     setUnlockModalOpen(false);
-    showToast('Cover mode engaged', 'info');
-  }, [showToast]);
+  }, []);
 
-  // Global auto-lock inactivity timer
+  // Global auto-lock inactivity timer. It waits while the camera or a photo picker has the screen,
+  // and restarts when the app comes back to the foreground.
   useEffect(() => {
     if (!isUnlocked) return;
 
     const timeoutSecs = preferences.auto_lock_seconds || 60;
-    let timer: NodeJS.Timeout;
+    let timer: ReturnType<typeof setTimeout>;
 
     const resetTimer = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
+        if (isAwayForExternalActivity()) {
+          resetTimer();
+          return;
+        }
         setIsUnlocked(false);
         setUnlockModalOpen(false);
-        showToast('Vault auto-locked due to inactivity', 'info');
       }, timeoutSecs * 1000);
     };
 
     resetTimer();
 
-    const activityEvents = ['mousedown', 'keydown', 'touchstart', 'scroll'];
-    activityEvents.forEach(evt => window.addEventListener(evt, resetTimer));
+    // Capture phase: scrolling a chat or list scrolls an element, and element scroll events
+    // don't bubble up to window.
+    const activityEvents = ['pointerdown', 'keydown', 'touchstart', 'scroll', 'input'];
+    const opts = { capture: true, passive: true };
+    activityEvents.forEach(evt => window.addEventListener(evt, resetTimer, opts));
+    const resume = Capacitor.isNativePlatform() ? App.addListener('resume', resetTimer) : null;
 
     return () => {
       clearTimeout(timer);
-      activityEvents.forEach(evt => window.removeEventListener(evt, resetTimer));
+      activityEvents.forEach(evt => window.removeEventListener(evt, resetTimer, opts));
+      void resume?.then(h => h.remove());
     };
-  }, [isUnlocked, preferences.auto_lock_seconds, showToast]);
+  }, [isUnlocked, preferences.auto_lock_seconds]);
+
+  // Leaving the app (home, app switcher, screen off) locks it right away, unless it left for the
+  // camera or a photo picker (see lib/externalActivity).
+  useEffect(() => {
+    if (!isUnlocked || !Capacitor.isNativePlatform()) return;
+    const pause = App.addListener('pause', () => {
+      if (leavingForExternalActivity()) return;
+      setIsUnlocked(false);
+      setUnlockModalOpen(false);
+    });
+    const resume = App.addListener('resume', returnedToApp);
+    return () => {
+      void pause.then(h => h.remove());
+      void resume.then(h => h.remove());
+    };
+  }, [isUnlocked]);
 
   // The vault opens only when the server confirms the unlock password (verify_vault_unlock).
   // There is no client-side fallback: an RPC error, a network failure or a rejected password
@@ -158,7 +187,6 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       setIsUnlocked(true);
       setUnlockModalOpen(false);
-      showToast('Vault security cleared', 'success');
       return true;
     } catch (err) {
       console.error('Unlock verification failed:', err instanceof Error ? err.message : err);

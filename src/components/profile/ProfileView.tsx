@@ -25,6 +25,7 @@ import { SettingsView } from '../settings/SettingsView';
 import { AvatarCropper } from './AvatarCropper';
 import { uploadAvatarImage } from '../../lib/storageHelper';
 import { capturePhoto, choosePhoto, CameraError } from '../../lib/nativeCamera';
+import { useBackHandler } from '../../lib/backButton';
 
 interface ProfileViewProps {
   onOpenSettings?: () => void;
@@ -168,6 +169,11 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
     panicLock();
     showToast('Signed out', 'info');
   };
+
+  useBackHandler(showSettings, () => setShowSettings(false));
+  useBackHandler(isEditModalOpen, () => setIsEditModalOpen(false));
+  useBackHandler(photoSheetOpen, () => setPhotoSheetOpen(false));
+  useBackHandler(Boolean(cropSource), () => setCropSource(null));
 
   if (showSettings) {
     return <SettingsView onBack={() => setShowSettings(false)} />;

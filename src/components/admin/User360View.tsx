@@ -45,6 +45,7 @@ import {
 import { formatDetailedDate } from '../../lib/utils';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { Avatar } from '../common/Avatar';
 
 interface User360ViewProps {
   userId: string;
@@ -287,8 +288,8 @@ export const User360View: React.FC<User360ViewProps> = ({
       events.push({
         id: `gal-${gal.id}`,
         date: gal.created_at,
-        title: 'Uploaded Vault Media',
-        description: gal.caption || 'Vault private media asset',
+        title: 'Uploaded to gallery',
+        description: gal.caption || 'Gallery photo',
         type: 'media',
         onClick: () => {
           setActiveLightboxImage(gal);
@@ -379,11 +380,7 @@ export const User360View: React.FC<User360ViewProps> = ({
       {/* User 360 Header Profile Card */}
       <div className="bg-vault-900 border border-vault-800 rounded-3xl p-5 shadow-lg flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="flex items-center gap-4">
-          <img
-            src={profile.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${profile.uid}`}
-            alt="Avatar"
-            className="w-16 h-16 rounded-2xl bg-vault-800 border-2 border-arcade-gold/50 object-cover shadow-md"
-          />
+          <Avatar name={profile.display_name ?? ''} seed={profile.uid} src={profile.avatar_url} size={72} />
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-lg font-bold text-white tracking-wide">
@@ -559,7 +556,7 @@ export const User360View: React.FC<User360ViewProps> = ({
               <div className="text-[10px] text-vault-400 uppercase font-bold">Private Media</div>
               <div className="text-xl font-bold text-white mt-1">{metrics.totalGalleryItems}</div>
               <div className="text-[10px] text-arcade-gold mt-1 flex items-center gap-1 font-semibold">
-                <span>View Vault</span>
+                <span>View gallery</span>
                 <ChevronRight className="w-3 h-3" />
               </div>
             </div>
@@ -676,14 +673,7 @@ export const User360View: React.FC<User360ViewProps> = ({
                     className="bg-vault-900 hover:bg-vault-850 border border-vault-800 hover:border-vault-700 rounded-2xl p-3.5 cursor-pointer transition-all shadow-sm flex items-center justify-between"
                   >
                     <div className="flex items-center gap-3">
-                      <img
-                        src={
-                          c.partnerProfile.avatar_url ||
-                          `https://api.dicebear.com/7.x/bottts/svg?seed=${c.partnerProfile.uid}`
-                        }
-                        alt="Partner"
-                        className="w-10 h-10 rounded-xl bg-vault-800 object-cover border border-vault-700"
-                      />
+                      <Avatar name={c.partnerProfile.display_name ?? ''} seed={c.partnerProfile.uid} src={c.partnerProfile.avatar_url} size={40} />
                       <div>
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs font-bold text-white">
@@ -759,7 +749,7 @@ export const User360View: React.FC<User360ViewProps> = ({
 
                   <div className="p-2.5">
                     <p className="text-xs text-white truncate font-medium">
-                      {item.caption || 'Vault Item'}
+                      {item.caption || 'Photo'}
                     </p>
                     <div className="text-[9px] text-vault-500 mt-0.5">
                       {formatDetailedDate(item.created_at)}

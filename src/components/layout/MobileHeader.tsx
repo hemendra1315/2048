@@ -13,7 +13,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({ title, onAdminToggle
   const { isSuperAdmin } = useAuth();
 
   return (
-    <header className="sticky top-0 z-30 bg-vault-950/95 backdrop-blur border-b border-vault-800 px-4 pt-4 pb-3 flex items-center justify-between gap-3">
+    <header className="sticky top-0 z-30 bg-vault-950/95 backdrop-blur border-b border-vault-800 px-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-3 flex items-center justify-between gap-3">
       <h1 className="t-h1 m-0 truncate">{title || 'Chats'}</h1>
       <div className="flex items-center gap-2">
         {isSuperAdmin && onAdminToggle && (

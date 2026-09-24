@@ -4,7 +4,6 @@ import {
   MessageSquare,
   Camera,
   Image as ImageIcon,
-  Shield,
   User,
   ShieldAlert,
 } from 'lucide-react';
@@ -16,6 +15,9 @@ import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { MobileHeader } from './MobileHeader';
 import { MobileNavbar } from './MobileNavbar';
 import { PanicButton } from '../launcher/PanicButton';
+import { useBackHandler } from '../../lib/backButton';
+import { useKeyboardOpen } from '../../lib/useKeyboardOpen';
+import { Avatar } from '../common/Avatar';
 
 // Code-split subviews
 const MessagesView = React.lazy(() =>
@@ -26,9 +28,6 @@ const CameraView = React.lazy(() =>
 );
 const GalleryView = React.lazy(() =>
   import('../gallery/GalleryView').then(m => ({ default: m.GalleryView }))
-);
-const VaultView = React.lazy(() =>
-  import('../vault/VaultView').then(m => ({ default: m.VaultView }))
 );
 const ProfileView = React.lazy(() =>
   import('../profile/ProfileView').then(m => ({ default: m.ProfileView }))
@@ -47,6 +46,7 @@ interface SocialLayoutProps {
 export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => {
   const { user, isSuperAdmin } = useAuth();
   usePresenceHeartbeat(user?.id);
+  const keyboardOpen = useKeyboardOpen();
   const { showToast } = useToast();
 
   // Chats is the default landing page
@@ -113,9 +113,10 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
     { id: 'chats' as SocialTab, label: 'Chats', icon: MessageSquare, badge: stats.unreadCount },
     { id: 'camera' as SocialTab, label: 'Camera', icon: Camera },
     { id: 'gallery' as SocialTab, label: 'Gallery', icon: ImageIcon, badge: stats.galleryCount },
-    { id: 'vault' as SocialTab, label: 'Vault', icon: Shield },
     { id: 'profile' as SocialTab, label: 'Profile', icon: User },
   ];
+
+  useBackHandler(currentTab !== 'chats', () => setCurrentTab('chats'));
 
   return (
     <div className="h-screen w-screen bg-vault-950 text-vault-100 flex flex-col select-none overflow-hidden font-sans">
@@ -193,11 +194,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
 
             <div className="p-3 bg-vault-900 border border-vault-800 rounded-xl flex items-center justify-between shadow-sm">
               <div className="flex items-center gap-2.5 min-w-0">
-                <img
-                  src={user?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.uid || 'vault'}`}
-                  alt="Avatar"
-                  className="w-8 h-8 rounded-lg bg-vault-850 object-cover border border-vault-700"
-                />
+                <Avatar name={user?.display_name ?? ''} seed={user?.uid} src={user?.avatar_url} size={32} />
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-white truncate m-0">{user?.display_name || 'Node'}</p>
                   <button
@@ -238,23 +235,23 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
                     setCurrentTab('chats');
                   }}
                   onSavedToGallery={() => setCurrentTab('gallery')}
-                  onSavedToVault={() => setCurrentTab('vault')}
                 />
               </div>
             )}
             {currentTab === 'gallery' && <div className="max-w-4xl mx-auto w-full h-full min-h-0 overflow-y-auto overscroll-contain"><GalleryView /></div>}
-            {currentTab === 'vault' && <div className="max-w-4xl mx-auto w-full h-full min-h-0 overflow-y-auto overscroll-contain"><VaultView /></div>}
             {currentTab === 'profile' && <div className="max-w-2xl mx-auto w-full h-full min-h-0 overflow-y-auto overscroll-contain"><ProfileView /></div>}
           </Suspense>
         </main>
       </div>
 
-      {/* Mobile Bottom 5-Tab Navigation (< 1024px) */}
-      <MobileNavbar
-        currentTab={currentTab}
-        onSelectTab={setCurrentTab}
-        unreadMessagesCount={stats.unreadCount}
-      />
+      {/* Mobile Bottom 5-Tab Navigation (< 1024px); hidden while typing so the keyboard leaves room for content */}
+      {!keyboardOpen && (
+        <MobileNavbar
+          currentTab={currentTab}
+          onSelectTab={setCurrentTab}
+          unreadMessagesCount={stats.unreadCount}
+        />
+      )}
     </div>
   );
 };

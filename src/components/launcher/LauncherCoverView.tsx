@@ -21,6 +21,7 @@ import { GameMinesweeper } from '../games/GameMinesweeper';
 import { GameMemoryMatch } from '../games/GameMemoryMatch';
 import { StealthUnlockModal } from './StealthUnlockModal';
 import { GameSettingsSheet } from './GameSettingsSheet';
+import { useBackHandler } from '../../lib/backButton';
 
 interface GameMetadata {
   id: CoverGameType;
@@ -238,9 +239,12 @@ export const LauncherCoverView: React.FC = () => {
   const featuredHighScore = getHighScore('game_2048');
   const dailyGameMeta = CATALOG.find(g => g.id === dailyChallenge.gameId) || CATALOG[0];
 
+  useBackHandler(Boolean(activePlayingGame), () => setActivePlayingGame(null));
+  useBackHandler(settingsOpen, () => setSettingsOpen(false));
+
   return (
     <div className="min-h-screen bg-vault-950 text-vault-100 flex flex-col items-center select-none font-sans">
-      <div className="w-full max-w-5xl flex flex-col flex-1 px-4 sm:px-6 pt-4 pb-12">
+      <div className="w-full max-w-5xl flex flex-col flex-1 px-4 sm:px-6 pt-[calc(1rem+env(safe-area-inset-top))] pb-[max(3rem,env(safe-area-inset-bottom))]">
         
         {/* ========================================================================= */}
         {/* TOP PLATFORM HEADER */}

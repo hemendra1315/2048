@@ -19,6 +19,7 @@ import { useVault } from '../../context/VaultContext';
 import { useToast } from '../../context/ToastContext';
 import { BiometricService } from '../../lib/biometrics';
 import { isSupabaseConfigured } from '../../lib/supabase';
+import { useBackHandler } from '../../lib/backButton';
 
 // Demo identities exist only in the offline mock backend used for local UI development.
 // They are never rendered in a production build or when a real backend is configured.
@@ -203,9 +204,11 @@ export const AuthModal: React.FC = () => {
     return '4/4';
   };
 
+  useBackHandler(true, () => (mode === 'login' ? panicLock() : setMode('login')));
+
   return (
     <div className="min-h-screen bg-vault-950 flex flex-col items-center">
-      <div className="w-full max-w-md min-h-screen px-5 pt-3 pb-7 flex flex-col relative">
+      <div className="w-full max-w-md min-h-screen px-5 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[max(1.75rem,env(safe-area-inset-bottom))] flex flex-col relative">
         <header className="h-[52px] flex items-center -ml-2">
           <button
             type="button"
@@ -605,7 +608,7 @@ export const AuthModal: React.FC = () => {
               <div className="w-12 h-12 rounded-[14px] bg-[#111214] border border-vault-700 flex items-center justify-center text-gold mb-2">
                 <RefreshCw className="w-6 h-6" />
               </div>
-              <h3 className="t-h2 text-white">Reset Vault Password</h3>
+              <h3 className="t-h2 text-white">Reset password</h3>
               <p className="t-sm c2 mt-1">Enter your Recovery Key to set a new password</p>
             </div>
 

@@ -24,6 +24,7 @@ import { useMediaQuery, DESKTOP_QUERY } from '../../lib/useMediaQuery';
 import { usePresence } from '../../lib/presence';
 import { extraPreview } from '../../lib/chatExtras';
 import { useToast } from '../../context/ToastContext';
+import { useBackHandler } from '../../lib/backButton';
 
 interface MessagesViewProps {
   initialPartnerId?: string | null;
@@ -458,6 +459,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     </div>
   );
 
+  useBackHandler(newChatModalOpen, () => setNewChatModalOpen(false));
+  useBackHandler(Boolean(pinTarget), () => setPinTarget(null));
+
   const activeChat = activeConversation ? (
     <ChatRoom
       key={activeConversation.id}
@@ -478,7 +482,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       onClick={() => setPinTarget(null)}
       onKeyDown={e => { if (e.key === 'Escape') setPinTarget(null); }}
     >
-      <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl" onClick={e => e.stopPropagation()}>
         <p className="px-4 pt-2 pb-2 text-xs text-vault-400 truncate">{pinTarget.partner.display_name}</p>
         <button
           type="button"

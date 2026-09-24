@@ -5,6 +5,7 @@ import { ContactNotificationPreference, NotificationMode } from '../types';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { mockBackend } from './mockBackend';
 import { clearOutbox } from './chatOutbox';
+import { clearDrafts } from './chatDrafts';
 
 export const GAME_UPDATES_CHANNEL_ID = 'game_updates';
 export const GAME_UPDATES_CHANNEL_NAME = 'Game Updates';
@@ -60,8 +61,9 @@ export async function signOutAndReleasePush(): Promise<void> {
       console.warn('[notifications] Failed to unlink push token:', err);
     }
   }
-  // Unsent messages belong to this account; don't leave them for the next person on the phone.
+  // Unsent messages and drafts belong to this account; don't leave them for the next person on the phone.
   clearOutbox();
+  clearDrafts();
   await supabase.auth.signOut();
 }
 

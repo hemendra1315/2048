@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { expectExternalActivity } from '../../lib/externalActivity';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -115,7 +116,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="upload-modal-title"
-        className="sheet anim-sheet absolute left-0 right-0 bottom-0 mx-auto max-w-md px-5 pt-3 pb-8 flex flex-col gap-4 bg-vault-900 border-t border-vault-700"
+        className="sheet anim-sheet absolute left-0 right-0 bottom-0 mx-auto max-w-md px-5 pt-3 pb-[max(2rem,env(safe-area-inset-bottom))] flex flex-col gap-4 bg-vault-900 border-t border-vault-700"
       >
         <div className="w-9 h-1 rounded-full bg-vault-700 self-center" aria-hidden="true" />
 
@@ -153,6 +154,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             <input
               type="file"
               accept="image/*"
+              onClick={expectExternalActivity}
               onChange={handleFileChange}
               className="sr-only"
               aria-label="Choose image file"

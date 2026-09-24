@@ -8,6 +8,10 @@ function hueFor(seed: string): string {
   return HUES[h % HUES.length];
 }
 
+// Old accounts stored generated avatars from api.dicebear.com. Loading them sent the user's ID to a
+// third party, so they're treated as "no photo" (migration 20260924000015 also clears them).
+const isExternalGeneratedAvatar = (src: string) => src.startsWith('https://api.dicebear.com/');
+
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
@@ -35,6 +39,7 @@ const sizeClasses: Record<number, string> = {
 /** Round avatar: the user's photo when set, otherwise initials on a pastel fill. Decorative by default. */
 export const Avatar: React.FC<AvatarProps> = ({ name, seed, src, size = 48, online = false, className = '' }) => {
   const [imgError, setImgError] = useState(false);
+  const photo = src && !isExternalGeneratedAvatar(src) ? src : null;
   // A new photo (for example right after changing it) gets a fresh load attempt.
   useEffect(() => setImgError(false), [src]);
   const dot = size >= 56 ? 14 : size >= 40 ? 12 : 10;
@@ -54,9 +59,9 @@ export const Avatar: React.FC<AvatarProps> = ({ name, seed, src, size = 48, onli
       }}
     >
       <span className="w-full h-full rounded-full overflow-hidden flex items-center justify-center">
-        {src && !imgError ? (
+        {photo && !imgError ? (
           <img
-            src={src}
+            src={photo}
             alt=""
             onError={() => setImgError(true)}
             className="w-full h-full object-cover"

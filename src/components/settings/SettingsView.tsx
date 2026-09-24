@@ -23,6 +23,7 @@ import { isSupabaseConfigured } from '../../lib/supabase';
 import { listBlocked, unblockUser } from '../../lib/blocks';
 import { UserProfile } from '../../types';
 import { CoverGameType } from '../../types';
+import { useBackHandler } from '../../lib/backButton';
 
 interface SettingsViewProps {
   onBack?: () => void;
@@ -157,6 +158,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
       document.activeElement.blur();
     }
   };
+
+  useBackHandler(showBlocked, () => setShowBlocked(false));
 
   return (
     <div

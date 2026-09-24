@@ -325,7 +325,7 @@ class MockBackendService {
       uid: newUid,
       username: cleanUsername,
       display_name: params.username.trim(),
-      avatar_url: params.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${newUid}`,
+      avatar_url: params.avatarUrl || null,
       biometric_enabled: params.enableBiometrics,
       role: 'user',
       status: 'active',

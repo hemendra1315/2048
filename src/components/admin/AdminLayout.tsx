@@ -20,6 +20,7 @@ import { MediaOversight } from './MediaOversight';
 import { ReportsView } from './ReportsView';
 import { DisappearingArchive } from './DisappearingArchive';
 import { getSafetyReports } from '../../lib/safetyApi';
+import { useBackHandler } from '../../lib/backButton';
 
 export type AdminTab = 'activity' | 'users' | 'conversations' | 'media' | 'disappearing' | 'reports';
 
@@ -116,10 +117,12 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
     },
   ];
 
+  useBackHandler(isSearchOpen, () => setIsSearchOpen(false));
+
   return (
     <div className="min-h-screen bg-[#050505] text-vault-100 flex flex-col w-full selection:bg-arcade-gold selection:text-vault-950 font-sans">
       {/* Top Header Bar */}
-      <header className="sticky top-0 z-40 bg-vault-950/90 backdrop-blur-md border-b border-vault-800 px-4 py-2.5 shadow-lg">
+      <header className="sticky top-0 z-40 bg-vault-950/90 backdrop-blur-md border-b border-vault-800 px-4 pb-2.5 pt-[calc(0.625rem+env(safe-area-inset-top))] shadow-lg">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
           {/* Brand & Left Actions */}
           <div className="flex items-center gap-3">
@@ -173,7 +176,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
       </header>
 
       {/* Sub Navigation Bar */}
-      <nav className="bg-vault-900/60 border-b border-vault-800/80 px-4 py-1.5 sticky top-[53px] z-30 backdrop-blur-md">
+      <nav className="bg-vault-900/60 border-b border-vault-800/80 px-4 py-1.5 sticky top-[calc(53px+env(safe-area-inset-top))] z-30 backdrop-blur-md">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-1 overflow-x-auto no-scrollbar">
           <div className="flex items-center gap-1">
             {navTabs.map(t => {

@@ -6,6 +6,7 @@ import { listProfiles, getConnectionCounts, setUserStatus } from '../../lib/admi
 import { getSafetyReports } from '../../lib/safetyApi';
 import { UserProfile } from '../../types';
 import { formatDetailedDate } from '../../lib/utils';
+import { Avatar } from '../common/Avatar';
 
 interface UserManagementProps {
   onSelectUser?: (userId: string, tab?: 'overview' | 'chats' | 'media' | 'reports' | 'activity' | 'notes') => void;
@@ -167,11 +168,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onSelectUser }) 
               >
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <img
-                      src={u.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${u.uid}`}
-                      alt="Avatar"
-                      className="w-12 h-12 rounded-xl bg-vault-800 border border-vault-700 object-cover"
-                    />
+                    <Avatar name={u.display_name ?? ''} seed={u.uid} src={u.avatar_url} size={48} />
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h4 className="text-sm font-bold text-white leading-tight">{u.display_name}</h4>

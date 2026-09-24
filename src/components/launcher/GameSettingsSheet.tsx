@@ -39,7 +39,7 @@ export const GameSettingsSheet: React.FC<GameSettingsSheetProps> = ({ isOpen, on
         role="dialog"
         aria-modal="true"
         aria-labelledby="game-settings-title"
-        className="sheet anim-sheet absolute left-0 right-0 bottom-0 mx-auto max-w-md px-4 pt-2.5 pb-7 flex flex-col gap-4"
+        className="sheet anim-sheet absolute left-0 right-0 bottom-0 mx-auto max-w-md px-4 pt-2.5 pb-[max(1.75rem,env(safe-area-inset-bottom))] flex flex-col gap-4"
       >
         <div className="w-9 h-1 rounded-full bg-vault-700 self-center" aria-hidden="true" />
         <div className="flex items-center justify-between">
