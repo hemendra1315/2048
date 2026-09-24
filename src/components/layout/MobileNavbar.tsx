@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquare, Camera, Image, Shield, User } from 'lucide-react';
+import { MessageSquare, Image, User } from 'lucide-react';
 import { SocialTab } from '../../types';
 
 interface MobileNavbarProps {
@@ -15,10 +15,8 @@ export const MobileNavbar: React.FC<MobileNavbarProps> = ({
 }) => {
   const tabs = [
     { id: 'chats' as SocialTab, label: 'Chats', icon: MessageSquare, badge: unreadMessagesCount },
-    { id: 'camera' as SocialTab, label: 'Camera', icon: Camera },
-    { id: 'gallery' as SocialTab, label: 'Gallery', icon: Image },
-    { id: 'vault' as SocialTab, label: 'Vault', icon: Shield },
-    { id: 'profile' as SocialTab, label: 'Profile', icon: User },
+    { id: 'gallery' as SocialTab, label: 'Photos', icon: Image },
+    { id: 'profile' as SocialTab, label: 'You', icon: User },
   ];
 
   return (

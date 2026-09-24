@@ -9,12 +9,14 @@ interface CameraViewProps {
   onSendToChat?: (imageUrl: string) => void;
   onSavedToVault?: () => void;
   onSavedToGallery?: () => void;
+  onClose?: () => void;
 }
 
 export const CameraView: React.FC<CameraViewProps> = ({
   onSendToChat,
   onSavedToVault,
   onSavedToGallery,
+  onClose,
 }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -202,12 +204,21 @@ export const CameraView: React.FC<CameraViewProps> = ({
   };
 
   return (
-    <div className="relative w-full h-[calc(100vh-140px)] md:h-[680px] bg-[#0A0A0A] rounded-2xl overflow-hidden border border-[#262626] flex flex-col justify-between select-none animate-fade-in">
+    <div className="relative w-full h-full bg-[#0A0A0A] overflow-hidden flex flex-col justify-between select-none animate-fade-in">
       <canvas ref={canvasRef} className="hidden" />
 
       {/* Top Overlay Controls */}
       <div className="absolute top-0 left-0 right-0 z-20 p-4 bg-gradient-to-b from-black/80 via-black/30 to-transparent flex items-center justify-between">
         <div className="flex items-center gap-2">
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-2.5 rounded-full bg-[#111111]/80 hover:bg-[#171717] border border-[#262626] text-white transition-all active:scale-95"
+              title="Close Camera"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
           <span className="flex items-center gap-1.5 px-3 py-1 bg-[#111111]/80 backdrop-blur-md border border-[#262626] rounded-full text-xs font-mono text-[#10B981]">
             <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
             LIVE CAM

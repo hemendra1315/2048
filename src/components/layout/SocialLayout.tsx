@@ -36,6 +36,8 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
   const [pendingMediaAttachment, setPendingMediaAttachment] = useState<string | null>(null);
   const [selectedDesktopPartner, setSelectedDesktopPartner] = useState<UserProfile | null>(null);
   const [mobileChatActive, setMobileChatActive] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [vaultOpen, setVaultOpen] = useState(false);
   const [stats, setStats] = useState({
     unreadCount: 0,
     galleryCount: 0,
@@ -89,18 +91,22 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
 
   const navItems = [
     { id: 'chats' as SocialTab, label: 'Chats', icon: MessageSquare, badge: stats.unreadCount },
-    { id: 'camera' as SocialTab, label: 'Camera', icon: Camera },
-    { id: 'gallery' as SocialTab, label: 'Gallery', icon: ImageIcon },
-    { id: 'vault' as SocialTab, label: 'Vault', icon: Shield },
-    { id: 'profile' as SocialTab, label: 'Profile', icon: User },
+    { id: 'gallery' as SocialTab, label: 'Photos', icon: ImageIcon },
+    { id: 'profile' as SocialTab, label: 'You', icon: User },
   ];
+
+  const screenTitles: Record<string, string> = {
+    chats: 'Chats',
+    gallery: 'Photos',
+    profile: 'You',
+  };
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-white flex flex-col justify-between">
       {/* Mobile Top Header (< 1024px) */}
       {!mobileChatActive && (
         <div className="lg:hidden">
-          <MobileHeader onAdminToggle={onAdminToggle} />
+          <MobileHeader title={screenTitles[currentTab]} onAdminToggle={onAdminToggle} />
         </div>
       )}
 
@@ -198,21 +204,11 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
               onClearInitialAttachment={() => setPendingMediaAttachment(null)}
               onSelectConversationForDesktop={partner => setSelectedDesktopPartner(partner)}
               onChatActiveChange={setMobileChatActive}
+              onOpenCamera={() => setCameraOpen(true)}
             />
           )}
-          {currentTab === 'camera' && (
-            <CameraView
-              onSendToChat={media => {
-                setPendingMediaAttachment(media);
-                setCurrentTab('chats');
-              }}
-              onSavedToGallery={() => setCurrentTab('gallery')}
-              onSavedToVault={() => setCurrentTab('vault')}
-            />
-          )}
-          {currentTab === 'gallery' && <GalleryView />}
-          {currentTab === 'vault' && <VaultView />}
-          {currentTab === 'profile' && <ProfileView />}
+          {currentTab === 'gallery' && <GalleryView onOpenCamera={() => setCameraOpen(true)} />}
+          {currentTab === 'profile' && <ProfileView onOpenVault={() => setVaultOpen(true)} />}
         </main>
 
         {/* Desktop Right Inspector Panel (>= 1280px) */}
@@ -267,14 +263,14 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
           <div className="p-4 bg-[#111111] border border-[#262626] rounded-2xl space-y-2">
             <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Quick Actions</h4>
             <button
-              onClick={() => setCurrentTab('camera')}
+              onClick={() => setCameraOpen(true)}
               className="w-full py-2 px-3 bg-[#171717] hover:bg-[#222222] border border-[#262626] rounded-xl text-xs font-semibold text-white flex items-center justify-between transition-all"
             >
               <span>Instant Capture</span>
               <Camera className="w-3.5 h-3.5 text-[#10B981]" />
             </button>
             <button
-              onClick={() => setCurrentTab('vault')}
+              onClick={() => setVaultOpen(true)}
               className="w-full py-2 px-3 bg-[#171717] hover:bg-[#222222] border border-[#262626] rounded-xl text-xs font-semibold text-white flex items-center justify-between transition-all"
             >
               <span>Open Vault</span>
@@ -284,13 +280,44 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
         </aside>
       </div>
 
-      {/* Mobile Bottom 5-Tab Navigation (< 1024px) */}
+      {/* Mobile Bottom Tab Navigation (< 1024px) */}
       {!mobileChatActive && (
         <MobileNavbar
           currentTab={currentTab}
           onSelectTab={setCurrentTab}
           unreadMessagesCount={stats.unreadCount}
         />
+      )}
+
+      {/* Camera Overlay (launched from Chats or Photos) */}
+      {cameraOpen && (
+        <div className="fixed inset-0 z-50 bg-black">
+          <CameraView
+            onClose={() => setCameraOpen(false)}
+            onSendToChat={media => {
+              setPendingMediaAttachment(media);
+              setCurrentTab('chats');
+              setCameraOpen(false);
+            }}
+            onSavedToGallery={() => {
+              setCurrentTab('gallery');
+              setCameraOpen(false);
+            }}
+            onSavedToVault={() => {
+              setCameraOpen(false);
+              setVaultOpen(true);
+            }}
+          />
+        </div>
+      )}
+
+      {/* Vault Overlay (launched from You) */}
+      {vaultOpen && (
+        <div className="fixed inset-0 z-50 bg-[#0A0A0A] p-3 sm:p-5 overflow-y-auto">
+          <div className="max-w-2xl mx-auto">
+            <VaultView onClose={() => setVaultOpen(false)} />
+          </div>
+        </div>
       )}
     </div>
   );

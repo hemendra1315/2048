@@ -10,6 +10,7 @@ import {
   Layers,
   Sparkles,
   UploadCloud,
+  Camera,
 } from 'lucide-react';
 import { GalleryItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -20,7 +21,11 @@ import { UploadModal } from './UploadModal';
 
 type GalleryTab = 'all' | 'photos' | 'videos' | 'albums' | 'shared';
 
-export const GalleryView: React.FC = () => {
+interface GalleryViewProps {
+  onOpenCamera?: () => void;
+}
+
+export const GalleryView: React.FC<GalleryViewProps> = ({ onOpenCamera }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
 
@@ -114,13 +119,24 @@ export const GalleryView: React.FC = () => {
           <p className="text-xs text-[#A1A1AA]">Organized media library & albums</p>
         </div>
 
-        <button
-          onClick={() => setUploadModalOpen(true)}
-          className="flex items-center justify-center gap-1.5 px-4 py-2 bg-[#171717] hover:bg-[#222222] border border-[#262626] hover:border-[#10B981] rounded-xl text-xs font-semibold text-white transition-all active:scale-95 shadow-md"
-        >
-          <Plus className="w-4 h-4 text-[#10B981]" />
-          <span>Add Media</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {onOpenCamera && (
+            <button
+              onClick={onOpenCamera}
+              className="flex items-center justify-center p-2.5 bg-[#171717] hover:bg-[#222222] border border-[#262626] hover:border-[#10B981] rounded-xl text-zinc-300 hover:text-[#10B981] transition-all active:scale-95"
+              title="Open Camera"
+            >
+              <Camera className="w-4 h-4" />
+            </button>
+          )}
+          <button
+            onClick={() => setUploadModalOpen(true)}
+            className="flex items-center justify-center gap-1.5 px-4 py-2 bg-[#171717] hover:bg-[#222222] border border-[#262626] hover:border-[#10B981] rounded-xl text-xs font-semibold text-white transition-all active:scale-95 shadow-md"
+          >
+            <Plus className="w-4 h-4 text-[#10B981]" />
+            <span>Add Media</span>
+          </button>
+        </div>
       </div>
 
       {/* Segmented Control Bar */}
@@ -211,7 +227,7 @@ export const GalleryView: React.FC = () => {
           <UploadCloud className="w-10 h-10 text-zinc-600 mx-auto" />
           <p className="text-sm font-semibold text-white">No Media in Gallery</p>
           <p className="text-xs text-[#A1A1AA] max-w-xs mx-auto">
-            Use the Camera tab or tap Add Media to build your personal photo library.
+            Use the camera or tap Add Media to build your personal photo library.
           </p>
           <button
             onClick={() => setUploadModalOpen(true)}

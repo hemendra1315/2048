@@ -8,6 +8,7 @@ import {
   UserPlus,
   ShieldCheck,
   Lock,
+  Camera,
 } from 'lucide-react';
 import { ConversationItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -23,6 +24,7 @@ interface MessagesViewProps {
   onClearInitialAttachment?: () => void;
   onSelectConversationForDesktop?: (partner: UserProfile, convId: string) => void;
   onChatActiveChange?: (active: boolean) => void;
+  onOpenCamera?: () => void;
 }
 
 export const MessagesView: React.FC<MessagesViewProps> = ({
@@ -32,6 +34,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   onClearInitialAttachment,
   onSelectConversationForDesktop,
   onChatActiveChange,
+  onOpenCamera,
 }) => {
   const { user } = useAuth();
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
@@ -321,6 +324,16 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             className="w-full bg-[#111111] border border-[#262626] focus:border-[#10B981] rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-zinc-500 outline-none transition-all"
           />
         </div>
+
+        {onOpenCamera && (
+          <button
+            onClick={onOpenCamera}
+            className="flex items-center justify-center p-2.5 bg-[#171717] hover:bg-[#222222] border border-[#262626] hover:border-[#10B981] rounded-xl text-zinc-300 hover:text-[#10B981] transition-all active:scale-95"
+            title="Open Camera"
+          >
+            <Camera className="w-4 h-4" />
+          </button>
+        )}
 
         <button
           onClick={() => setNewChatModalOpen(true)}

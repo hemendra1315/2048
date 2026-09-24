@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck,
   Fingerprint,
-  Lock,
   Gamepad2,
   Clock,
   Eye,
@@ -10,13 +9,19 @@ import {
   Copy,
   LogOut,
   CheckCircle2,
+  FolderLock,
+  ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useVault } from '../../context/VaultContext';
 import { CoverGameType } from '../../types';
 
-export const ProfileView: React.FC = () => {
+interface ProfileViewProps {
+  onOpenVault?: () => void;
+}
+
+export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
   const { user, isSuperAdmin, logout, enrollBiometrics, disableBiometrics } = useAuth();
   const { showToast } = useToast();
   const { preferences, updatePreferences, panicLock } = useVault();
@@ -134,6 +139,25 @@ export const ProfileView: React.FC = () => {
           </button>
         </div>
 
+        {/* Private Vault Access */}
+        {onOpenVault && (
+          <button
+            onClick={onOpenVault}
+            className="w-full flex items-center justify-between p-3 rounded-xl bg-[#171717] border border-[#262626] hover:border-[#10B981]/50 transition-all"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-[#222222] text-[#10B981]">
+                <FolderLock className="w-4 h-4" />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-semibold text-white">Private Vault</p>
+                <p className="text-[11px] text-zinc-500">PIN or biometric protected</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-zinc-500" />
+          </button>
+        )}
+
         {/* Stealth Cover Game Selector */}
         <div className="flex items-center justify-between p-3 rounded-xl bg-[#171717] border border-[#262626]">
           <div className="flex items-center gap-3">
@@ -235,19 +259,11 @@ export const ProfileView: React.FC = () => {
         </div>
       </div>
 
-      {/* Account Termination & Session Lock */}
-      <div className="p-4 bg-[#111111] border border-[#262626] rounded-2xl flex flex-col sm:flex-row gap-2.5">
-        <button
-          onClick={panicLock}
-          className="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-[#171717] hover:bg-[#222222] border border-[#262626] rounded-xl text-xs font-semibold text-zinc-300 hover:text-white transition-all active:scale-95"
-        >
-          <Lock className="w-4 h-4 text-amber-400" />
-          <span>Lock to 2048 Camouflage</span>
-        </button>
-
+      {/* Sign Out (use the LOCK button in the header for an instant cover switch) */}
+      <div className="p-4 bg-[#111111] border border-[#262626] rounded-2xl">
         <button
           onClick={handleLogout}
-          className="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-red-950/40 hover:bg-red-950/80 border border-red-800/40 rounded-xl text-xs font-semibold text-red-400 transition-all active:scale-95"
+          className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-red-950/40 hover:bg-red-950/80 border border-red-800/40 rounded-xl text-xs font-semibold text-red-400 transition-all active:scale-95"
         >
           <LogOut className="w-4 h-4" />
           <span>Sign Out</span>

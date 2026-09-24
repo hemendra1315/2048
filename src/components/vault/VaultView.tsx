@@ -11,6 +11,7 @@ import {
   FileText,
   Trash2,
   Clock,
+  ArrowLeft,
 } from 'lucide-react';
 import { GalleryItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -22,7 +23,11 @@ import { BiometricService } from '../../lib/biometrics';
 
 type VaultCategory = 'all' | 'photos' | 'videos' | 'documents' | 'notes';
 
-export const VaultView: React.FC = () => {
+interface VaultViewProps {
+  onClose?: () => void;
+}
+
+export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
   const { preferences, verifyAndUnlock } = useVault();
@@ -159,7 +164,15 @@ export const VaultView: React.FC = () => {
   // Locked State: Zero-Leak Gatekeeper
   if (!isUnlocked) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[540px] p-6 bg-[#0A0A0A] border border-[#262626] rounded-2xl animate-fade-in text-center select-none">
+      <div className="relative flex flex-col items-center justify-center min-h-[540px] p-6 bg-[#0A0A0A] border border-[#262626] rounded-2xl animate-fade-in text-center select-none">
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 left-4 p-1.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-300 hover:text-white transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+        )}
         <div className="w-20 h-20 rounded-3xl bg-[#111111] border border-[#262626] flex items-center justify-center text-[#10B981] mb-6 shadow-2xl relative">
           <Lock className="w-10 h-10" />
           <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-950 border border-[#10B981] flex items-center justify-center">
@@ -230,6 +243,14 @@ export const VaultView: React.FC = () => {
       {/* Vault Status Header */}
       <div className="p-4 bg-[#111111] border border-[#262626] rounded-2xl flex items-center justify-between">
         <div className="flex items-center gap-3">
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-300 hover:text-white transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+          )}
           <div className="w-10 h-10 rounded-xl bg-emerald-950/80 border border-[#10B981]/40 flex items-center justify-center text-[#10B981]">
             <Unlock className="w-5 h-5" />
           </div>
