@@ -11,11 +11,9 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import {
   listGalleryItems,
-  listConversations,
   listProfiles,
   deleteGalleryItem,
   AdminGalleryItem,
-  AdminConversation,
 } from '../../lib/adminApi';
 import { UserProfile } from '../../types';
 import { formatTimestamp } from '../../lib/utils';
@@ -23,6 +21,7 @@ import { Avatar } from '../common/Avatar';
 
 interface MediaOversightProps {
   onSelectUser?: (userId: string, tab?: User360Tab) => void;
+  /** Kept for callers; gallery uploads have no conversation, so it isn't used. */
   onSelectConversation?: (conversationId: string, highlightMessageId?: string) => void;
   onNavigateToUser?: (userId: string, tab?: User360Tab) => void;
   onNavigateToConversation?: (conversationId: string, highlightMessageId?: string) => void;
@@ -30,17 +29,13 @@ interface MediaOversightProps {
 
 export const MediaOversight: React.FC<MediaOversightProps> = ({
   onSelectUser,
-  onSelectConversation,
   onNavigateToUser,
-  onNavigateToConversation,
 }) => {
   const navigateUser = onNavigateToUser || onSelectUser || (() => {});
-  const navigateConv = onNavigateToConversation || onSelectConversation || (() => {});
 
   const { user } = useAuth();
   const { showToast } = useToast();
   const [items, setItems] = useState<AdminGalleryItem[]>([]);
-  const [conversations, setConversations] = useState<AdminConversation[]>([]);
   const [profiles, setProfiles] = useState<Record<string, UserProfile>>({});
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -50,9 +45,8 @@ export const MediaOversight: React.FC<MediaOversightProps> = ({
     if (!user) return;
     setLoading(true);
     try {
-      const [mediaList, convs, profileList] = await Promise.all([
+      const [mediaList, profileList] = await Promise.all([
         listGalleryItems(user.id),
-        listConversations(user.id),
         listProfiles(),
       ]);
 
@@ -60,7 +54,6 @@ export const MediaOversight: React.FC<MediaOversightProps> = ({
       for (const p of profileList) map[p.id] = p;
 
       setItems(mediaList);
-      setConversations(convs);
       setProfiles(map);
     } catch (err) {
       console.warn('Error loading media oversight:', err);
@@ -94,38 +87,12 @@ export const MediaOversight: React.FC<MediaOversightProps> = ({
   };
 
   /**
-   * Media Context Resolution:
-   * Finds the exact conversation containing this media asset and triggers
-   * the conversation viewer with highlight on that message.
+   * These are private gallery uploads (gallery_items). They are never sent in a chat:
+   * chat photos are stored separately under the conversation. So there is no chat to
+   * jump to; open the owner's Media tab instead of guessing a conversation.
    */
   const handleMediaClick = (item: AdminGalleryItem) => {
-    let targetConvId: string | undefined;
-    let targetMsgId: string | undefined;
-
-    for (const conv of conversations) {
-      const foundMsg = conv.messages.find(m =>
-        m.content.includes(item.image_url) ||
-        (item.previewUrl && m.content.includes(item.previewUrl)) ||
-        (item.storage_path && m.content.includes(item.storage_path))
-      );
-
-      if (foundMsg) {
-        targetConvId = conv.id;
-        targetMsgId = foundMsg.id;
-        break;
-      }
-    }
-
-    if (!targetConvId) {
-      const userConv = conversations.find(c => c.user_a === item.user_id || c.user_b === item.user_id);
-      targetConvId = userConv?.id;
-    }
-
-    if (targetConvId) {
-      navigateConv(targetConvId, targetMsgId);
-    } else {
-      navigateUser(item.user_id, 'media');
-    }
+    navigateUser(item.user_id, 'media');
   };
 
   const filteredItems = items.filter(item => {
@@ -150,10 +117,10 @@ export const MediaOversight: React.FC<MediaOversightProps> = ({
           </div>
           <div>
             <h3 className="text-sm font-bold text-white uppercase tracking-wider m-0">
-              Media Oversight & Context Resolution
+              Media Oversight
             </h3>
             <p className="text-xs text-vault-400 font-mono m-0">
-              Click ANY photo to immediately view it in live conversation stream
+              Private gallery uploads. Click a photo to open its owner's Media tab.
             </p>
           </div>
         </div>
@@ -216,10 +183,10 @@ export const MediaOversight: React.FC<MediaOversightProps> = ({
                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-3 text-center gap-2">
                     <span className="px-3 py-1.5 rounded-xl bg-emerald text-black text-xs font-bold flex items-center gap-1.5 shadow-lg">
                       <MessageSquare className="w-3.5 h-3.5" />
-                      <span>View in Chat Context</span>
+                      <span>Open owner's media</span>
                     </span>
                     <span className="text-[10px] text-vault-300 font-mono">
-                      Highlights message & reveals surrounding chat
+                      Shows this user's uploads
                     </span>
                   </div>
 

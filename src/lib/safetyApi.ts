@@ -464,13 +464,8 @@ export async function performUniversalSearch(
     const userMatch = user && (user.display_name.toLowerCase().includes(q) || user.uid.toLowerCase().includes(q));
 
     if (captionMatch || userMatch) {
-      // Find corresponding conversation
-      const conv = convs.find(c => c.user_a === item.user_id || c.user_b === item.user_id);
-      matchedMedia.push({
-        item,
-        user,
-        conversationId: conv?.id,
-      });
+      // Gallery uploads are not chat messages, so there's no conversation to link to.
+      matchedMedia.push({ item, user });
     }
   }
 
