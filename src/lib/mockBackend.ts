@@ -743,6 +743,12 @@ class MockBackendService {
     return newMsg;
   }
 
+  clearConversationMessages(conversationId: string) {
+    const allMsgs = this.getAllMessages().filter(m => m.conversation_id !== conversationId);
+    localStorage.setItem(KEYS.MESSAGES, JSON.stringify(allMsgs));
+    this.emit('messages:updated', { conversationId });
+  }
+
   markMessagesAsRead(conversationId: string, currentUserId: string) {
     const allMsgs = this.getAllMessages();
     let changed = false;

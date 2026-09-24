@@ -35,6 +35,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
   const [chatPartnerId, setChatPartnerId] = useState<string | null>(null);
   const [pendingMediaAttachment, setPendingMediaAttachment] = useState<string | null>(null);
   const [selectedDesktopPartner, setSelectedDesktopPartner] = useState<UserProfile | null>(null);
+  const [mobileChatActive, setMobileChatActive] = useState(false);
   const [stats, setStats] = useState({
     unreadCount: 0,
     galleryCount: 0,
@@ -97,9 +98,11 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-white flex flex-col justify-between">
       {/* Mobile Top Header (< 1024px) */}
-      <div className="lg:hidden">
-        <MobileHeader onAdminToggle={onAdminToggle} />
-      </div>
+      {!mobileChatActive && (
+        <div className="lg:hidden">
+          <MobileHeader onAdminToggle={onAdminToggle} />
+        </div>
+      )}
 
       {/* Main Container */}
       <div className="flex-1 w-full max-w-7xl mx-auto flex">
@@ -194,6 +197,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
               onClearInitialPartner={() => setChatPartnerId(null)}
               onClearInitialAttachment={() => setPendingMediaAttachment(null)}
               onSelectConversationForDesktop={partner => setSelectedDesktopPartner(partner)}
+              onChatActiveChange={setMobileChatActive}
             />
           )}
           {currentTab === 'camera' && (
@@ -281,11 +285,13 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
       </div>
 
       {/* Mobile Bottom 5-Tab Navigation (< 1024px) */}
-      <MobileNavbar
-        currentTab={currentTab}
-        onSelectTab={setCurrentTab}
-        unreadMessagesCount={stats.unreadCount}
-      />
+      {!mobileChatActive && (
+        <MobileNavbar
+          currentTab={currentTab}
+          onSelectTab={setCurrentTab}
+          unreadMessagesCount={stats.unreadCount}
+        />
+      )}
     </div>
   );
 };

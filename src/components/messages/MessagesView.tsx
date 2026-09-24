@@ -22,6 +22,7 @@ interface MessagesViewProps {
   onClearInitialPartner?: () => void;
   onClearInitialAttachment?: () => void;
   onSelectConversationForDesktop?: (partner: UserProfile, convId: string) => void;
+  onChatActiveChange?: (active: boolean) => void;
 }
 
 export const MessagesView: React.FC<MessagesViewProps> = ({
@@ -30,6 +31,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   onClearInitialPartner,
   onClearInitialAttachment,
   onSelectConversationForDesktop,
+  onChatActiveChange,
 }) => {
   const { user } = useAuth();
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
@@ -271,6 +273,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
   };
 
+  useEffect(() => {
+    if (onChatActiveChange) onChatActiveChange(!!activeConversation);
+  }, [activeConversation, onChatActiveChange]);
+
+  useEffect(() => {
+    return () => {
+      if (onChatActiveChange) onChatActiveChange(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const filteredConversations = conversations.filter(c => {
     const q = searchQuery.toLowerCase();
     return (
@@ -283,11 +296,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
   if (isMobile && activeConversation) {
     return (
-      <ChatRoom
-        conversationId={activeConversation.id}
-        partner={activeConversation.partner}
-        onBack={() => setActiveConversation(null)}
-      />
+      <div className="fixed inset-0 z-40 bg-[#0A0A0A] lg:hidden">
+        <ChatRoom
+          conversationId={activeConversation.id}
+          partner={activeConversation.partner}
+          onBack={() => setActiveConversation(null)}
+        />
+      </div>
     );
   }
 

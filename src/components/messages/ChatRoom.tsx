@@ -4,12 +4,17 @@ import {
   Send,
   CheckCheck,
   Check,
-  ShieldCheck,
   Image as ImageIcon,
   Mic,
   Play,
   Pause,
   Lock,
+  MoreVertical,
+  X,
+  Smile,
+  BellOff,
+  Trash2,
+  Info,
 } from 'lucide-react';
 import { MessageItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -41,8 +46,13 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [inputContent, setInputContent] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [showContactInfo, setShowContactInfo] = useState(false);
+  const [showChatOptions, setShowChatOptions] = useState(false);
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const STICKERS = ['😂', '❤️', '🔥', '👍', '🎉', '😢', '😮', '🙏'];
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -194,6 +204,31 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     }
   };
 
+  const handleSendSticker = (emoji: string) => {
+    handleSend(`[STICKER]${emoji}`);
+    setShowStickerPicker(false);
+  };
+
+  const handleClearChat = async () => {
+    if (!confirm('Clear this chat for you? This cannot be undone.')) {
+      setShowChatOptions(false);
+      return;
+    }
+    try {
+      if (isSupabaseConfigured()) {
+        await supabase.from('messages').delete().eq('conversation_id', conversationId);
+      } else {
+        mockBackend.clearConversationMessages(conversationId);
+      }
+      setMessages([]);
+      showToast('Chat cleared', 'success');
+    } catch (err) {
+      console.error('Clear chat error:', err);
+      showToast('Could not clear chat', 'error');
+    }
+    setShowChatOptions(false);
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -302,16 +337,19 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-140px)] md:h-[680px] bg-[#0A0A0A] border border-[#262626] rounded-2xl overflow-hidden select-none animate-fade-in">
+    <div className="flex flex-col h-full lg:h-[calc(100vh-140px)] md:h-[680px] bg-[#0A0A0A] lg:border lg:border-[#262626] lg:rounded-2xl overflow-hidden select-none animate-fade-in">
       {/* Header */}
       <header className="bg-[#111111] border-b border-[#262626] px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="p-1.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-300 hover:text-white transition-colors"
+        <button
+          onClick={() => setShowContactInfo(true)}
+          className="flex items-center gap-3 min-w-0 text-left"
+        >
+          <span
+            onClick={e => { e.stopPropagation(); onBack(); }}
+            className="p-1.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-300 hover:text-white transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-5 h-5" />
-          </button>
+          </span>
 
           <img
             src={partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${partner.uid}`}
@@ -319,18 +357,21 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             className="w-10 h-10 rounded-xl bg-[#171717] border border-[#262626] object-cover"
           />
 
-          <div>
-            <div className="flex items-center gap-1.5">
-              <h3 className="text-sm font-bold text-white leading-tight">{partner.display_name}</h3>
-              <span className="w-2 h-2 rounded-full bg-[#10B981]" />
-            </div>
-            <div className="flex items-center gap-1 text-[11px] font-mono text-[#10B981]">
-              <ShieldCheck className="w-3 h-3" />
-              <span>{partner.uid}</span>
-              <span className="text-zinc-500 font-sans ml-1 text-[10px]">• E2E Encrypted</span>
-            </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-white leading-tight truncate">{partner.display_name}</h3>
+            <p className="text-[11px] text-zinc-500">
+              {isTyping ? <span className="text-[#10B981]">typing...</span> : 'Online'}
+            </p>
           </div>
-        </div>
+        </button>
+
+        <button
+          onClick={() => setShowChatOptions(true)}
+          className="p-1.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-300 hover:text-white transition-colors"
+          title="Chat options"
+        >
+          <MoreVertical className="w-5 h-5" />
+        </button>
       </header>
 
       {/* Messages Thread */}
@@ -340,9 +381,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             <div className="w-14 h-14 rounded-2xl bg-[#111111] border border-[#262626] flex items-center justify-center text-[#10B981] mb-3">
               <Lock className="w-7 h-7" />
             </div>
-            <span className="font-bold text-white text-sm mb-1">Direct Encrypted Channel</span>
+            <span className="font-bold text-white text-sm mb-1">No messages yet</span>
             <p className="max-w-xs text-[11px] text-zinc-400">
-              Only you and {partner.display_name} have cryptographic clearance to this stream.
+              Messages you send to {partner.display_name} are end-to-end encrypted.
             </p>
           </div>
         ) : (
@@ -350,9 +391,28 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             const isMe = msg.sender_id === user?.id;
             const isImage = msg.content.startsWith('[IMAGE]');
             const isVoice = msg.content.startsWith('[VOICE_NOTE');
+            const isSticker = msg.content.startsWith('[STICKER]');
             const voiceMatch = msg.content.match(/^\[VOICE_NOTE:(.*?)\](.*)$/);
             const voiceDuration = voiceMatch ? voiceMatch[1] : '0:14';
             const voiceDataUrl = voiceMatch ? voiceMatch[2] : '';
+
+            if (isSticker) {
+              return (
+                <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-fade-in`}>
+                  <span className="text-5xl leading-none">{msg.content.replace('[STICKER]', '')}</span>
+                  <div className="flex items-center gap-1 text-[10px] text-zinc-500 mt-1 px-1">
+                    <span>{formatTimestamp(msg.created_at)}</span>
+                    {isMe && (
+                      msg.is_read ? (
+                        <CheckCheck className="w-3.5 h-3.5 text-[#10B981]" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5 text-zinc-500" />
+                      )
+                    )}
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
@@ -360,22 +420,29 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-fade-in`}
               >
                 <div
-                  className={`max-w-[85%] sm:max-w-[70%] p-3 rounded-2xl text-sm leading-relaxed ${
-                    isMe
-                      ? 'bg-[#10B981] text-black font-medium rounded-br-xs shadow-md'
-                      : 'bg-[#171717] border border-[#262626] text-white rounded-bl-xs shadow-sm'
+                  className={`max-w-[85%] sm:max-w-[70%] rounded-2xl text-sm leading-relaxed ${
+                    isImage
+                      ? 'p-1'
+                      : `p-3 ${
+                          isMe
+                            ? 'bg-[#10B981] text-black font-medium rounded-br-xs shadow-md'
+                            : 'bg-[#171717] border border-[#262626] text-white rounded-bl-xs shadow-sm'
+                        }`
                   }`}
                 >
                   {isImage ? (
                     <div
                       onClick={() => onOpenMedia && onOpenMedia(msg.content.replace('[IMAGE]', ''))}
-                      className="cursor-pointer rounded-xl overflow-hidden border border-black/20"
+                      className="relative cursor-pointer rounded-lg overflow-hidden border border-white/10 max-w-[200px]"
                     >
                       <img
                         src={msg.content.replace('[IMAGE]', '')}
-                        alt="Encrypted attachment"
-                        className="max-h-60 w-full object-cover rounded-lg"
+                        alt="Attachment"
+                        className="max-h-40 w-full object-cover"
                       />
+                      <span className="absolute bottom-1 right-1.5 text-[10px] font-medium text-white bg-black/50 px-1.5 py-0.5 rounded-md">
+                        {formatTimestamp(msg.created_at)}
+                      </span>
                     </div>
                   ) : isVoice ? (
                     <div className="flex items-center gap-3 min-w-[180px] py-1">
@@ -464,8 +531,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             </div>
           </div>
         ) : (
-          <>
+          <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex-1 flex items-center gap-2">
             <button
+              type="button"
               onClick={() => fileInputRef.current?.click()}
               className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-400 hover:text-white transition-all active:scale-95"
               title="Attach Photo"
@@ -473,33 +541,139 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               <ImageIcon className="w-5 h-5 text-zinc-300" />
             </button>
 
-            <button
-              onClick={handleStartVoiceRecord}
-              className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-400 hover:text-white transition-all active:scale-95"
-              title="Record Voice Note"
-            >
-              <Mic className="w-5 h-5 text-[#10B981]" />
-            </button>
-
-            <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex-1 flex items-center gap-2">
+            <div className="relative flex-1">
               <input
                 type="text"
                 value={inputContent}
                 onChange={e => setInputContent(e.target.value)}
                 placeholder={`Message ${partner.display_name}...`}
-                className="flex-1 bg-[#171717] border border-[#262626] focus:border-[#10B981] rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition-colors"
+                className="w-full bg-[#171717] border border-[#262626] focus:border-[#10B981] rounded-xl pl-4 pr-10 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition-colors"
               />
               <button
+                type="button"
+                onClick={() => setShowStickerPicker(v => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-[#10B981] transition-colors"
+                title="Stickers"
+              >
+                <Smile className="w-5 h-5" />
+              </button>
+
+              {showStickerPicker && (
+                <div className="absolute bottom-full mb-2 right-0 bg-[#171717] border border-[#262626] rounded-xl p-2 grid grid-cols-4 gap-1 shadow-2xl z-10">
+                  {STICKERS.map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => handleSendSticker(s)}
+                      className="text-2xl p-1.5 hover:bg-[#222222] rounded-lg transition-colors"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {inputContent.trim() ? (
+              <button
                 type="submit"
-                disabled={!inputContent.trim()}
-                className="bg-[#10B981] hover:bg-emerald-400 disabled:opacity-40 active:scale-95 text-black p-2.5 rounded-xl flex items-center justify-center font-bold shadow-md transition-all"
+                className="bg-[#10B981] hover:bg-emerald-400 active:scale-95 text-black p-2.5 rounded-xl flex items-center justify-center font-bold shadow-md transition-all"
               >
                 <Send className="w-4 h-4 fill-current" />
               </button>
-            </form>
-          </>
+            ) : (
+              <button
+                type="button"
+                onClick={handleStartVoiceRecord}
+                className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-400 hover:text-white transition-all active:scale-95"
+                title="Record Voice Note"
+              >
+                <Mic className="w-5 h-5 text-[#10B981]" />
+              </button>
+            )}
+          </form>
         )}
       </div>
+
+      {/* Chat Options Sheet */}
+      {showChatOptions && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-end justify-center"
+          onClick={() => setShowChatOptions(false)}
+        >
+          <div
+            className="bg-[#111111] border-t border-[#262626] rounded-t-2xl w-full max-w-lg p-3 space-y-1.5 animate-fade-in"
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={() => { setShowChatOptions(false); setShowContactInfo(true); }}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-white hover:bg-[#171717] transition-colors"
+            >
+              <Info className="w-4 h-4 text-zinc-400" />
+              View contact
+            </button>
+            <button
+              onClick={() => { setShowChatOptions(false); showToast('Notifications muted', 'success'); }}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-white hover:bg-[#171717] transition-colors"
+            >
+              <BellOff className="w-4 h-4 text-zinc-400" />
+              Mute notifications
+            </button>
+            <button
+              onClick={handleClearChat}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-red-400 hover:bg-[#171717] transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+              Clear chat
+            </button>
+            <div className="pt-1.5 border-t border-[#262626]">
+              <button
+                onClick={() => setShowChatOptions(false)}
+                className="w-full px-4 py-3 rounded-xl text-sm font-semibold text-zinc-300 hover:bg-[#171717] transition-colors text-center"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Contact Info Panel */}
+      {showContactInfo && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          onClick={() => setShowContactInfo(false)}
+        >
+          <div
+            className="bg-[#111111] border border-[#262626] rounded-2xl w-full max-w-sm p-6 space-y-4 animate-fade-in"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white">Contact info</h3>
+              <button onClick={() => setShowContactInfo(false)} className="text-zinc-500 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex flex-col items-center gap-2 py-2">
+              <img
+                src={partner.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${partner.uid}`}
+                alt={partner.display_name}
+                className="w-20 h-20 rounded-2xl bg-[#171717] border border-[#262626] object-cover"
+              />
+              <h4 className="text-base font-bold text-white">{partner.display_name}</h4>
+              <p className="text-xs font-mono text-zinc-500">{partner.uid}</p>
+            </div>
+
+            <div className="flex items-start gap-3 p-3 bg-[#171717] rounded-xl">
+              <Lock className="w-4 h-4 text-[#10B981] mt-0.5 shrink-0" />
+              <p className="text-xs text-zinc-400">
+                Messages and calls in this chat are end-to-end encrypted. Only you and {partner.display_name} can read or listen to them.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
