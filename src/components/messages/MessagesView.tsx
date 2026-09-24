@@ -6,15 +6,19 @@ import {
   Image as ImageIcon,
   Mic,
   UserPlus,
-  ShieldCheck,
   Lock,
   Camera,
+  Link2,
+  Copy,
 } from 'lucide-react';
+import QRCode from 'qrcode';
 import { ConversationItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { formatTimestamp } from '../../lib/utils';
+import { buildInviteLink, extractUidFromInput } from '../../lib/invite';
 import { ChatRoom } from './ChatRoom';
 
 interface MessagesViewProps {
@@ -37,6 +41,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   onOpenCamera,
 }) => {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeConversation, setActiveConversation] = useState<{
@@ -46,6 +51,24 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [newChatUidInput, setNewChatUidInput] = useState('');
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
+  const [inviteQrDataUrl, setInviteQrDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!newChatModalOpen || !user?.uid) return;
+    QRCode.toDataURL(buildInviteLink(user.uid), {
+      width: 200,
+      margin: 1,
+      color: { dark: '#0A0A0A', light: '#FFFFFF' },
+    })
+      .then(setInviteQrDataUrl)
+      .catch(err => console.error('Failed to generate invite QR code:', err));
+  }, [newChatModalOpen, user?.uid]);
+
+  const copyInviteLink = () => {
+    if (!user?.uid) return;
+    navigator.clipboard.writeText(buildInviteLink(user.uid));
+    showToast('Invite link copied to clipboard', 'success');
+  };
 
   const loadConversations = useCallback(async () => {
     if (!user) return;
@@ -206,10 +229,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const handleCreateChatByUid = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newChatUidInput.trim() || !user) return;
-    const cleanUid = newChatUidInput.trim().toUpperCase();
+    const cleanUid = extractUidFromInput(newChatUidInput);
 
     if (user.uid === cleanUid) {
-      alert('You cannot start a direct chat with your own UID.');
+      alert("That's your own invite link or UID.");
       return;
     }
 
@@ -222,7 +245,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           .maybeSingle();
 
         if (error || !rawProfile) {
-          alert(`No sovereign user node found with UID/Username "${cleanUid}"`);
+          alert(`No one found with that invite link or UID "${cleanUid}"`);
           return;
         }
 
@@ -271,7 +294,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         setNewChatModalOpen(false);
         setNewChatUidInput('');
       } else {
-        alert(`No sovereign user node found with UID "${cleanUid}"`);
+        alert(`No one found with that invite link or UID "${cleanUid}"`);
       }
     }
   };
@@ -394,13 +417,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             <MessageSquare className="w-8 h-8 text-zinc-600 mx-auto" />
             <p className="text-sm font-semibold text-white">No Active Chats</p>
             <p className="text-xs text-[#A1A1AA] max-w-xs mx-auto">
-              Connect directly with sovereign peers using their UID tag.
+              Share your invite link or scan a friend's QR code to connect.
             </p>
             <button
               onClick={() => setNewChatModalOpen(true)}
               className="px-4 py-2 bg-[#10B981] hover:bg-emerald-400 text-black text-xs font-bold rounded-xl shadow-lg transition-all"
             >
-              Start New Chat
+              Add a Friend
             </button>
           </div>
         ) : (
@@ -498,9 +521,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               <div className="w-16 h-16 rounded-2xl bg-[#111111] border border-[#262626] flex items-center justify-center text-[#10B981]">
                 <Lock className="w-8 h-8" />
               </div>
-              <h3 className="text-base font-bold text-white">Signal-Grade Encrypted Messenger</h3>
+              <h3 className="text-base font-bold text-white">Your messages are private</h3>
               <p className="text-xs text-[#A1A1AA] max-w-sm">
-                Select a conversation from the left pane or tap <span className="text-[#10B981] font-semibold">+ Direct Connect</span> to establish an end-to-end encrypted session.
+                Select a conversation from the left, or tap the <span className="text-[#10B981] font-semibold">add-friend</span> icon above to invite someone new.
               </p>
             </div>
           )}
@@ -522,15 +545,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         )}
       </div>
 
-      {/* Direct UID Connect Modal */}
+      {/* Add Friend Modal */}
       {newChatModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#111111] border border-[#262626] rounded-2xl p-6 max-w-sm w-full space-y-4 animate-fade-in shadow-2xl">
+          <div className="bg-[#111111] border border-[#262626] rounded-2xl p-6 max-w-sm w-full space-y-5 animate-fade-in shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-[#10B981]" />
-                <h3 className="text-sm font-bold text-white">Direct Sovereign Connect</h3>
-              </div>
+              <h3 className="text-sm font-bold text-white">Add a friend</h3>
               <button
                 onClick={() => setNewChatModalOpen(false)}
                 className="text-zinc-500 hover:text-white text-sm"
@@ -539,14 +559,40 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               </button>
             </div>
 
-            <p className="text-xs text-[#A1A1AA]">
-              Enter the peer's unique UID tag (e.g. <span className="font-mono text-white">CIPHER-1082</span> or <span className="font-mono text-white">SOLAR-8120</span>) to open an encrypted channel.
-            </p>
+            {/* Share my invite */}
+            <div className="space-y-3 text-center">
+              <p className="text-xs text-[#A1A1AA]">Share this to let someone message you</p>
 
+              <div className="flex items-center justify-center p-3 bg-white rounded-2xl w-fit mx-auto">
+                {inviteQrDataUrl ? (
+                  <img src={inviteQrDataUrl} alt="Your invite QR code" className="w-40 h-40" />
+                ) : (
+                  <div className="w-40 h-40 animate-pulse bg-zinc-200 rounded-lg" />
+                )}
+              </div>
+
+              <button
+                onClick={copyInviteLink}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#171717] hover:bg-[#222222] border border-[#262626] rounded-xl text-white text-xs font-bold transition-all active:scale-98"
+              >
+                <Link2 className="w-4 h-4 text-[#10B981]" />
+                <span>Copy my invite link</span>
+                <Copy className="w-3.5 h-3.5 opacity-60" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 text-zinc-600">
+              <div className="flex-1 h-px bg-[#262626]" />
+              <span className="text-[10px] uppercase font-mono tracking-widest">or</span>
+              <div className="flex-1 h-px bg-[#262626]" />
+            </div>
+
+            {/* Have someone else's invite */}
             <form onSubmit={handleCreateChatByUid} className="space-y-3">
+              <p className="text-xs text-[#A1A1AA]">Paste a friend's invite link or UID</p>
               <input
                 type="text"
-                placeholder="Enter UID..."
+                placeholder="Invite link or UID..."
                 value={newChatUidInput}
                 onChange={e => setNewChatUidInput(e.target.value)}
                 className="w-full py-2.5 px-4 bg-[#171717] border border-[#262626] focus:border-[#10B981] rounded-xl text-white font-mono text-sm placeholder:text-zinc-600 focus:outline-none"
@@ -556,7 +602,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 type="submit"
                 className="w-full py-2.5 bg-[#10B981] hover:bg-emerald-400 active:scale-98 text-black text-xs font-bold rounded-xl shadow-lg transition-all"
               >
-                Open Encrypted Channel
+                Start Chat
               </button>
             </form>
           </div>

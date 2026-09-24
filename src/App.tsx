@@ -7,12 +7,14 @@ import { LauncherCoverView } from './components/launcher/LauncherCoverView';
 import { AuthModal } from './components/auth/AuthModal';
 import { SocialLayout } from './components/layout/SocialLayout';
 import { AdminLayout } from './components/admin/AdminLayout';
+import { getInviteUidFromUrl, clearInviteFromUrl } from './lib/invite';
 
 const MainNavigator: React.FC = () => {
   const { user, isSuperAdmin, recoveryCodeToShow } = useAuth();
   const { isUnlocked } = useVault();
   const { showToast } = useToast();
   const [adminMode, setAdminMode] = useState(false);
+  const [pendingInviteUid, setPendingInviteUid] = useState<string | null>(() => getInviteUidFromUrl());
 
   // Network disconnect/reconnect detector
   useEffect(() => {
@@ -50,6 +52,11 @@ const MainNavigator: React.FC = () => {
   return (
     <SocialLayout
       onAdminToggle={isSuperAdmin ? () => setAdminMode(true) : undefined}
+      pendingInviteUid={pendingInviteUid}
+      onInviteConsumed={() => {
+        setPendingInviteUid(null);
+        clearInviteFromUrl();
+      }}
     />
   );
 };

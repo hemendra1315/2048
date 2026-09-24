@@ -24,9 +24,11 @@ import { PanicButton } from '../launcher/PanicButton';
 
 interface SocialLayoutProps {
   onAdminToggle?: () => void;
+  pendingInviteUid?: string | null;
+  onInviteConsumed?: () => void;
 }
 
-export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => {
+export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle, pendingInviteUid, onInviteConsumed }) => {
   const { user, isSuperAdmin } = useAuth();
   const { showToast } = useToast();
 
@@ -81,6 +83,47 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
   useEffect(() => {
     void refreshStats();
   }, [refreshStats, currentTab]);
+
+  // Resolve an invite link's UID into a conversation the moment the user is signed in.
+  useEffect(() => {
+    if (!pendingInviteUid || !user) return;
+
+    if (pendingInviteUid === user.uid) {
+      showToast("That's your own invite link", 'info');
+      onInviteConsumed?.();
+      return;
+    }
+
+    (async () => {
+      try {
+        let partner: UserProfile | null = null;
+
+        if (isSupabaseConfigured()) {
+          const { data } = await supabase
+            .from('profiles')
+            .select('*')
+            .or(`uid.eq.${pendingInviteUid},username.eq.${pendingInviteUid.toLowerCase()}`)
+            .maybeSingle();
+          partner = (data as unknown as UserProfile) || null;
+        } else {
+          partner = mockBackend.lookupProfileByUid(pendingInviteUid);
+        }
+
+        if (partner) {
+          setCurrentTab('chats');
+          setChatPartnerId(partner.id);
+          showToast(`Connected with ${partner.display_name}`, 'success');
+        } else {
+          showToast('That invite link is no longer valid', 'error');
+        }
+      } catch (err) {
+        console.error('Error resolving invite link:', err);
+        showToast('Could not open that invite link', 'error');
+      } finally {
+        onInviteConsumed?.();
+      }
+    })();
+  }, [pendingInviteUid, user, showToast, onInviteConsumed]);
 
   const copyUid = () => {
     if (user?.uid) {

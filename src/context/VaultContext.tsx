@@ -29,6 +29,7 @@ function unlockErrorMessage(result: UnlockResult | null): string {
   }
 }
 import { useToast } from './ToastContext';
+import { getInviteUidFromUrl } from '../lib/invite';
 
 interface VaultContextType {
   isUnlocked: boolean;
@@ -47,7 +48,7 @@ const VaultContext = createContext<VaultContextType | undefined>(undefined);
 export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
-  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(() => !!getInviteUidFromUrl());
   const [unlockModalOpen, setUnlockModalOpen] = useState(false);
   const [preferences, setPreferences] = useState<UserPreferences>({
     id: 'default',
