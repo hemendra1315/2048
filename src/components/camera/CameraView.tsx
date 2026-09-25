@@ -2,8 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Camera, RefreshCw, Zap, ZapOff, Check, X, Shield, Image, Send, Video } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured, signGalleryUrls } from '../../lib/supabase';
 import { mockBackend } from '../../lib/mockBackend';
+import { dataUrlToBlob } from '../../lib/utils';
 
 interface CameraViewProps {
   onSendToChat?: (imageUrl: string) => void;
@@ -131,25 +132,34 @@ export const CameraView: React.FC<CameraViewProps> = ({
     }
   };
 
+  const savePhotoAs = async (filePrefix: string, caption: string) => {
+    if (!user || !capturedMedia) throw new Error('Nothing to save');
+    if (isSupabaseConfigured()) {
+      const filePath = `${user.id}/${filePrefix}_${Date.now()}.jpg`;
+      const blob = await dataUrlToBlob(capturedMedia);
+      const { error: storageError } = await supabase.storage.from('gallery').upload(filePath, blob, {
+        contentType: 'image/jpeg',
+      });
+      if (storageError) throw storageError;
+
+      const [{ image_url: signedUrl }] = await signGalleryUrls([{ image_url: filePath, storage_path: filePath }]);
+      const { error: dbError } = await supabase.from('gallery_items').insert({
+        user_id: user.id,
+        image_url: signedUrl,
+        storage_path: filePath,
+        caption,
+      } as unknown as { user_id: string; image_url: string; storage_path: string; caption: string });
+      if (dbError) throw dbError;
+    } else {
+      mockBackend.uploadGalleryItem(user.id, capturedMedia, caption);
+    }
+  };
+
   const handleSaveToGallery = async () => {
     if (!capturedMedia || !user) return;
     setIsProcessing(true);
     try {
-      if (isSupabaseConfigured()) {
-        const filePath = `${user.id}/cam_${Date.now()}.jpg`;
-        await supabase.from('gallery_items').insert({
-          user_id: user.id,
-          image_url: capturedMedia,
-          storage_path: filePath,
-          caption: 'Captured via Camera',
-        } as unknown as { user_id: string; image_url: string; storage_path: string; caption: string });
-      } else {
-        mockBackend.uploadGalleryItem(
-          user.id,
-          capturedMedia,
-          'Captured via Camera'
-        );
-      }
+      await savePhotoAs('cam', 'Captured via Camera');
       showToast('Saved to Photos', 'success');
       setCapturedMedia(null);
       if (onSavedToGallery) onSavedToGallery();
@@ -165,21 +175,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     if (!capturedMedia || !user) return;
     setIsProcessing(true);
     try {
-      if (isSupabaseConfigured()) {
-        const filePath = `${user.id}/vault_${Date.now()}.jpg`;
-        await supabase.from('gallery_items').insert({
-          user_id: user.id,
-          image_url: capturedMedia,
-          storage_path: filePath,
-          caption: '[ENCRYPTED_VAULT_ITEM]',
-        } as unknown as { user_id: string; image_url: string; storage_path: string; caption: string });
-      } else {
-        mockBackend.uploadGalleryItem(
-          user.id,
-          capturedMedia,
-          '[ENCRYPTED_VAULT_ITEM]'
-        );
-      }
+      await savePhotoAs('vault', '[ENCRYPTED_VAULT_ITEM]');
       showToast('Saved to Vault', 'success');
       setCapturedMedia(null);
       if (onSavedToVault) onSavedToVault();

@@ -42,6 +42,12 @@ export function getAvatarUrl(seed: string): string {
   return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(seed)}`;
 }
 
+// Converts a data: URL (e.g. a canvas.toDataURL() capture) into a Blob for storage upload.
+export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  return res.blob();
+}
+
 // A subtle placeholder shown in place of a broken/failed-to-load photo thumbnail.
 export const BROKEN_IMAGE_PLACEHOLDER =
   'data:image/svg+xml,' +
