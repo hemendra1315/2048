@@ -127,26 +127,20 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const verifyAndUnlock = async (secret: string): Promise<boolean> => {
     try {
       if (isSupabaseConfigured() && user) {
-        try {
-          const { data, error } = await supabase.rpc('verify_vault_unlock', { p_secret: secret });
-          const result = data as UnlockResult | null;
-          if (!error && result && result.ok) {
-            setIsUnlocked(true);
-            setUnlockModalOpen(false);
-            showToast('Unlocked', 'success');
-            return true;
-          }
-        } catch {
-          // RPC fallback
+        const { data, error } = await supabase.rpc('verify_vault_unlock', { p_secret: secret });
+        if (error) {
+          console.error('Vault unlock RPC error:', error);
+          showToast('Something went wrong. Try again.', 'error');
+          return false;
         }
-        // Direct password or default code check
-        if (secret === '2048' || secret.length >= 4) {
+        const result = data as UnlockResult | null;
+        if (result?.ok) {
           setIsUnlocked(true);
           setUnlockModalOpen(false);
           showToast('Unlocked', 'success');
           return true;
         }
-        showToast('Incorrect PIN', 'error');
+        showToast(unlockErrorMessage(result), 'error');
         return false;
       } else if (user && isMockBackendAllowed()) {
         const ok = await mockBackend.verifyUnlockSecret(user.id, secret);
