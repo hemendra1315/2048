@@ -11,6 +11,7 @@ import {
   ShieldAlert,
   Loader2,
   AlertTriangle,
+  StickyNote,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -38,6 +39,7 @@ import { ChatsTab } from './userDetail/ChatsTab';
 import { GalleryTab } from './userDetail/GalleryTab';
 import { ConnectionsTab } from './userDetail/ConnectionsTab';
 import { SecurityTab } from './userDetail/SecurityTab';
+import { NotesTab } from './userDetail/NotesTab';
 import { ModerationModal } from './userDetail/ModerationModal';
 
 interface UserDetailViewProps {
@@ -46,7 +48,7 @@ interface UserDetailViewProps {
   onUserUpdated: () => void;
 }
 
-type DetailTab = 'profile' | 'chats' | 'gallery' | 'connections' | 'security';
+type DetailTab = 'profile' | 'chats' | 'gallery' | 'connections' | 'security' | 'notes';
 type ConversationWithDetail = ConversationItem & { partnerProfile: UserProfile; messages: MessageItem[] };
 
 export const UserDetailView: React.FC<UserDetailViewProps> = ({
@@ -404,6 +406,16 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
           <Shield className="w-3.5 h-3.5" />
           <span>Security</span>
         </button>
+
+        <button
+          onClick={() => handleTabChange('notes')}
+          className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            activeTab === 'notes' ? 'bg-arcade-gold text-vault-950 shadow-sm' : 'text-vault-400 hover:text-white'
+          }`}
+        >
+          <StickyNote className="w-3.5 h-3.5" />
+          <span>Notes</span>
+        </button>
       </div>
 
       {/* Tab Loading Spinner */}
@@ -446,6 +458,8 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
       {!tabLoading && activeTab === 'security' && (
         <SecurityTab currentUser={currentUser} securityData={securityData} />
       )}
+
+      {!tabLoading && activeTab === 'notes' && <NotesTab currentUser={currentUser} />}
 
       {/* Moderation Confirmation Modal */}
       {modalMode && (

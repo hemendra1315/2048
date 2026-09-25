@@ -191,29 +191,38 @@ Two things showed up here:
    - `gallery_delete` duplicates `gallery_delete_policy`
    - `gallery_insert` is *not* identical - `_policy` additionally blocks
      non-active accounts
-   - `profiles_select` is *not* identical - it's much broader (any active
-     profile is visible to anyone) vs. `profiles_select_policy`'s
-     connections/requests-scoped visibility
+   - `profiles_select` was *not* identical - it was much broader (any active
+     profile visible to anyone) vs. `profiles_select_policy`'s
+     connections/requests-scoped visibility. **Resolved** in
+     `20260925000002_profiles_visibility_alignment.sql`: the permissive
+     behavior was kept (this repo's own "Add a friend" UID lookup requires
+     it - a stranger's profile has to be visible before any connection
+     exists) and made the one tracked policy, dropping the untracked
+     duplicate. `profiles` carries no sensitive columns (no email, no
+     password/PIN hashes - those are in `account_secrets`), so broad
+     lookup-by-UID is a low-risk, intentional choice for this app, not an
+     oversight.
    - `admin_log_select` duplicates `admin_log_select_policy`
    - `admin_log_insert` is *not* identical - `_policy` additionally requires
      `admin_id = auth.uid()`
 
    The genuine duplicates (`conversations_select`, `messages_select`,
    `gallery_select`, `gallery_delete`, `admin_log_select`) are safe to drop in
-   a follow-up migration - same logic, just redundant. The non-identical
-   ones are **not** safe to touch without deciding which behavior is
-   intended: `profiles_select` in particular is significantly more
-   permissive than what this repo's own policy allows.
+   a follow-up migration - same logic, just redundant.
+
+## Feature frontend status
+
+Reactions, edit/delete-for-everyone/reply, pinned chats + the unified
+`get_chat_list()`, and presence now have frontend (see the git history for
+the commit that added them). In-chat tic-tac-toe, per-contact notification
+preferences, the user-report/moderation queue, and admin notes on accounts
+are being built next. Push notifications remain deliberately unbuilt - they
+need a Firebase project (VAPID keys, service account) not available in this
+environment.
 
 ## Suggested next steps (not done here)
 
 1. Get a real `supabase db dump`/`db diff` once Docker Desktop is available,
    to replace this hand-assembled reference with an exact one (constraints,
    indexes, defaults this file couldn't capture).
-2. Decide, per feature, whether to build the frontend for it (reactions,
-   presence, pinned chats, disappearing messages, etc. are all
-   backend-complete) or leave it dormant.
-3. Resolve the non-identical duplicate policies above - `profiles_select`
-   especially, since it's a real access-control difference, not just a
-   performance duplicate.
-4. Drop the confirmed-identical duplicate policies listed above.
+2. Drop the confirmed-identical duplicate policies listed above.

@@ -9,6 +9,7 @@ import { useToast } from '../../context/ToastContext';
 import { MessageBubble } from './chatRoom/MessageBubble';
 import { ChatOptionsSheet } from './chatRoom/ChatOptionsSheet';
 import { ContactInfoPanel } from './chatRoom/ContactInfoPanel';
+import { ReportUserModal } from './chatRoom/ReportUserModal';
 
 interface ChatRoomProps {
   conversationId: string;
@@ -35,6 +36,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [showContactInfo, setShowContactInfo] = useState(false);
   const [showChatOptions, setShowChatOptions] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
   const [editingMessage, setEditingMessage] = useState<MessageItem | null>(null);
@@ -372,6 +374,34 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       showToast('Could not clear chat', 'error');
     }
     setShowChatOptions(false);
+  };
+
+  const handlePlayGame = async () => {
+    setShowChatOptions(false);
+    if (!isSupabaseConfigured()) {
+      showToast('Games require the live server', 'info');
+      return;
+    }
+    const { error } = await supabase.rpc('start_chat_game', { p_conversation_id: conversationId });
+    if (error) {
+      console.error('Start game error:', error);
+      showToast(error.message || 'Could not start a game', 'error');
+    }
+  };
+
+  const handleSubmitReport = async (category: string, reason: string) => {
+    const { error } = await supabase.rpc('submit_report', {
+      p_reported_user_id: partner.id,
+      p_category: category,
+      p_reason: reason,
+    });
+    if (error) {
+      console.error('Submit report error:', error);
+      showToast(error.message || 'Could not submit report', 'error');
+    } else {
+      showToast('Report submitted. Our team will review it.', 'success');
+      setShowReportModal(false);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -718,11 +748,25 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             showToast('Notifications muted', 'success');
           }}
           onClearChat={handleClearChat}
+          onPlayGame={handlePlayGame}
+          onReportUser={() => {
+            setShowChatOptions(false);
+            setShowReportModal(true);
+          }}
         />
       )}
 
       {/* Contact Info Panel */}
       {showContactInfo && <ContactInfoPanel partner={partner} onClose={() => setShowContactInfo(false)} />}
+
+      {/* Report User Modal */}
+      {showReportModal && (
+        <ReportUserModal
+          partnerName={partner.display_name}
+          onClose={() => setShowReportModal(false)}
+          onSubmit={handleSubmitReport}
+        />
+      )}
     </div>
   );
 };

@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { ShieldAlert, LayoutDashboard, Users, MessageSquare, Image, Activity, ArrowLeft } from 'lucide-react';
+import { ShieldAlert, LayoutDashboard, Users, MessageSquare, Image, Activity, Flag, ArrowLeft } from 'lucide-react';
 import { AdminTab } from '../../types';
 import { AdminDashboard } from './AdminDashboard';
 import { UserManagement } from './UserManagement';
 import { MessageOversight } from './MessageOversight';
 import { GalleryOversight } from './GalleryOversight';
 import { AuditLogViewer } from './AuditLogViewer';
+import { ReportsQueue } from './ReportsQueue';
 
 interface AdminLayoutProps {
   onReturnToUserMode: () => void;
@@ -19,6 +20,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
     { id: 'users' as AdminTab, label: 'Users', icon: Users },
     { id: 'messages' as AdminTab, label: 'Chats', icon: MessageSquare },
     { id: 'gallery' as AdminTab, label: 'Media', icon: Image },
+    { id: 'reports' as AdminTab, label: 'Reports', icon: Flag },
     { id: 'audit_log' as AdminTab, label: 'Audit', icon: Activity },
   ];
 
@@ -77,6 +79,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
         {currentTab === 'users' && <UserManagement />}
         {currentTab === 'messages' && <MessageOversight />}
         {currentTab === 'gallery' && <GalleryOversight />}
+        {currentTab === 'reports' && <ReportsQueue />}
         {currentTab === 'audit_log' && <AuditLogViewer />}
       </main>
     </div>

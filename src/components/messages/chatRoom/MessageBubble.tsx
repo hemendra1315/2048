@@ -3,6 +3,7 @@ import { CheckCheck, Check, Play, Pause, Smile, CornerUpLeft, Pencil, Trash2 } f
 import { MessageItem } from '../../../types';
 import { formatTimestamp, handleImageError } from '../../../lib/utils';
 import { ReactionPicker } from './ReactionPicker';
+import { TicTacToeGame } from './TicTacToeGame';
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
@@ -62,6 +63,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
         <div className="px-3 py-2 rounded-2xl text-xs italic text-zinc-500 bg-[#111111] border border-[#262626]">
           This message was deleted
+        </div>
+      </div>
+    );
+  }
+
+  const gameMatch = msg.content.match(/^\[GAME:tictactoe:(.+)\]$/);
+  if (gameMatch) {
+    return (
+      <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-fade-in`}>
+        <TicTacToeGame gameId={gameMatch[1]} currentUserId={currentUserId} />
+        <div className="flex items-center gap-1 text-[10px] text-zinc-500 mt-1 px-1">
+          <span>{formatTimestamp(msg.created_at)}</span>
         </div>
       </div>
     );

@@ -119,4 +119,4 @@ export interface CoverGameMeta {
 }
 
 export type SocialTab = 'chats' | 'gallery' | 'profile' | 'messages' | 'home' | 'connections' | 'settings';
-export type AdminTab = 'dashboard' | 'users' | 'messages' | 'gallery' | 'audit_log';
+export type AdminTab = 'dashboard' | 'users' | 'messages' | 'gallery' | 'reports' | 'audit_log';
