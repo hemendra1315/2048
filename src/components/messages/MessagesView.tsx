@@ -78,30 +78,33 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     setLoading(true);
     try {
       if (isSupabaseConfigured()) {
-        const { data: rawConvs } = await supabase
-          .from('conversations')
-          .select('*')
-          .or(`user_a.eq.${user.id},user_b.eq.${user.id}`)
-          .order('updated_at', { ascending: false });
+        const { data: rawRows, error } = await supabase.rpc('get_chat_list');
+        if (error) throw error;
 
-        const convs = (rawConvs || []) as unknown as { id: string; user_a: string; user_b: string; created_at: string; updated_at: string }[];
+        const rows = (rawRows ?? []) as unknown as {
+          conversation_id: string;
+          partner_id: string;
+          created_at: string;
+          updated_at: string;
+          last_message_id: string | null;
+          last_message_content: string | null;
+          last_message_sender_id: string | null;
+          last_message_at: string | null;
+          last_message_is_read: boolean | null;
+          unread_count: number;
+          pinned_at: string | null;
+          disappear_after_seconds: number | null;
+          chat_theme: string;
+        }[];
 
-        if (convs.length > 0) {
-          const partnerIds = convs.map(c => (c.user_a === user.id ? c.user_b : c.user_a));
-          const convIds = convs.map(c => c.id);
-
-          const [{ data: rawProfiles }, { data: rawMessages }] = await Promise.all([
-            supabase.from('profiles').select('*').in('id', partnerIds),
-            supabase.from('messages').select('*').in('conversation_id', convIds).order('created_at', { ascending: false }),
-          ]);
-
+        if (rows.length > 0) {
+          const partnerIds = rows.map(r => r.partner_id);
+          const { data: rawProfiles } = await supabase.from('profiles').select('*').in('id', partnerIds);
           const profiles = (rawProfiles || []) as unknown as UserProfile[];
-          const messages = (rawMessages || []) as unknown as { id: string; conversation_id: string; sender_id: string; content: string; is_read: boolean; created_at: string }[];
 
-          const formatted: ConversationItem[] = convs.map(c => {
-            const pId = c.user_a === user.id ? c.user_b : c.user_a;
-            const partner = profiles?.find(p => p.id === pId) || {
-              id: pId,
+          const formatted: ConversationItem[] = rows.map(r => {
+            const partner = profiles?.find(p => p.id === r.partner_id) || {
+              id: r.partner_id,
               uid: 'UNKNOWN',
               display_name: 'Contact',
               avatar_url: null,
@@ -111,19 +114,27 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               updated_at: '',
             };
 
-            const convMessages = messages.filter(m => m.conversation_id === c.id);
-            const lastMsg = convMessages[0] as ConversationItem['lastMessage'];
-            const unreadCount = convMessages.filter(m => !m.is_read && m.sender_id !== user.id).length;
-
             return {
-              id: c.id,
-              user_a: c.user_a,
-              user_b: c.user_b,
-              created_at: c.created_at,
-              updated_at: c.updated_at,
+              id: r.conversation_id,
+              user_a: user.id,
+              user_b: r.partner_id,
+              created_at: r.created_at,
+              updated_at: r.updated_at,
               partner: partner as ConversationItem['partner'],
-              lastMessage: lastMsg,
-              unreadCount,
+              lastMessage: r.last_message_id
+                ? {
+                    id: r.last_message_id,
+                    conversation_id: r.conversation_id,
+                    sender_id: r.last_message_sender_id ?? '',
+                    content: r.last_message_content ?? '',
+                    is_read: r.last_message_is_read ?? false,
+                    created_at: r.last_message_at ?? r.updated_at,
+                  }
+                : undefined,
+              unreadCount: r.unread_count,
+              pinnedAt: r.pinned_at,
+              disappearAfterSeconds: r.disappear_after_seconds,
+              chatTheme: r.chat_theme,
             };
           });
           setConversations(formatted);
@@ -171,8 +182,11 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       return unsub;
     } else {
       const channel = supabase
-        .channel('public:conversations_messages')
+        .channel(`public:conversations_messages:${crypto.randomUUID()}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+          loadConversations();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members' }, () => {
           loadConversations();
         })
         .subscribe();
@@ -230,6 +244,23 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     setActiveConversation({ id: convId, partner });
     if (onSelectConversationForDesktop) {
       onSelectConversationForDesktop(partner, convId);
+    }
+  };
+
+  const handleTogglePin = async (conversationId: string, pinned: boolean) => {
+    if (!isSupabaseConfigured()) {
+      showToast('Pinning requires the live server', 'info');
+      return;
+    }
+    // Optimistic; loadConversations (triggered by the realtime subscription) reconciles it.
+    setConversations(prev =>
+      prev.map(c => (c.id === conversationId ? { ...c, pinnedAt: pinned ? new Date().toISOString() : null } : c))
+    );
+    const { error } = await supabase.rpc('set_chat_pinned', { p_conversation_id: conversationId, p_pinned: pinned });
+    if (error) {
+      console.error('Pin chat error:', error);
+      showToast(error.message || 'Could not update pin', 'error');
+      loadConversations();
     }
   };
 
@@ -324,6 +355,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       (c.partner.uid && c.partner.uid.toLowerCase().includes(q))
     );
   });
+  const pinnedConversations = conversations.filter(c => c.pinnedAt);
 
   // Mobile Viewport: if conversation is active, show only ChatRoom
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
@@ -375,15 +407,15 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       </div>
 
       {/* Pinned Contacts Carousel */}
-      {conversations.length > 0 && (
+      {pinnedConversations.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5 px-1 text-xs text-zinc-500 font-semibold">
             <Pin className="w-3 h-3 text-[#10B981]" />
-            <span>PINNED CONTACTS</span>
+            <span>PINNED CHATS</span>
           </div>
 
           <div className="flex items-center gap-2.5 overflow-x-auto pb-1 scrollbar-none">
-            {conversations.slice(0, 5).map(c => (
+            {pinnedConversations.map(c => (
               <PinnedContact
                 key={c.id}
                 conversation={c}
@@ -426,6 +458,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 conversation={c}
                 isSelected={activeConversation?.id === c.id}
                 onClick={() => handleStartDirectChat(c.partner, c.id)}
+                onTogglePin={() => handleTogglePin(c.id, !c.pinnedAt)}
               />
             ))}
           </div>

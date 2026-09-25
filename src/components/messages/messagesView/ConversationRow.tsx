@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image as ImageIcon, Mic } from 'lucide-react';
+import { Image as ImageIcon, Mic, Pin } from 'lucide-react';
 import { ConversationItem } from '../../../types';
 import { formatTimestamp, getAvatarUrl } from '../../../lib/utils';
 
@@ -7,17 +7,32 @@ interface ConversationRowProps {
   conversation: ConversationItem;
   isSelected: boolean;
   onClick: () => void;
+  onTogglePin: () => void;
 }
 
-export const ConversationRow: React.FC<ConversationRowProps> = ({ conversation: c, isSelected, onClick }) => (
+export const ConversationRow: React.FC<ConversationRowProps> = ({ conversation: c, isSelected, onClick, onTogglePin }) => (
   <div
     onClick={onClick}
-    className={`group flex items-center justify-between p-3 border rounded-2xl cursor-pointer transition-all active:scale-98 ${
+    className={`group relative flex items-center justify-between p-3 border rounded-2xl cursor-pointer transition-all active:scale-98 ${
       isSelected
         ? 'bg-[#171717] border-[#10B981] shadow-sm'
         : 'bg-[#111111] border-[#262626] hover:bg-[#171717] hover:border-zinc-600'
     }`}
   >
+    <button
+      type="button"
+      onClick={e => {
+        e.stopPropagation();
+        onTogglePin();
+      }}
+      title={c.pinnedAt ? 'Unpin chat' : 'Pin chat'}
+      className={`absolute top-2 right-2 p-1 rounded-full transition-opacity ${
+        c.pinnedAt ? 'text-[#10B981] opacity-100' : 'text-zinc-600 opacity-0 group-hover:opacity-100 hover:text-zinc-300'
+      }`}
+    >
+      <Pin className={`w-3.5 h-3.5 ${c.pinnedAt ? 'fill-current' : ''}`} />
+    </button>
+
     <div className="flex items-center gap-3 min-w-0">
       <div className="relative">
         <img
@@ -45,6 +60,8 @@ export const ConversationRow: React.FC<ConversationRowProps> = ({ conversation: 
               <Mic className="w-3.5 h-3.5 text-[#10B981]" />
               <span>Voice message (0:14)</span>
             </>
+          ) : c.lastMessage?.content === '[DELETED]' ? (
+            <span className="italic">This message was deleted</span>
           ) : (
             c.lastMessage?.content || 'Encrypted direct channel ready'
           )}
@@ -52,7 +69,7 @@ export const ConversationRow: React.FC<ConversationRowProps> = ({ conversation: 
       </div>
     </div>
 
-    <div className="flex flex-col items-end gap-1 text-right pl-2">
+    <div className="flex flex-col items-end gap-1 text-right pl-2 pr-5">
       <span className="text-[10px] text-zinc-500 whitespace-nowrap">
         {c.lastMessage ? formatTimestamp(c.lastMessage.created_at) : ''}
       </span>

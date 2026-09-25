@@ -18,6 +18,7 @@ import { useToast } from '../../context/ToastContext';
 import { useVault } from '../../context/VaultContext';
 import { CoverGameType } from '../../types';
 import { getAvatarUrl } from '../../lib/utils';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 
 interface ProfileViewProps {
   onOpenVault?: () => void;
@@ -30,6 +31,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
 
   const [biometricsEnabled, setBiometricsEnabled] = useState(user?.biometric_enabled ?? false);
   const [readReceipts, setReadReceipts] = useState(true);
+  const [sharePresence, setSharePresence] = useState(true);
   const [oldPin, setOldPin] = useState('');
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -39,6 +41,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
     if (user?.biometric_enabled !== undefined) {
       setBiometricsEnabled(user.biometric_enabled);
     }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !isSupabaseConfigured()) return;
+    supabase
+      .from('user_presence')
+      .select('share_presence, share_read_receipts')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        const row = data as { share_presence: boolean; share_read_receipts: boolean } | null;
+        if (row) {
+          setSharePresence(row.share_presence);
+          setReadReceipts(row.share_read_receipts);
+        }
+      });
   }, [user]);
 
   const copyUid = () => {
@@ -66,6 +84,36 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
     logout();
     panicLock();
     showToast('Signed out', 'info');
+  };
+
+  const handleToggleReadReceipts = async () => {
+    if (!isSupabaseConfigured()) {
+      setReadReceipts(v => !v);
+      return;
+    }
+    const next = !readReceipts;
+    setReadReceipts(next);
+    const { error } = await supabase.rpc('set_read_receipts', { p_share: next });
+    if (error) {
+      console.error('Set read receipts error:', error);
+      setReadReceipts(!next);
+      showToast('Could not update read receipts', 'error');
+    }
+  };
+
+  const handleTogglePresenceSharing = async () => {
+    if (!isSupabaseConfigured()) {
+      setSharePresence(v => !v);
+      return;
+    }
+    const next = !sharePresence;
+    setSharePresence(next);
+    const { error } = await supabase.rpc('set_presence_sharing', { p_share: next });
+    if (error) {
+      console.error('Set presence sharing error:', error);
+      setSharePresence(!next);
+      showToast('Could not update online status sharing', 'error');
+    }
   };
 
   const handleUpdatePin = async (e: React.FormEvent) => {
@@ -304,10 +352,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
             </div>
           </div>
           <button
-            onClick={() => {
-              setReadReceipts(!readReceipts);
-              showToast(`Read receipts ${!readReceipts ? 'enabled' : 'disabled'}`, 'info');
-            }}
+            onClick={handleToggleReadReceipts}
             className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
               readReceipts ? 'bg-[#10B981]' : 'bg-[#262626]'
             }`}
@@ -315,6 +360,31 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
             <div
               className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
                 readReceipts ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Online Status Sharing */}
+        <div className="flex items-center justify-between p-3 rounded-xl bg-[#171717] border border-[#262626]">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-[#222222] text-zinc-300">
+              <ShieldCheck className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-white">Show Online Status</p>
+              <p className="text-[11px] text-zinc-500">Let contacts see when you're active</p>
+            </div>
+          </div>
+          <button
+            onClick={handleTogglePresenceSharing}
+            className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
+              sharePresence ? 'bg-[#10B981]' : 'bg-[#262626]'
+            }`}
+          >
+            <div
+              className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                sharePresence ? 'translate-x-5' : 'translate-x-0'
               }`}
             />
           </button>

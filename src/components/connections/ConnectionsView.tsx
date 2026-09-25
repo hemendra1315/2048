@@ -107,7 +107,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
       };
     } else {
       const channel = supabase
-        .channel('public:connections_and_requests')
+        .channel(`public:connections_and_requests:${crypto.randomUUID()}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'connections' }, () => {
           loadData();
         })

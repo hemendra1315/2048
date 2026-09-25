@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Send, Lock, MoreVertical, Smile, Mic, Image as ImageIcon } from 'lucide-react';
-import { MessageItem, UserProfile } from '../../types';
+import { ArrowLeft, Send, Lock, MoreVertical, Smile, Mic, Image as ImageIcon, X, Pencil, CornerUpLeft } from 'lucide-react';
+import { MessageItem, MessageReaction, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { getAvatarUrl } from '../../lib/utils';
+import { getAvatarUrl, formatTimestamp } from '../../lib/utils';
 import { useToast } from '../../context/ToastContext';
 import { MessageBubble } from './chatRoom/MessageBubble';
 import { ChatOptionsSheet } from './chatRoom/ChatOptionsSheet';
@@ -36,6 +36,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [showContactInfo, setShowContactInfo] = useState(false);
   const [showChatOptions, setShowChatOptions] = useState(false);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
+  const [editingMessage, setEditingMessage] = useState<MessageItem | null>(null);
+  const [partnerPresence, setPartnerPresence] = useState<{ isOnline: boolean; lastSeenAt: string | null } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -47,6 +50,24 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  // Reactions live in a separate table (no conversation_id column), so they're fetched by
+  // message id and merged onto the loaded messages rather than joined server-side.
+  const attachReactions = useCallback(async (msgs: MessageItem[]): Promise<MessageItem[]> => {
+    if (!isSupabaseConfigured() || msgs.length === 0) return msgs;
+    const { data, error } = await supabase
+      .from('message_reactions')
+      .select('message_id, user_id, emoji')
+      .in('message_id', msgs.map(m => m.id));
+    if (error || !data) return msgs;
+    const byMessage = new Map<string, MessageReaction[]>();
+    for (const row of data as unknown as { message_id: string; user_id: string; emoji: string }[]) {
+      const list = byMessage.get(row.message_id) ?? [];
+      list.push({ emoji: row.emoji, user_id: row.user_id });
+      byMessage.set(row.message_id, list);
+    }
+    return msgs.map(m => ({ ...m, reactions: byMessage.get(m.id) }));
+  }, []);
 
   const loadMessages = useCallback(async () => {
     if (!user) return;
@@ -60,12 +81,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
         if (error) throw error;
         if (data) {
-          setMessages(data as unknown as MessageItem[]);
-          await supabase
-            .from('messages')
-            .update({ is_read: true } as unknown as { is_read: boolean })
-            .eq('conversation_id', conversationId)
-            .neq('sender_id', user.id);
+          setMessages(await attachReactions(data as unknown as MessageItem[]));
+          await supabase.rpc('mark_conversation_read', { p_conversation_id: conversationId });
         }
       } else {
         const msgs = mockBackend.getMessages(conversationId);
@@ -75,7 +92,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     } catch (err) {
       console.error('Error loading messages:', err);
     }
-  }, [conversationId, user]);
+  }, [conversationId, user, attachReactions]);
 
   useEffect(() => {
     loadMessages();
@@ -97,8 +114,12 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         unsubRead();
       };
     } else {
+      // A unique topic per mount avoids a StrictMode dev-mode race: two mounts of this effect back
+      // to back would otherwise both resolve to the same topic while the first's removeChannel()
+      // is still in flight, and Supabase throws on adding .on() callbacks to an already-subscribed
+      // channel instance.
       const channel = supabase
-        .channel(`chat:${conversationId}`)
+        .channel(`chat:${conversationId}:${crypto.randomUUID()}`)
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
@@ -116,7 +137,23 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
           payload => {
             const updatedMsg = payload.new as unknown as MessageItem;
-            setMessages(prev => prev.map(m => (m.id === updatedMsg.id ? updatedMsg : m)));
+            // The realtime payload has no `reactions` field - keep whatever was already merged in.
+            setMessages(prev => prev.map(m => (m.id === updatedMsg.id ? { ...updatedMsg, reactions: m.reactions } : m)));
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'message_reactions' },
+          async payload => {
+            const row = (payload.new ?? payload.old) as { message_id?: string } | null;
+            const messageId = row?.message_id;
+            if (!messageId) return;
+            const { data } = await supabase
+              .from('message_reactions')
+              .select('user_id, emoji')
+              .eq('message_id', messageId);
+            const reactions = (data ?? []) as unknown as MessageReaction[];
+            setMessages(prev => (prev.some(m => m.id === messageId) ? prev.map(m => (m.id === messageId ? { ...m, reactions } : m)) : prev));
           }
         )
         .on('broadcast', { event: 'typing' }, ({ payload }) => {
@@ -140,6 +177,30 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+
+    const loadPresence = async () => {
+      const { data } = await supabase.rpc('get_presence', { p_user_ids: [partner.id] });
+      const row = (data as { user_id: string; is_online: boolean; last_seen_at: string | null }[] | null)?.[0];
+      setPartnerPresence(row ? { isOnline: row.is_online, lastSeenAt: row.last_seen_at } : null);
+    };
+    loadPresence();
+
+    const channel = supabase
+      .channel(`presence:${partner.id}:${crypto.randomUUID()}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'user_presence', filter: `user_id=eq.${partner.id}` },
+        () => loadPresence()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [partner.id]);
 
   useEffect(() => {
     if (initialAttachment) {
@@ -166,15 +227,30 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     if (!content || !user) return;
 
     if (!contentToSend) setInputContent('');
+    const replyToId = replyingTo?.id;
+    setReplyingTo(null);
 
     try {
       if (isSupabaseConfigured()) {
-        const { error } = await supabase.from('messages').insert({
-          conversation_id: conversationId,
-          sender_id: user.id,
-          content,
-        } as unknown as { conversation_id: string; sender_id: string; content: string });
+        const { data, error } = await supabase
+          .from('messages')
+          .insert({
+            conversation_id: conversationId,
+            sender_id: user.id,
+            content,
+            reply_to_id: replyToId ?? null,
+          } as unknown as { conversation_id: string; sender_id: string; content: string; reply_to_id: string | null })
+          .select('*')
+          .single();
         if (error) throw error;
+        // Append locally rather than waiting on the realtime INSERT event, which can lag or
+        // (on a flaky connection) never arrive at all - the postgres_changes handler already
+        // guards against double-adding this same id.
+        if (data) {
+          const newMsg = data as unknown as MessageItem;
+          setMessages(prev => (prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg]));
+          scrollToBottom();
+        }
       } else {
         const msg = mockBackend.sendMessage(conversationId, user.id, content);
         setMessages(prev => [...prev, msg]);
@@ -215,6 +291,67 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const handleSendSticker = (emoji: string) => {
     handleSend(`[STICKER]${emoji}`);
     setShowStickerPicker(false);
+  };
+
+  const handleReact = async (msg: MessageItem, emoji: string | null) => {
+    if (!isSupabaseConfigured()) {
+      showToast('Reactions require the live server', 'info');
+      return;
+    }
+    // Optimistic update; the message_reactions realtime subscription reconciles the real state.
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.id !== msg.id || !user) return m;
+        const others = (m.reactions ?? []).filter(r => r.user_id !== user.id);
+        return { ...m, reactions: emoji ? [...others, { emoji, user_id: user.id }] : others };
+      })
+    );
+    const { error } = await supabase.rpc('set_reaction', { p_message_id: msg.id, p_emoji: emoji });
+    if (error) {
+      console.error('React error:', error);
+      showToast('Could not react to message', 'error');
+    }
+  };
+
+  const handleStartEdit = (msg: MessageItem) => {
+    setReplyingTo(null);
+    setEditingMessage(msg);
+    setInputContent(msg.content);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessage(null);
+    setInputContent('');
+  };
+
+  const handleSubmitEdit = async () => {
+    if (!editingMessage) return;
+    const content = inputContent.trim();
+    if (!content) return;
+    setInputContent('');
+    const target = editingMessage;
+    setEditingMessage(null);
+    // Optimistic; the messages realtime subscription reconciles it against the server row.
+    const editedAt = new Date().toISOString();
+    setMessages(prev => prev.map(m => (m.id === target.id ? { ...m, content, edited_at: editedAt } : m)));
+    const { error } = await supabase.rpc('edit_message', { p_message_id: target.id, p_content: content });
+    if (error) {
+      console.error('Edit message error:', error);
+      showToast(error.message || 'Could not edit message', 'error');
+      setMessages(prev => prev.map(m => (m.id === target.id ? target : m)));
+    }
+  };
+
+  const handleDeleteForEveryone = async (msg: MessageItem) => {
+    if (!confirm('Delete this message for everyone? This cannot be undone.')) return;
+    const deletedAt = new Date().toISOString();
+    setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, content: '[DELETED]', deleted_at: deletedAt } : m)));
+    const { error } = await supabase.rpc('delete_message_for_everyone', { p_message_id: msg.id });
+    if (error) {
+      console.error('Delete for everyone error:', error);
+      showToast(error.message || 'Could not delete message', 'error');
+      setMessages(prev => prev.map(m => (m.id === msg.id ? msg : m)));
+    }
   };
 
   const handleClearChat = async () => {
@@ -368,7 +505,17 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           <div className="min-w-0">
             <h3 className="text-sm font-bold text-white leading-tight truncate">{partner.display_name}</h3>
             <p className="text-[11px] text-zinc-500">
-              {isTyping ? <span className="text-[#10B981]">typing...</span> : 'Online'}
+              {isTyping ? (
+                <span className="text-[#10B981]">typing...</span>
+              ) : partnerPresence === null ? (
+                'Encrypted direct channel'
+              ) : partnerPresence.isOnline ? (
+                <span className="text-[#10B981]">Online</span>
+              ) : partnerPresence.lastSeenAt ? (
+                `Last seen ${formatTimestamp(partnerPresence.lastSeenAt)}`
+              ) : (
+                'Offline'
+              )}
             </p>
           </div>
         </button>
@@ -400,10 +547,19 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               key={msg.id}
               msg={msg}
               isMe={msg.sender_id === user?.id}
+              currentUserId={user?.id}
               onOpenMedia={onOpenMedia}
               playingAudioId={playingAudioId}
               setPlayingAudioId={setPlayingAudioId}
               onPlayAudio={playAudio}
+              replyToMessage={msg.reply_to_id ? messages.find(m => m.id === msg.reply_to_id) : undefined}
+              onReact={emoji => handleReact(msg, emoji)}
+              onReply={() => {
+                setEditingMessage(null);
+                setReplyingTo(msg);
+              }}
+              onEdit={() => handleStartEdit(msg)}
+              onDeleteForEveryone={() => handleDeleteForEveryone(msg)}
             />
           ))
         )}
@@ -420,7 +576,29 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       </div>
 
       {/* Input Bar */}
-      <div className="bg-[#111111] border-t border-[#262626] p-3 flex items-center gap-2">
+      <div className="bg-[#111111] border-t border-[#262626]">
+        {(replyingTo || editingMessage) && (
+          <div className="flex items-center justify-between px-3 pt-2.5 gap-2 border-b border-[#262626]/60 pb-2.5">
+            <div className="flex items-center gap-2 min-w-0 text-xs text-zinc-400">
+              {editingMessage ? <Pencil className="w-3.5 h-3.5 text-[#10B981] shrink-0" /> : <CornerUpLeft className="w-3.5 h-3.5 text-[#10B981] shrink-0" />}
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold text-[#10B981]">
+                  {editingMessage ? 'Editing message' : `Replying to ${replyingTo?.sender_id === user?.id ? 'yourself' : partner.display_name}`}
+                </div>
+                <div className="truncate">{(editingMessage ?? replyingTo)?.content}</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={editingMessage ? handleCancelEdit : () => setReplyingTo(null)}
+              className="p-1 rounded-full hover:bg-[#222222] text-zinc-500 hover:text-white shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        <div className="p-3 flex items-center gap-2">
         <input
           type="file"
           ref={fileInputRef}
@@ -451,11 +629,19 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             </div>
           </div>
         ) : (
-          <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex-1 flex items-center gap-2">
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              if (editingMessage) handleSubmitEdit();
+              else handleSend();
+            }}
+            className="flex-1 flex items-center gap-2"
+          >
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-400 hover:text-white transition-all active:scale-95"
+              disabled={!!editingMessage}
+              className="p-2.5 rounded-xl bg-[#171717] hover:bg-[#222222] text-zinc-400 hover:text-white transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
               title="Attach Photo"
             >
               <ImageIcon className="w-5 h-5 text-zinc-300" />
@@ -469,7 +655,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                   setInputContent(e.target.value);
                   broadcastTyping();
                 }}
-                placeholder={`Message ${partner.display_name}...`}
+                placeholder={editingMessage ? 'Edit message...' : `Message ${partner.display_name}...`}
                 className="w-full bg-[#171717] border border-[#262626] focus:border-[#10B981] rounded-xl pl-4 pr-10 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition-colors"
               />
               <button
@@ -516,6 +702,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             )}
           </form>
         )}
+        </div>
       </div>
 
       {/* Chat Options Sheet */}

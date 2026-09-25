@@ -68,7 +68,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ onOpenCamera }) => {
       return unsub;
     } else {
       const channel = supabase
-        .channel('public:gallery_items')
+        .channel(`public:gallery_items:${crypto.randomUUID()}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'gallery_items' }, () => {
           loadGallery();
         })

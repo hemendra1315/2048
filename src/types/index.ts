@@ -62,6 +62,14 @@ export interface ConversationItem {
   lastMessage?: MessageItem;
   unreadCount: number;
   isPartnerTyping?: boolean;
+  pinnedAt?: string | null;
+  disappearAfterSeconds?: number | null;
+  chatTheme?: string;
+}
+
+export interface MessageReaction {
+  emoji: string;
+  user_id: string;
 }
 
 export interface MessageItem {
@@ -72,6 +80,10 @@ export interface MessageItem {
   is_read: boolean;
   created_at: string;
   sender?: UserProfile;
+  reply_to_id?: string | null;
+  edited_at?: string | null;
+  deleted_at?: string | null;
+  reactions?: MessageReaction[];
 }
 
 export interface GalleryItem {

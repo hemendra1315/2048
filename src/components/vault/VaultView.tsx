@@ -80,7 +80,7 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
         return unsub;
       } else {
         const channel = supabase
-          .channel('public:vault_gallery_items')
+          .channel(`public:vault_gallery_items:${crypto.randomUUID()}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'gallery_items' }, () => {
             loadVaultItems();
           })

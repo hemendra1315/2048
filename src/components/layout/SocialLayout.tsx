@@ -24,6 +24,7 @@ import { ProfileView } from '../profile/ProfileView';
 import { PanicButton } from '../launcher/PanicButton';
 import { updateUnreadBadge } from '../../lib/badge';
 import { getAvatarUrl } from '../../lib/utils';
+import { usePresenceHeartbeat } from '../../hooks/usePresenceHeartbeat';
 
 interface SocialLayoutProps {
   onAdminToggle?: () => void;
@@ -35,6 +36,8 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle, pendi
   const { user, isSuperAdmin } = useAuth();
   const { preferences } = useVault();
   const { showToast } = useToast();
+
+  usePresenceHeartbeat(!!user);
 
   // Chats is the default landing page
   const [currentTab, setCurrentTab] = useState<SocialTab>('chats');
