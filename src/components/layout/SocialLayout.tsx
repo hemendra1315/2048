@@ -44,6 +44,9 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle, pendi
   const [chatPartnerId, setChatPartnerId] = useState<string | null>(null);
   const [pendingMediaAttachment, setPendingMediaAttachment] = useState<string | null>(null);
   const [selectedDesktopPartner, setSelectedDesktopPartner] = useState<UserProfile | null>(null);
+  const handleSelectConversationForDesktop = useCallback((partner: UserProfile) => {
+    setSelectedDesktopPartner(partner);
+  }, []);
   const [mobileChatActive, setMobileChatActive] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [vaultOpen, setVaultOpen] = useState(false);
@@ -257,7 +260,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle, pendi
               initialAttachment={pendingMediaAttachment}
               onClearInitialPartner={() => setChatPartnerId(null)}
               onClearInitialAttachment={() => setPendingMediaAttachment(null)}
-              onSelectConversationForDesktop={partner => setSelectedDesktopPartner(partner)}
+              onSelectConversationForDesktop={handleSelectConversationForDesktop}
               onChatActiveChange={setMobileChatActive}
               onOpenCamera={() => setCameraOpen(true)}
             />
