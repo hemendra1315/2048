@@ -5,11 +5,8 @@ import {
   ShieldCheck,
   Bell,
   Copy,
-  FileText,
   Lock,
   Image as ImageIcon,
-  KeyRound,
-  ExternalLink,
   Sparkles,
   Send,
   Check,
@@ -18,6 +15,8 @@ import {
 import { UserProfile, NotificationMode } from '../../types';
 import { Avatar } from '../common/Avatar';
 import { useAuth } from '../../context/AuthContext';
+import { useVault } from '../../context/VaultContext';
+import { describePresence, usePresence } from '../../lib/presence';
 import { useToast } from '../../context/ToastContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { mockBackend } from '../../lib/mockBackend';
@@ -26,7 +25,7 @@ import {
   saveContactNotificationPreference,
   sendTestNotification,
   DEFAULT_DISGUISED_TITLE,
-  DEFAULT_DISGUISED_BODY,
+  disguisedBody,
   NOTIFICATION_SOUND_OPTIONS,
 } from '../../lib/notifications';
 
@@ -51,8 +50,11 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
   className = '',
 }) => {
   const { user } = useAuth();
+  const { preferences } = useVault();
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState<'media' | 'files' | 'security'>('media');
+  const partnerPresence = usePresence([partner.id])[partner.id];
+  const presenceLabel = describePresence(partnerPresence);
+  const [activeTab, setActiveTab] = useState<'media' | 'security'>('media');
   const [sharedMedia, setSharedMedia] = useState<string[]>([]);
   const [loadingMedia, setLoadingMedia] = useState(false);
 
@@ -143,7 +145,7 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
     try {
       await sendTestNotification({
         title: titleToUse,
-        body: DEFAULT_DISGUISED_BODY,
+        body: disguisedBody(preferences.custom_app_name),
         sound: customSound,
       });
       showToast('Disguised test notification sent to device', 'success');
@@ -196,9 +198,6 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
     }
   };
 
-  // Generate a deterministic safety fingerprint from UIDs
-  const safetyFingerprint = `${(partner.uid || 'CIPHER').slice(0, 4)}-${(partner.id || '9021').slice(0, 4)}-${(partner.uid || '8841').slice(-4)}`.toUpperCase();
-
   const previewTitle =
     notificationMode === 'silent'
       ? '(No notification sent)'
@@ -220,7 +219,7 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
             src={partner.avatar_url}
             size={56}
             className="!w-[72px] !h-[72px] !text-2xl shadow-lg border border-vault-700"
-            online={true}
+            online={partnerPresence?.isOnline ?? false}
           />
         </div>
 
@@ -246,10 +245,12 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
         </button>
 
         {/* Live Presence Status */}
-        <div className="flex items-center gap-1.5 text-xs text-emerald font-mono mt-2">
-          <span className="w-2 h-2 rounded-full bg-emerald animate-pulse" />
-          <span>Active Contact</span>
-        </div>
+        {presenceLabel && (
+          <div className={`flex items-center gap-1.5 text-xs font-mono mt-2 ${partnerPresence?.isOnline ? 'text-emerald' : 'text-vault-400'}`}>
+            <span className={`w-2 h-2 rounded-full ${partnerPresence?.isOnline ? 'bg-emerald animate-pulse' : 'bg-vault-600'}`} />
+            <span>{presenceLabel}</span>
+          </div>
+        )}
       </div>
 
       {/* 2. DISGUISED NOTIFICATION STYLE SETTINGS */}
@@ -261,7 +262,7 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
               Notification Style
             </span>
           </div>
-          <span className="tag tag-em mono !text-[9px] !h-4 !px-1.5">STEALTH</span>
+          <span className="tag tag-em mono !text-[9px] !h-4 !px-1.5">Disguised</span>
         </div>
 
         {/* Style Selector Buttons */}
@@ -383,7 +384,7 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
           <div className="flex items-center justify-between text-[10px] text-vault-500 font-mono">
             <span className="flex items-center gap-1">
               <span>🎮</span>
-              <span>Games • lock screen preview</span>
+              <span>{preferences.custom_app_name || 'Games'} • lock screen preview</span>
             </span>
             <span>now</span>
           </div>
@@ -392,7 +393,7 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
           </p>
           {notificationMode !== 'silent' && (
             <p className="text-[11px] text-vault-400 m-0 leading-tight">
-              {DEFAULT_DISGUISED_BODY}
+              {disguisedBody(preferences.custom_app_name)}
             </p>
           )}
         </div>
@@ -444,19 +445,6 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
           <button
             type="button"
             role="tab"
-            aria-selected={activeTab === 'files'}
-            onClick={() => setActiveTab('files')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold text-center transition-all ${
-              activeTab === 'files'
-                ? 'bg-vault-800 text-white shadow-sm'
-                : 'text-vault-400 hover:text-white'
-            }`}
-          >
-            Files
-          </button>
-          <button
-            type="button"
-            role="tab"
             aria-selected={activeTab === 'security'}
             onClick={() => setActiveTab('security')}
             className={`flex-1 py-1.5 rounded-lg text-xs font-semibold text-center transition-all ${
@@ -465,7 +453,7 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
                 : 'text-vault-400 hover:text-white'
             }`}
           >
-            Security
+            Privacy
           </button>
         </div>
 
@@ -509,61 +497,25 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
           </div>
         )}
 
-        {/* Tab 2: Shared Documents & Files */}
-        {activeTab === 'files' && (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between px-1">
-              <span className="t-over text-[10px]">Transfers & Keys</span>
-              <span className="t-cap mono c2">3 files</span>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              {[
-                { name: 'session-public-key.pem', size: '2.4 KB', date: 'Today' },
-                { name: 'channel-manifest.json', size: '14.8 KB', date: 'Yesterday' },
-                { name: 'hardware-signature.sig', size: '512 B', date: 'Sep 21' },
-              ].map(f => (
-                <div
-                  key={f.name}
-                  className="p-2.5 bg-vault-950 border border-vault-800 hover:border-vault-700 rounded-xl flex items-center justify-between transition-colors cursor-pointer group"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <FileText className="w-4 h-4 text-emerald shrink-0" />
-                    <div className="min-w-0">
-                      <p className="t-cap font-mono text-white truncate m-0 group-hover:text-emerald">{f.name}</p>
-                      <p className="text-[10px] text-vault-500 m-0">{f.size} • {f.date}</p>
-                    </div>
-                  </div>
-                  <ExternalLink className="w-3.5 h-3.5 text-vault-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Tab 3: Security & Cryptographic Proof */}
+        {/* Tab 2: what actually protects this chat. No "Files" tab: nothing in this app sends a
+            generic file, and the old one listed three made-up filenames on every contact — never
+            anything either person had actually sent. No fingerprint either: it looked like a
+            per-conversation safety code but was just letters sliced from both UIDs, not backed by
+            any real key exchange. */}
         {activeTab === 'security' && (
           <div className="flex flex-col gap-3">
             <div className="card p-3.5 bg-vault-950 border border-vault-800 space-y-2.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Lock className="w-4 h-4 text-emerald" />
-                  <span className="t-sm font-bold text-white">Private Direct Channel</span>
+                  <span className="t-sm font-bold text-white">Private chat</span>
                 </div>
                 <span className="tag tag-em mono text-[10px]">ACTIVE</span>
               </div>
               <p className="text-[11px] text-vault-400 leading-relaxed m-0">
-                Messages and media in this thread are secured in transit via TLS and isolated by row-level database access policies (RLS). Only participants have access.
-              </p>
-            </div>
-
-            <div className="card p-3.5 bg-vault-950 border border-vault-800 space-y-1.5">
-              <div className="flex items-center gap-1.5 text-xs text-vault-300 font-semibold">
-                <KeyRound className="w-3.5 h-3.5 text-gold" />
-                <span>Safety Fingerprint</span>
-              </div>
-              <p className="font-mono text-xs text-gold font-bold tracking-widest m-0 bg-vault-900 p-2 rounded-lg text-center border border-vault-800">
-                {safetyFingerprint}
+                Messages and media in this chat travel over HTTPS and are only readable by the two
+                of you, enforced by the database's own access rules. A super admin can still review
+                chats for safety and moderation.
               </p>
             </div>
           </div>

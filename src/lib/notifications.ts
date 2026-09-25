@@ -12,7 +12,14 @@ export const GAME_UPDATES_CHANNEL_NAME = 'Game Updates';
 export const GAME_UPDATES_CHANNEL_DESC = 'Game alerts and rewards';
 
 export const DEFAULT_DISGUISED_TITLE = '🎮 Daily puzzle ready';
+/** Fallback body, used only where the recipient's chosen app name isn't known. */
 export const DEFAULT_DISGUISED_BODY = 'Open Games to continue.';
+
+/** The body text always names the disguise the recipient actually chose (migration 20260924000016
+ * makes the server do the same, so what shows on the lock screen preview here matches what a real
+ * push notification says). */
+export const disguisedBody = (appName: string | null | undefined): string =>
+  `Open ${appName?.trim() || 'Games'} to continue.`;
 
 export const NOTIFICATION_SOUND_OPTIONS = [
   { id: 'default', label: 'Default' },

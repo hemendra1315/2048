@@ -108,6 +108,12 @@ await t('sends FCM v1 message with custom sound channel', async () => {
   for (const id of [A, B, CONV, MSG]) assert.ok(!wire.includes(id), 'no IDs in FCM payload');
 });
 await t('unknown sound falls back to default channel', async () => { db.payload.sound = '../evil'; r = await call(good); const m = fcmCalls[0].message; assert.equal(m.android.notification.channel_id, 'game_updates'); assert.equal(m.android.notification.default_sound, true); });
+await t('body names the recipient\'s own launcher name, not a hardcoded one', async () => {
+  db.payload.body = 'Open Retro Arcade to continue.';
+  r = await call(good);
+  assert.equal(fcmCalls[0].message.notification.body, 'Open Retro Arcade to continue.');
+});
+await t('malformed body falls back to default', async () => { db.payload.body = 123; r = await call(good); assert.equal(fcmCalls[0].message.notification.body, 'Open Games to continue.'); });
 await t('response never echoes disguise settings', async () => { r = await call(good); const txt = await r.text(); assert.ok(!txt.includes('Level up') && !txt.includes('chime')); });
 await t('prunes dead tokens', async () => { db.subs = [{ fcm_token: 'tok-good' }, { fcm_token: 'tok-dead' }]; r = await call(good); j = await r.json(); assert.deepEqual(j, { sent: 1, failed: 1, pruned: 1 }); assert.deepEqual(deleted, ['tok-dead']); });
 await t('caches OAuth token', async () => { await call(good); await call(good); assert.equal(oauthCalls, 0, 'token from earlier test still cached'); });

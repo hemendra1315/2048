@@ -29,6 +29,12 @@ interface SettingsViewProps {
   onBack?: () => void;
 }
 
+function autoLockLabel(seconds: number): string {
+  if (seconds < 60) return `${seconds} seconds`;
+  if (seconds % 60 === 0) return `${seconds / 60} minute${seconds === 60 ? '' : 's'}`;
+  return `${Math.round(seconds / 60)} minutes`;
+}
+
 export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const { user, logout, enrollBiometrics, disableBiometrics } = useAuth();
   const { preferences, updatePreferences, updateSecret, panicLock } = useVault();
@@ -240,6 +246,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
               aria-label="Auto-lock timer"
               className="bg-vault-850 text-xs font-semibold text-vault-100 px-3 py-2 rounded-xl border border-vault-700 focus:outline-none focus:border-cy"
             >
+              {/* A saved value outside these three (e.g. set directly on the account) still shows its
+                  real length instead of silently falling back to "30 seconds". */}
+              {![30, 60, 300].includes(preferences.auto_lock_seconds ?? 60) && (
+                <option value={preferences.auto_lock_seconds}>{autoLockLabel(preferences.auto_lock_seconds)}</option>
+              )}
               <option value={30}>30 seconds</option>
               <option value={60}>1 minute</option>
               <option value={300}>5 minutes</option>
@@ -486,7 +497,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
       </section>
 
       {/* App Version Footer */}
-      <p className="t-cap mono text-center m-0">Games 2.4.0 (240)</p>
+      <p className="t-cap mono text-center m-0">Games {__APP_VERSION__}</p>
     </div>
   );
 };

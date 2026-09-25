@@ -1,5 +1,5 @@
 import { ChatImage, ChatAudio } from '../common/ChatMedia';
-import { extraPreview, parseSticker, parseVoiceNote } from '../../lib/chatExtras';
+import { extraPreview, parseSticker, parseVoiceNote, readableMessagePreview } from '../../lib/chatExtras';
 import type { User360Tab } from './User360View';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -221,8 +221,8 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
                       )}
                     </div>
 
-                    <p className="text-xs text-vault-400 truncate m-0 font-mono">
-                      {lastMsg ? lastMsg.content : 'No messages'}
+                    <p className="text-xs text-vault-400 truncate m-0">
+                      {lastMsg ? readableMessagePreview(lastMsg.content) : 'No messages'}
                     </p>
                   </div>
                 </button>

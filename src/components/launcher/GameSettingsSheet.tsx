@@ -85,7 +85,7 @@ export const GameSettingsSheet: React.FC<GameSettingsSheetProps> = ({ isOpen, on
           )}
         </div>
 
-        <p className="t-cap mono text-center m-0">Games 2.4.0</p>
+        <p className="t-cap mono text-center m-0">Games {__APP_VERSION__}</p>
       </section>
     </div>
   );

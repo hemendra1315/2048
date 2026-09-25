@@ -43,6 +43,7 @@ import {
   getSafetyReports,
 } from '../../lib/safetyApi';
 import { formatDetailedDate } from '../../lib/utils';
+import { readableMessagePreview } from '../../lib/chatExtras';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { Avatar } from '../common/Avatar';
@@ -272,7 +273,10 @@ export const User360View: React.FC<User360ViewProps> = ({
             id: `msg-${msg.id}`,
             date: msg.created_at,
             title: `Sent message to @${conv.partnerProfile.display_name || conv.partnerProfile.uid}`,
-            description: msg.content.length > 50 ? `${msg.content.slice(0, 50)}...` : msg.content,
+            description: (() => {
+              const text = readableMessagePreview(msg.content);
+              return text.length > 50 ? `${text.slice(0, 50)}...` : text;
+            })(),
             type: 'chat',
             onClick: () => {
               if (onNavigateToConversation) {
@@ -684,7 +688,7 @@ export const User360View: React.FC<User360ViewProps> = ({
                           </span>
                         </div>
                         <p className="text-[11px] text-vault-400 truncate max-w-[250px] mt-0.5">
-                          {lastMsg ? lastMsg.content : 'No messages'}
+                          {lastMsg ? readableMessagePreview(lastMsg.content) : 'No messages'}
                         </p>
                         <div className="text-[9px] text-vault-500 mt-0.5">
                           ID: {c.id} • Last active: {formatDetailedDate(c.updated_at)}

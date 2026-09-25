@@ -12,7 +12,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { useVault } from '../../context/VaultContext';
-import { useGame } from '../../context/GameContext';
+import { useGame, dailyChallengeLabel } from '../../context/GameContext';
 import { CoverGameType } from '../../types';
 import { Game2048 } from '../games/Game2048';
 import { GameSnake } from '../games/GameSnake';
@@ -350,7 +350,7 @@ export const LauncherCoverView: React.FC = () => {
                     <span className="text-xs text-vault-300 font-medium">Daily Puzzle</span>
                   </div>
                   <h3 id="daily-challenge-title" className="text-sm font-bold text-white truncate m-0 mt-0.5">
-                    {dailyGameMeta.title}: Target Score {dailyChallenge.targetScore}
+                    {dailyGameMeta.title}: {dailyChallengeLabel(dailyChallenge.gameId, dailyChallenge.targetScore)}
                   </h3>
                 </div>
               </div>

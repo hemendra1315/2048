@@ -201,7 +201,9 @@ Deno.serve(async (req: Request) => {
   if (payload.should_send === false) return json(200, { sent: 0, skipped: true });
 
   const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : DEFAULT_TITLE;
-  const body = DEFAULT_BODY;
+  // The RPC names the recipient's own launcher disguise (migration 20260924000016); DEFAULT_BODY
+  // is only the fallback for a malformed/missing response.
+  const body = typeof payload.body === 'string' && payload.body.trim() ? payload.body.trim() : DEFAULT_BODY;
   const sound = typeof payload.sound === 'string' ? payload.sound : null;
 
   const { data: subs, error: subsError } = await supabase

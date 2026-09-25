@@ -7,7 +7,6 @@ import {
   Settings as SettingsIcon,
   Edit3,
   QrCode,
-  Users,
   Plus,
   ChevronRight,
   Camera,
@@ -26,6 +25,7 @@ import { AvatarCropper } from './AvatarCropper';
 import { uploadAvatarImage } from '../../lib/storageHelper';
 import { capturePhoto, choosePhoto, CameraError } from '../../lib/nativeCamera';
 import { useBackHandler } from '../../lib/backButton';
+import { usePresence } from '../../lib/presence';
 
 interface ProfileViewProps {
   onOpenSettings?: () => void;
@@ -49,7 +49,11 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
     media: 0,
     messages: 0,
   });
-  const [recentConnections, setRecentConnections] = useState<Array<{ id: string; name: string; uid: string; online: boolean }>>([]);
+  // "Connections" here means people you have a chat with — the connection_requests/connections
+  // tables exist but nothing in the live app writes to them (chats are started directly by UID),
+  // so counting them always read 0 even for active accounts.
+  const [recentConnections, setRecentConnections] = useState<Array<{ id: string; name: string; uid: string; avatar_url: string | null }>>([]);
+  const presence = usePresence(recentConnections.map(c => c.id));
 
   useEffect(() => {
     if (!user) return;
@@ -58,45 +62,54 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
     const loadProfileStats = async () => {
       try {
         if (isSupabaseConfigured()) {
-          const [{ count: galleryCount }, { count: messageCount }, { count: connectionCount }, { data: profiles }] = await Promise.all([
+          const [{ count: galleryCount }, { count: messageCount }, { data: chatList }] = await Promise.all([
             supabase.from('gallery_items').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
             supabase.from('messages').select('*', { count: 'exact', head: true }).eq('sender_id', user.id),
-            supabase.from('connections').select('*', { count: 'exact', head: true }).or(`user_a.eq.${user.id},user_b.eq.${user.id}`),
-            supabase.from('profiles').select('id, display_name, uid').neq('id', user.id).limit(6),
+            supabase.rpc('get_chat_list'),
           ]);
 
+          const chats = (chatList ?? []) as {
+            partner_id: string;
+            last_message_at: string | null;
+          }[];
+          const partnerIds = chats.map(c => c.partner_id);
+
           setStats({
-            connections: connectionCount ?? 0,
+            connections: partnerIds.length,
             media: galleryCount ?? 0,
             messages: messageCount ?? 0,
           });
 
-          if (profiles && profiles.length > 0) {
+          if (partnerIds.length > 0) {
+            const { data: profiles } = await supabase
+              .from('profiles')
+              .select('id, display_name, uid, avatar_url')
+              .in('id', partnerIds);
+            const byId = new Map(((profiles ?? []) as unknown as { id: string; display_name: string; uid: string; avatar_url: string | null }[]).map(p => [p.id, p]));
             setRecentConnections(
-              profiles.map((p, i) => ({
-                id: p.id,
-                name: (p.display_name || 'Contact').split(' ')[0],
-                uid: p.uid,
-                online: i % 2 === 0,
-              }))
+              chats.slice(0, 6).flatMap(c => {
+                const p = byId.get(c.partner_id);
+                if (!p) return [];
+                return [{ id: p.id, name: (p.display_name || 'Contact').split(' ')[0], uid: p.uid, avatar_url: p.avatar_url }];
+              })
             );
           } else {
             setRecentConnections([]);
           }
         } else {
           const gallery = mockBackend.getGallery(user.id);
-          const allProfiles = mockBackend.getProfiles().filter(p => p.id !== user.id);
+          const convs = mockBackend.getConversations(user.id);
           setStats({
-            connections: allProfiles.length,
+            connections: convs.length,
             media: gallery.length,
             messages: 0,
           });
           setRecentConnections(
-            allProfiles.slice(0, 5).map((p, i) => ({
-              id: p.id,
-              name: (p.display_name || 'Contact').split(' ')[0],
-              uid: p.uid,
-              online: i % 2 === 0,
+            convs.slice(0, 6).map(c => ({
+              id: c.partner.id,
+              name: (c.partner.display_name || 'Contact').split(' ')[0],
+              uid: c.partner.uid,
+              avatar_url: c.partner.avatar_url,
             }))
           );
         }
@@ -258,14 +271,6 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between px-1">
           <h2 className="t-over m-0">Connections</h2>
-          {recentConnections.length > 0 && (
-            <button
-              type="button"
-              className="t-sm font-semibold text-cy hover:underline cursor-pointer bg-transparent border-0 p-0"
-            >
-              See all
-            </button>
-          )}
         </div>
 
         <div className="flex items-center gap-3 overflow-x-auto pb-1 -mx-1 px-1 no-scrollbar">
@@ -293,8 +298,9 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
               <Avatar
                 name={c.name}
                 seed={c.uid}
+                src={c.avatar_url}
                 size={56}
-                online={c.online}
+                online={Boolean(presence[c.id]?.isOnline)}
               />
               <span className="t-cap text-vault-200 truncate max-w-[56px] text-center">{c.name}</span>
             </div>
@@ -338,23 +344,6 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
               <span className="t-body">Share my ID</span>
             </div>
             <ChevronRight className="i i-sm c3" aria-hidden />
-          </button>
-
-          <div className="divider ml-12" />
-
-          <button
-            type="button"
-            onClick={() => showToast('0 pending connection requests', 'info')}
-            className="row w-full text-left justify-between"
-          >
-            <div className="flex items-center gap-3">
-              <Users className="i c2" aria-hidden />
-              <span className="t-body">Connection requests</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="badge">0</span>
-              <ChevronRight className="i i-sm c3" aria-hidden />
-            </div>
           </button>
 
           <div className="divider ml-12" />

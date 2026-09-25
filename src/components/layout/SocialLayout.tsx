@@ -52,6 +52,9 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
   // Chats is the default landing page
   const [currentTab, setCurrentTab] = useState<SocialTab>('chats');
   const [chatPartnerId, setChatPartnerId] = useState<string | null>(null);
+  // A phone-width chat fills the screen: no title bar, tab bar, or Lock/Admin buttons over it.
+  const [chatOpenFullScreen, setChatOpenFullScreen] = useState(false);
+  const hideChrome = currentTab === 'chats' && chatOpenFullScreen;
   const [pendingMediaAttachment, setPendingMediaAttachment] = useState<string | null>(null);
   const [stats, setStats] = useState({
     unreadCount: 0,
@@ -62,20 +65,24 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
     if (!user) return;
     try {
       if (isSupabaseConfigured()) {
-        const [{ count: unreadCount }, { count: galleryCount }] = await Promise.all([
-          supabase
-            .from('messages')
-            .select('*', { count: 'exact', head: true })
-            .eq('is_read', false)
-            .neq('sender_id', user.id),
+        // Same source as the chat list itself (get_chat_list), so the badge always matches what
+        // each chat row shows: it accounts for read receipts being off, and skips system/game
+        // notices and deleted or expired messages.
+        const [{ data: chatList }, { count: galleryCount }] = await Promise.all([
+          supabase.rpc('get_chat_list'),
           supabase
             .from('gallery_items')
             .select('*', { count: 'exact', head: true })
             .eq('user_id', user.id),
         ]);
 
+        const unreadCount = ((chatList ?? []) as { unread_count: number }[]).reduce(
+          (sum, c) => sum + (c.unread_count || 0),
+          0
+        );
+
         setStats({
-          unreadCount: unreadCount ?? 0,
+          unreadCount,
           galleryCount: galleryCount ?? 0,
         });
       } else {
@@ -120,11 +127,13 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
 
   return (
     <div className="h-screen w-screen bg-vault-950 text-vault-100 flex flex-col select-none overflow-hidden font-sans">
-      {/* Mobile Top Header (< 1024px) */}
-      <MobileHeader
-        title={navItems.find(n => n.id === currentTab)?.label}
-        onAdminToggle={onAdminToggle}
-      />
+      {/* Mobile Top Header (< 1024px); hidden while a chat fills the screen */}
+      {!hideChrome && (
+        <MobileHeader
+          title={navItems.find(n => n.id === currentTab)?.label}
+          onAdminToggle={onAdminToggle}
+        />
+      )}
 
       <div className="flex-1 flex min-h-0 relative">
         {/* Desktop / Tablet Left Sidebar (>= 1024px) */}
@@ -217,7 +226,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
         </aside>
 
         {/* Center Main Workspace */}
-        <main className="flex-1 min-w-0 min-h-0 p-3 lg:p-4 max-w-full mx-auto w-full flex flex-col overflow-hidden">
+        <main className={`flex-1 min-w-0 min-h-0 ${hideChrome ? 'p-0' : 'p-3'} lg:p-4 max-w-full mx-auto w-full flex flex-col overflow-hidden`}>
           <Suspense fallback={<TabSkeleton />}>
             {currentTab === 'chats' && (
               <MessagesView
@@ -225,6 +234,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
                 initialAttachment={pendingMediaAttachment}
                 onClearInitialPartner={() => setChatPartnerId(null)}
                 onClearInitialAttachment={() => setPendingMediaAttachment(null)}
+                onActiveChatChange={setChatOpenFullScreen}
               />
             )}
             {currentTab === 'camera' && (
@@ -245,7 +255,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
       </div>
 
       {/* Mobile Bottom 5-Tab Navigation (< 1024px); hidden while typing so the keyboard leaves room for content */}
-      {!keyboardOpen && (
+      {!keyboardOpen && !hideChrome && (
         <MobileNavbar
           currentTab={currentTab}
           onSelectTab={setCurrentTab}

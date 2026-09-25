@@ -136,3 +136,36 @@ export function extraPreview(content: string): string | undefined {
   if (content.startsWith('[GAME:')) return '🎮 Tic-Tac-Toe';
   return undefined;
 }
+
+/** System notices ("[SYSTEM:disappearing:86400]") are written by the server, never typed by a user. */
+export const isSystemMessage = (content: string): boolean => content.startsWith('[SYSTEM:');
+
+export function timerLabel(seconds: number): string {
+  return seconds >= 604800 ? '7 days' : '24 hours';
+}
+
+/** "[SYSTEM:disappearing:86400]" → "turned on disappearing messages (24 hours)". */
+export function systemMessageText(content: string): string {
+  const m = content.match(/^\[SYSTEM:disappearing:(\w+)\]$/);
+  if (m) {
+    return m[1] === 'off'
+      ? 'turned off disappearing messages'
+      : `turned on disappearing messages (${timerLabel(Number(m[1]))})`;
+  }
+  return 'updated the chat';
+}
+
+/**
+ * Reads like a chat bubble, never a raw content string: "📷 Photo", "🎤 Voice message",
+ * "Sticker", "someone turned on disappearing messages (24 hours)" and so on. Used anywhere a
+ * message needs to be summarised in one line — chat-list previews, reply quotes, and admin views.
+ */
+export function readableMessagePreview(content: string): string {
+  if (content === '[DELETED]') return 'Deleted message';
+  if (isSystemMessage(content)) return systemMessageText(content).replace(/^./, c => c.toUpperCase());
+  const extra = extraPreview(content);
+  if (extra) return extra;
+  if (content.startsWith('[IMAGE]')) return '📷 Photo';
+  if (content.startsWith('[VOICE_NOTE')) return '🎤 Voice message';
+  return content;
+}
