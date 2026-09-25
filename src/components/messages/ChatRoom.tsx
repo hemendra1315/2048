@@ -390,6 +390,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   };
 
   const handleSubmitReport = async (category: string, reason: string) => {
+    if (!isSupabaseConfigured()) {
+      showToast('Reporting requires the live server', 'info');
+      setShowReportModal(false);
+      return;
+    }
     const { error } = await supabase.rpc('submit_report', {
       p_reported_user_id: partner.id,
       p_category: category,
