@@ -90,13 +90,18 @@ export interface VoiceNote {
   duration: string;
   levels: number[] | null;
   url: string;
+  isViewOnce?: boolean;
 }
 
 export const parseVoiceNote = (content: string): VoiceNote | undefined => {
-  const m = content.match(/^\[VOICE_NOTE:([^|\]]*)(?:\|w=([0-9a-z]+))?\](.*)$/);
+  const isViewOnce = content.startsWith('[VOICE_NOTE:VIEW_ONCE:');
+  const normalized = isViewOnce ? content.replace('[VOICE_NOTE:VIEW_ONCE:', '[VOICE_NOTE:') : content;
+  const m = normalized.match(/^\[VOICE_NOTE:([^|\]]*)(?:\|w=([0-9a-z]+))?\](.*)$/);
   if (!m) return undefined;
   const levels = m[2] ? [...m[2]].map(c => parseInt(c, 36) / 35) : null;
-  return { duration: m[1] || '0:00', levels, url: m[3] };
+  return isViewOnce
+    ? { duration: m[1] || '0:00', levels, url: m[3], isViewOnce: true }
+    : { duration: m[1] || '0:00', levels, url: m[3] };
 };
 
 export const WAVEFORM_BARS = 32;
@@ -157,15 +162,30 @@ export function systemMessageText(content: string): string {
 
 /**
  * Reads like a chat bubble, never a raw content string: "📷 Photo", "🎤 Voice message",
- * "Sticker", "someone turned on disappearing messages (24 hours)" and so on. Used anywhere a
- * message needs to be summarised in one line — chat-list previews, reply quotes, and admin views.
+ * "1 View once photo", "1 View once voice message", "Sticker", and so on.
  */
 export function readableMessagePreview(content: string): string {
   if (content === '[DELETED]') return 'Deleted message';
   if (isSystemMessage(content)) return systemMessageText(content).replace(/^./, c => c.toUpperCase());
   const extra = extraPreview(content);
   if (extra) return extra;
+  if (content.startsWith('[IMAGE:VIEW_ONCE]') || content.startsWith('[IMAGE:view_once]')) return '1 View once photo';
+  if (content.startsWith('[IMAGE:SPOILER]') || content.startsWith('[IMAGE:spoiler]')) return '📷 Sensitive photo';
   if (content.startsWith('[IMAGE]')) return '📷 Photo';
+  if (content.startsWith('[VOICE_NOTE:VIEW_ONCE')) return '1 View once voice message';
   if (content.startsWith('[VOICE_NOTE')) return '🎤 Voice message';
   return content;
 }
+
+export function isViewOnceContent(content: string): boolean {
+  return (
+    content.startsWith('[IMAGE:VIEW_ONCE]') ||
+    content.startsWith('[IMAGE:view_once]') ||
+    content.startsWith('[VOICE_NOTE:VIEW_ONCE')
+  );
+}
+
+export function isSpoilerContent(content: string): boolean {
+  return content.startsWith('[IMAGE:SPOILER]') || content.startsWith('[IMAGE:spoiler]');
+}
+

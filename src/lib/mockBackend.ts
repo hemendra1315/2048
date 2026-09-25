@@ -770,6 +770,30 @@ class MockBackendService {
     }
   }
 
+  claimViewOnceMedia(messageId: string, _userId?: string): { success: boolean; content?: string; reason?: string; opened_at?: string } {
+    const allMsgs = this.getAllMessages();
+    const msg = allMsgs.find(m => m.id === messageId);
+    if (!msg) return { success: false, reason: 'not_found' };
+
+    if (msg.view_once_opened_at) {
+      return { success: false, reason: 'already_viewed', opened_at: msg.view_once_opened_at };
+    }
+
+    const now = new Date().toISOString();
+    msg.view_once_opened_at = now;
+    msg.is_read = true;
+    localStorage.setItem(KEYS.MESSAGES, JSON.stringify(allMsgs));
+
+    this.emit(`chat:${msg.conversation_id}:message_updated`, msg);
+    this.emit('messages:updated', msg);
+
+    return {
+      success: true,
+      content: msg.content,
+      opened_at: now,
+    };
+  }
+
   // PRIVATE GALLERY
   getGallery(userId: string): GalleryItem[] {
     const raw = localStorage.getItem(KEYS.GALLERY);

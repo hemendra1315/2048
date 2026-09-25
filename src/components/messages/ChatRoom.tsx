@@ -25,13 +25,16 @@ import {
   Trophy,
   MoreVertical,
   Ban,
+  ChevronDown,
+  Info,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { CoverGameType, MessageItem, MessageReaction, ReactionEmoji, REACTION_EMOJIS, UserProfile } from '../../types';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import {
   deliver,
   enqueue,
-  flushOutbox,
   newClientId,
   onOutboxEvent,
   pendingFor,
@@ -39,7 +42,6 @@ import {
   OutboxItem,
 } from '../../lib/chatOutbox';
 import { useAuth } from '../../context/AuthContext';
-import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { uploadChatMedia } from '../../lib/storageHelper';
 import { uniqueChannelName } from '../../lib/realtime';
@@ -68,10 +70,13 @@ import { ChatExtrasSheet, ChatThemeSheet } from './ChatExtrasSheet';
 import { COVER_GAMES, useGame } from '../../context/GameContext';
 import { resolveChatMediaUrl } from '../../lib/mediaUrls';
 import { BlockStatus, blockUser, getBlockStatus, unblockUser } from '../../lib/blocks';
-import { ChatImage } from '../common/ChatMedia';
+import { ChatImage, ViewOnceImageBubble, ViewOnceAudioBubble } from '../common/ChatMedia';
+import { LightboxViewer } from '../gallery/LightboxViewer';
+import { claimViewOnceMedia } from '../../lib/viewOnceApi';
 import { useBackHandler } from '../../lib/backButton';
 import { expectExternalActivity } from '../../lib/externalActivity';
 import { getDraft, setDraft } from '../../lib/chatDrafts';
+import { lightImpact, mediumImpact, selectionChange, notificationSuccess, errorWarning } from '../../lib/haptics';
 
 interface ChatRoomProps {
   conversationId: string;
@@ -96,13 +101,20 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [inputContent, setInputContent] = useState(() => getDraft(conversationId));
   const [isTyping, setIsTyping] = useState(false);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [sendAsSpoiler, setSendAsSpoiler] = useState(false);
+  const [sendAsViewOnce, setSendAsViewOnce] = useState(false);
+  const [claimingViewOnceId, setClaimingViewOnceId] = useState<string | null>(null);
+  const [activeViewOnceItem, setActiveViewOnceItem] = useState<{ id: string; url: string; created_at: string; sender_id: string } | null>(null);
+  const [viewOnceConsumedIds, setViewOnceConsumedIds] = useState<Set<string>>(() => new Set());
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [audioSpeed, setAudioSpeed] = useState<number>(1);
   const [showContactModal, setShowContactModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({});
   const [replyTo, setReplyTo] = useState<MessageItem | null>(null);
   const [editing, setEditing] = useState<MessageItem | null>(null);
   const [actionMsg, setActionMsg] = useState<MessageItem | null>(null);
+  const [showDetailsModal, setShowDetailsModal] = useState<MessageItem | null>(null);
   const messagesRef = useRef<MessageItem[]>([]);
   messagesRef.current = messages;
   const typingChannelRef = useRef<RealtimeChannel | null>(null);
@@ -118,6 +130,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [confirmBlock, setConfirmBlock] = useState(false);
   const [blockStatus, setBlockStatus] = useState<BlockStatus>({ iBlocked: false, blocked: false });
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [unreadWhileScrolled, setUnreadWhileScrolled] = useState(0);
   const blockedRef = useRef(false);
   blockedRef.current = blockStatus.blocked;
   const theme = themeById(themeId);
@@ -127,36 +141,42 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userId = user?.id;
 
-  // Scrolling is done on the message list itself. (scrollIntoView also scrolled every scrollable
-  // ancestor, including the app shell, which is what made the header jump in and out of view.)
   const stickToBottomRef = useRef(true);
   const hasScrolledInitiallyRef = useRef(false);
 
-  // Long chats load the latest PAGE_SIZE messages; older ones load as you scroll up.
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const hasOlderRef = useRef(false);
   hasOlderRef.current = hasOlder;
   const loadingOlderRef = useRef(false);
-  /** Distance from the bottom to keep while older messages are inserted above. */
   const prependAnchorRef = useRef<number | null>(null);
   const loadOlderRef = useRef<() => void>(() => {});
 
   const handleListScroll = useCallback(() => {
     const el = listRef.current;
     if (!el) return;
-    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const isNearBottom = distFromBottom < 140;
+    stickToBottomRef.current = isNearBottom;
+    setShowScrollBottom(!isNearBottom);
+    if (isNearBottom) setUnreadWhileScrolled(0);
     if (el.scrollTop < 150 && hasOlderRef.current && !loadingOlderRef.current) loadOlderRef.current();
   }, []);
 
-  // After new messages are committed to the DOM: jump to the end on first load, then follow new
-  // messages only while the reader is already at the bottom (so reading history is not disturbed).
+  const scrollToBottom = useCallback((smooth = true) => {
+    const el = listRef.current;
+    if (!el) return;
+    lightImpact();
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    setShowScrollBottom(false);
+    setUnreadWhileScrolled(0);
+  }, []);
+
   const lastMessage = messages[messages.length - 1];
   useLayoutEffect(() => {
     const el = listRef.current;
     if (!el || messages.length === 0) return;
     if (prependAnchorRef.current !== null) {
-      // Older messages were added above: keep what the reader was looking at in place.
       el.scrollTop = el.scrollHeight - prependAnchorRef.current;
       prependAnchorRef.current = null;
       return;
@@ -169,10 +189,12 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     }
     if (stickToBottomRef.current || mine) {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      setUnreadWhileScrolled(0);
+    } else if (!mine) {
+      setUnreadWhileScrolled(c => c + 1);
     }
   }, [messages.length, lastMessage, userId]);
 
-  // Images load after they are laid out; keep the view pinned to the bottom when they do.
   const handleMediaLoaded = useCallback(() => {
     const el = listRef.current;
     if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
@@ -195,7 +217,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     setReactions(map);
   }, [conversationId]);
 
-  // Disappearing-messages setting for this chat.
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
     let cancelled = false;
@@ -210,7 +231,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     return () => { cancelled = true; };
   }, [conversationId]);
 
-  // Drop messages from the screen as they expire (the server already hides them).
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
@@ -233,10 +253,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     if (error) {
       setDisappearAfter(before);
       showToast(error.message || 'Could not change the timer', 'error');
+    } else {
+      notificationSuccess();
     }
   };
 
-  // Your theme for this chat (private to you).
   useEffect(() => {
     if (!isSupabaseConfigured() || !userId) return;
     let cancelled = false;
@@ -253,93 +274,77 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     return () => { cancelled = true; };
   }, [conversationId, userId]);
 
-  const pickTheme = async (id: ChatThemeId) => {
-    setShowThemeSheet(false);
-    const before = themeId;
+  const changeTheme = async (id: ChatThemeId) => {
     setThemeId(id);
-    if (!isSupabaseConfigured()) return;
-    const { error } = await supabase.rpc('set_chat_theme', { p_conversation_id: conversationId, p_theme: id });
-    if (error) {
-      setThemeId(before);
-      showToast('Could not save theme', 'error');
-    }
+    setShowThemeSheet(false);
+    selectionChange();
+    if (!isSupabaseConfigured() || !userId) return;
+    await supabase
+      .from('conversation_members')
+      .update({ chat_theme: id })
+      .eq('conversation_id', conversationId)
+      .eq('user_id', userId);
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    void getBlockStatus(partner.id).then(st => { if (!cancelled) setBlockStatus(st); });
-    return () => { cancelled = true; };
+  const loadBlock = useCallback(async () => {
+    const s = await getBlockStatus(partner.id);
+    setBlockStatus(s);
   }, [partner.id]);
+
+  useEffect(() => { void loadBlock(); }, [loadBlock]);
 
   const toggleBlock = async () => {
     if (!userId) return;
-    setConfirmBlock(false);
-    setShowChatMenu(false);
     try {
       if (blockStatus.iBlocked) {
         await unblockUser(userId, partner.id);
         showToast(`Unblocked ${partner.display_name}`, 'success');
+        notificationSuccess();
       } else {
         await blockUser(userId, partner.id);
-        showToast(`Blocked ${partner.display_name}`, 'success');
+        showToast(`Blocked ${partner.display_name}`, 'info');
+        mediumImpact();
       }
-      setBlockStatus(await getBlockStatus(partner.id));
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Could not update block', 'error');
+      setConfirmBlock(false);
+      setShowChatMenu(false);
+      await loadBlock();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Action failed', 'error');
+      errorWarning();
     }
   };
 
-  const startGame = useCallback(async () => {
-    setShowExtras(false);
-    const { error } = await supabase.rpc('start_chat_game', { p_conversation_id: conversationId });
-    if (error) showToast(error.message || 'Could not start a game', 'error');
-    else stickToBottomRef.current = true;
-  }, [conversationId, showToast]);
-
   const loadMessages = useCallback(async () => {
-    if (!userId) return;
-    try {
-      if (isSupabaseConfigured()) {
-        const { data, error } = await supabase
-          .from('messages')
-          .select('*')
-          .eq('conversation_id', conversationId)
-          .order('created_at', { ascending: false })
-          .limit(PAGE_SIZE);
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: false })
+        .limit(PAGE_SIZE + 1);
 
-        if (error) throw error;
-        if (data) {
-          const stored = (data as unknown as MessageItem[]).reverse();
-          setHasOlder(data.length === PAGE_SIZE);
-          // Messages still waiting in the outbox (sent while offline) show as queued.
-          const storedClientIds = new Set(stored.map(m => m.client_id).filter(Boolean));
-          const waiting = pendingFor(conversationId, userId)
-            .filter(item => !storedClientIds.has(item.client_id))
-            .map(item => outboxToMessage(item, 'queued'));
-          setMessages([...stored, ...waiting]);
-          void loadReactions();
-          // Read receipts go through an RPC: messages has no UPDATE policy (by design).
-          const { error: readError } = await supabase.rpc('mark_conversation_read', {
-            p_conversation_id: conversationId,
-          });
-          if (readError) console.warn('[chat] mark as read failed:', readError.code);
-        }
-      } else {
-        const msgs = mockBackend.getMessages(conversationId);
-        setMessages(msgs);
-        mockBackend.markMessagesAsRead(conversationId, userId);
+      if (error) {
+        console.error('Failed to load messages:', error);
+        return;
       }
-    } catch (err) {
-      console.error('Error loading messages:', err);
+      const raw = (data ?? []) as MessageItem[];
+      setHasOlder(raw.length > PAGE_SIZE);
+      const page = raw.slice(0, PAGE_SIZE).reverse();
+      setMessages(page);
+      void loadReactions();
+    } else {
+      setHasOlder(false);
     }
-  }, [conversationId, userId, loadReactions]);
+  }, [conversationId, loadReactions]);
 
   const loadOlder = useCallback(async () => {
-    if (!isSupabaseConfigured() || loadingOlderRef.current || !hasOlderRef.current) return;
-    const oldest = messagesRef.current.find(m => !m.status);
-    if (!oldest) return;
+    if (loadingOlderRef.current || !hasOlderRef.current || !isSupabaseConfigured()) return;
+    const oldest = messagesRef.current[0];
+    if (!oldest?.created_at) return;
     loadingOlderRef.current = true;
     setLoadingOlder(true);
+    const el = listRef.current;
+    if (el) prependAnchorRef.current = el.scrollHeight - el.scrollTop;
     try {
       const { data, error } = await supabase
         .from('messages')
@@ -347,352 +352,170 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         .eq('conversation_id', conversationId)
         .lt('created_at', oldest.created_at)
         .order('created_at', { ascending: false })
-        .limit(PAGE_SIZE);
-      if (error) throw error;
-      const older = ((data ?? []) as unknown as MessageItem[]).reverse();
-      setHasOlder(older.length === PAGE_SIZE);
-      if (older.length) {
-        const el = listRef.current;
-        prependAnchorRef.current = el ? el.scrollHeight - el.scrollTop : null;
-        setMessages(prev => {
-          const seen = new Set(prev.map(m => m.id));
-          return [...older.filter(m => !seen.has(m.id)), ...prev];
-        });
+        .limit(PAGE_SIZE + 1);
+
+      if (error) {
+        console.warn('[chat] load older messages failed:', error.message);
+        prependAnchorRef.current = null;
+        return;
       }
-    } catch (err) {
-      console.warn('[chat] loading older messages failed:', err);
+      const raw = (data ?? []) as MessageItem[];
+      setHasOlder(raw.length > PAGE_SIZE);
+      const older = raw.slice(0, PAGE_SIZE).reverse();
+      setMessages(prev => [...older, ...prev]);
     } finally {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
   }, [conversationId]);
-  loadOlderRef.current = () => void loadOlder();
+  loadOlderRef.current = loadOlder;
 
   useEffect(() => {
+    hasScrolledInitiallyRef.current = false;
+    stickToBottomRef.current = true;
+    setShowScrollBottom(false);
+    setUnreadWhileScrolled(0);
     loadMessages();
 
-    if (!isSupabaseConfigured()) {
-      const unsubNew = mockBackend.subscribe(`chat:${conversationId}:new_message`, (newMsg: unknown) => {
-        setMessages(prev => [...prev, newMsg as MessageItem]);
-        if (userId) mockBackend.markMessagesAsRead(conversationId, userId);
-      });
+    if (!isSupabaseConfigured()) return;
 
-      const unsubRead = mockBackend.subscribe(`chat:${conversationId}:read`, () => {
-        loadMessages();
-      });
-
-      return () => {
-        unsubNew();
-        unsubRead();
-      };
-    } else {
-      const channel = supabase
-        .channel(uniqueChannelName(`chat:${conversationId}`))
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
-          payload => {
-            const newMsg = payload.new as unknown as MessageItem;
-            setMessages(prev => {
-              if (prev.some(m => m.id === newMsg.id)) return prev;
-              // Replace our own optimistic copy instead of showing the message twice.
-              if (newMsg.client_id) {
-                const i = prev.findIndex(m => m.client_id === newMsg.client_id && m.sender_id === newMsg.sender_id);
-                if (i >= 0) {
-                  const next = prev.slice();
-                  next[i] = newMsg;
-                  return next;
-                }
-              }
-              return [...prev, newMsg];
-            });
-            // The chat is open, so a message from the other person is read on arrival.
-            if (newMsg.sender_id !== userId) {
-              void supabase.rpc('mark_conversation_read', { p_conversation_id: conversationId });
+    const channel = supabase
+      .channel(uniqueChannelName('messages'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, payload => {
+        if (payload.eventType === 'INSERT') {
+          const inserted = payload.new as MessageItem;
+          setMessages(prev => {
+            const idx = inserted.client_id ? prev.findIndex(m => m.client_id === inserted.client_id) : -1;
+            if (idx >= 0) {
+              const copy = [...prev];
+              copy[idx] = inserted;
+              return copy;
             }
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
-          payload => {
-            // Patch the changed row (e.g. a read receipt) instead of refetching the whole thread.
-            const updated = payload.new as unknown as MessageItem;
-            setMessages(prev => {
-              const index = prev.findIndex(m => m.id === updated.id);
-              if (index === -1) return prev;
-              const current = prev[index];
-              if (
-                current.is_read === updated.is_read &&
-                current.content === updated.content &&
-                current.deleted_at === updated.deleted_at
-              ) return prev;
-              const next = prev.slice();
-              next[index] = { ...current, ...updated };
-              return next;
-            });
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `id=eq.${conversationId}` },
-          payload => {
-            const row = payload.new as { disappear_after_seconds?: number | null };
-            setDisappearAfter(row.disappear_after_seconds ?? null);
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'message_reactions' },
-          payload => {
-            const row = (payload.eventType === 'DELETE' ? payload.old : payload.new) as {
-              message_id?: string;
-              user_id?: string;
-              emoji?: ReactionEmoji;
-            };
-            const messageId = row?.message_id;
-            const reactor = row?.user_id;
-            if (!messageId || !reactor || !messagesRef.current.some(m => m.id === messageId)) return;
-            setReactions(prev => {
-              const list = (prev[messageId] ?? []).filter(r => r.user_id !== reactor);
-              if (payload.eventType !== 'DELETE' && row.emoji) list.push({ user_id: reactor, emoji: row.emoji });
-              return { ...prev, [messageId]: list };
-            });
-          }
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    }
-  }, [conversationId, loadMessages, userId]);
-
-  // ---------------------------------------------------------------------------
-  // Sending: the message shows at once; the outbox delivers it (and retries offline).
-  // ---------------------------------------------------------------------------
-  const applyOutboxResult = useCallback((clientId: string, patch: Partial<MessageItem> | MessageItem, replace = false) => {
-    setMessages(prev => {
-      const i = prev.findIndex(m => m.client_id === clientId && m.sender_id === userId);
-      if (i < 0) return prev;
-      const next = prev.slice();
-      if (replace) {
-        const stored = patch as MessageItem;
-        // Realtime may already have added the stored copy; keep one.
-        if (prev.some((m, j) => j !== i && m.id === stored.id)) {
-          next.splice(i, 1);
-          return next;
+            if (prev.some(m => m.id === inserted.id)) return prev;
+            return [...prev, inserted];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const updated = payload.new as MessageItem;
+          setMessages(prev => prev.map(m => (m.id === updated.id ? { ...m, ...updated } : m)));
+        } else if (payload.eventType === 'DELETE') {
+          const deletedId = (payload.old as { id: string }).id;
+          setMessages(prev => prev.filter(m => m.id !== deletedId));
         }
-        next[i] = stored;
-      } else {
-        next[i] = { ...next[i], ...patch };
-      }
-      return next;
-    });
-  }, [userId]);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, () => {
+        void loadReactions();
+      })
+      .subscribe();
 
-  useEffect(() => {
-    if (!isSupabaseConfigured() || !userId) return;
-    startOutboxSync(() => userId);
-    const off = onOutboxEvent(e => {
-      if (e.type === 'sent') applyOutboxResult(e.clientId, e.message, true);
-      else if (e.type === 'queued') applyOutboxResult(e.clientId, { status: 'queued' });
-      else {
-        applyOutboxResult(e.clientId, { status: 'failed' });
-        showToast('Message not sent: ' + e.error, 'error');
-      }
-    });
-    void flushOutbox(userId);
-    return off;
-  }, [userId, applyOutboxResult, showToast]);
-
-  // ---------------------------------------------------------------------------
-  // Typing indicator (Realtime broadcast: nothing is written to the database)
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    if (!isSupabaseConfigured() || !userId) return;
-    let cancelled = false;
-    let hideTimer: ReturnType<typeof setTimeout> | undefined;
-    const name = `typing:${conversationId}`;
-    (async () => {
-      // Both people must join the same channel name, so remove a stale copy first.
-      const stale = supabase.getChannels().find(c => c.topic === `realtime:${name}`);
-      if (stale) await supabase.removeChannel(stale);
-      if (cancelled) return;
-      const channel = supabase.channel(name, { config: { broadcast: { self: false } } });
-      channel
-        .on('broadcast', { event: 'typing' }, ({ payload }) => {
-          if (!payload || payload.user_id !== partner.id || blockedRef.current) return;
-          if (hideTimer) clearTimeout(hideTimer);
-          setIsTyping(Boolean(payload.typing));
-          // If the "stopped" signal is lost, don't show "typing" forever.
-          if (payload.typing) hideTimer = setTimeout(() => setIsTyping(false), 6000);
-        })
-        .subscribe();
-      typingChannelRef.current = channel;
-    })();
     return () => {
-      cancelled = true;
-      if (hideTimer) clearTimeout(hideTimer);
-      const channel = typingChannelRef.current;
-      typingChannelRef.current = null;
-      if (channel) void supabase.removeChannel(channel);
-      setIsTyping(false);
+      supabase.removeChannel(channel);
     };
-  }, [conversationId, userId, partner.id]);
+  }, [conversationId, loadMessages, loadReactions]);
 
-  const sendTyping = useCallback((typing: boolean) => {
-    const channel = typingChannelRef.current;
-    if (!channel || !userId || blockedRef.current) return;
-    const now = Date.now();
-    if (typing && now - lastTypingSentRef.current < 2500) return; // at most one "typing" every 2.5 s
-    if (!typing && lastTypingSentRef.current === 0) return;
-    lastTypingSentRef.current = typing ? now : 0;
-    void channel.send({ type: 'broadcast', event: 'typing', payload: { user_id: userId, typing } });
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    const typingChannel = supabase.channel(`typing:${conversationId}`);
+    typingChannelRef.current = typingChannel;
+    typingChannel
+      .on('broadcast', { event: 'typing' }, payload => {
+        if (payload.payload?.user_id !== userId) {
+          setIsTyping(true);
+          if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+          typingIdleTimerRef.current = setTimeout(() => setIsTyping(false), 3000);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+      supabase.removeChannel(typingChannel);
+      typingChannelRef.current = null;
+    };
+  }, [conversationId, userId]);
+
+  useEffect(() => {
+    startOutboxSync(() => userId);
+    const unsub = onOutboxEvent(ev => {
+      if (ev.type === 'sent') {
+        setMessages(prev => prev.map(m => (m.client_id === ev.clientId ? ev.message : m)));
+      } else if (ev.type === 'failed') {
+        setMessages(prev => prev.map(m => (m.client_id === ev.clientId ? { ...m, status: 'failed' } : m)));
+      } else if (ev.type === 'queued') {
+        setMessages(prev => prev.map(m => (m.client_id === ev.clientId ? { ...m, status: 'queued' } : m)));
+      }
+    });
+    return unsub;
   }, [userId]);
 
-  const handleInputChange = (value: string) => {
-    setInputContent(value);
-    if (editing) return;
-    setDraft(conversationId, value);
-    sendTyping(value.trim().length > 0);
-    if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
-    typingIdleTimerRef.current = setTimeout(() => sendTyping(false), 4000);
+  const handleInputChange = (text: string) => {
+    setInputContent(text);
+    setDraft(conversationId, text);
+    if (!text.trim()) return;
+    const now = Date.now();
+    if (now - lastTypingSentRef.current > 2000) {
+      lastTypingSentRef.current = now;
+      typingChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { user_id: userId },
+      });
+    }
   };
-
-  useEffect(() => () => {
-    if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
-  }, []);
 
   const handleSend = async (contentToSend?: string) => {
-    const content = (contentToSend || inputContent).trim();
-    if (!content || !user) return;
+    if (blockedRef.current) return;
+    const raw = (contentToSend ?? inputContent).trim();
+    if (!raw || !user) return;
 
-    if (!contentToSend) {
-      // After an edit, bring back whatever was being typed before it.
-      if (!editing) setDraft(conversationId, '');
-      setInputContent(editing ? getDraft(conversationId) : '');
-    }
-    sendTyping(false);
-
-    if (editing && !contentToSend) {
-      await saveEdit(editing, content);
-      return;
-    }
-
-    const replyId = replyTo?.id ?? null;
-    setReplyTo(null);
-
-    if (isSupabaseConfigured()) {
-      const item: OutboxItem = {
-        client_id: newClientId(),
-        conversation_id: conversationId,
-        sender_id: user.id,
-        content,
-        reply_to_id: replyId,
-        created_at: new Date().toISOString(),
-      };
-      enqueue(item);
-      setMessages(prev => [...prev, outboxToMessage(item, 'sending')]);
-      stickToBottomRef.current = true;
-      await deliver(item);
-      return;
-    }
-
-    try {
-      const msg = { ...mockBackend.sendMessage(conversationId, user.id, content), reply_to_id: replyId };
-      setMessages(prev => [...prev, msg]);
-
-      // Simulated auto-reply in demo mode
-      if (partner.uid === 'SOLAR-8120' || partner.uid === 'VORTEX-3391') {
-        setTimeout(() => {
-          setIsTyping(true);
-          setTimeout(() => {
-            setIsTyping(false);
-            const responses = [
-              'Received, thanks!',
-              'Looks good to me.',
-              'Got it, will check it out shortly.',
-              'Message confirmed.',
-            ];
-            const autoReply = responses[Math.floor(Math.random() * responses.length)];
-            mockBackend.sendMessage(conversationId, partner.id, autoReply);
-          }, 1200);
-        }, 500);
+    if (editing) {
+      const target = editing;
+      setEditing(null);
+      setInputContent('');
+      setDraft(conversationId, '');
+      lightImpact();
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase
+          .from('messages')
+          .update({ content: raw, edited_at: new Date().toISOString() })
+          .eq('id', target.id);
+        if (error) showToast(error.message || 'Could not edit message', 'error');
+        else notificationSuccess();
       }
-    } catch (err) {
-      console.error('Send message error:', err);
-      showToast('Message send failed', 'error');
+      return;
     }
-  };
 
-  const retrySend = useCallback((msg: MessageItem) => {
-    if (!msg.client_id || !userId) return;
-    const item: OutboxItem = {
-      client_id: msg.client_id,
+    const clientId = newClientId();
+    const replyTargetId = replyTo?.id ?? null;
+    setReplyTo(null);
+    setInputContent('');
+    setDraft(conversationId, '');
+    lightImpact();
+
+    const pendingItem: OutboxItem = {
+      client_id: clientId,
       conversation_id: conversationId,
-      sender_id: userId,
-      content: msg.content,
-      reply_to_id: msg.reply_to_id ?? null,
-      created_at: msg.created_at,
+      sender_id: user.id,
+      content: raw,
+      created_at: new Date().toISOString(),
+      reply_to_id: replyTargetId,
     };
-    enqueue(item);
-    applyOutboxResult(msg.client_id, { status: 'sending' });
-    void deliver(item);
-  }, [conversationId, userId, applyOutboxResult]);
 
-  const discardFailed = (msg: MessageItem) => {
-    setMessages(prev => prev.filter(m => m !== msg));
-  };
+    setMessages(prev => [...prev, outboxToMessage(pendingItem, 'queued')]);
 
-  // ---------------------------------------------------------------------------
-  // Reactions, edit, delete
-  // ---------------------------------------------------------------------------
-  const toggleReaction = useCallback(async (msg: MessageItem, emoji: ReactionEmoji) => {
-    if (!userId || msg.status || msg.deleted_at) return;
-    const mine = (reactions[msg.id] ?? []).find(r => r.user_id === userId);
-    const next: ReactionEmoji | null = mine?.emoji === emoji ? null : emoji;
-    const before = reactions[msg.id] ?? [];
-    const updated = before.filter(r => r.user_id !== userId);
-    if (next) updated.push({ user_id: userId, emoji: next });
-    setReactions(prev => ({ ...prev, [msg.id]: updated }));
-    if (!isSupabaseConfigured()) return;
-    const { error } = await supabase.rpc('set_reaction', { p_message_id: msg.id, p_emoji: next });
-    if (error) {
-      setReactions(prev => ({ ...prev, [msg.id]: before }));
-      showToast('Could not save reaction', 'error');
+    if (!isSupabaseConfigured()) {
+      setMessages(prev => prev.map(m => (m.client_id === clientId ? { ...m, status: undefined } : m)));
+      notificationSuccess();
+      return;
     }
-  }, [reactions, userId, showToast]);
 
-  const saveEdit = async (msg: MessageItem, text: string) => {
-    setEditing(null);
-    if (text === msg.content) return;
-    const previous = msg.content;
-    const edited = new Date().toISOString();
-    setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, content: text, edited_at: edited } : m)));
-    if (!isSupabaseConfigured()) return;
-    const { error } = await supabase.rpc('edit_message', { p_message_id: msg.id, p_content: text });
-    if (error) {
-      setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, content: previous, edited_at: msg.edited_at } : m)));
-      showToast(error.message || 'Could not edit message', 'error');
-    }
-  };
-
-  const deleteForEveryone = async (msg: MessageItem) => {
-    const before = msg;
-    setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, content: '[DELETED]', deleted_at: new Date().toISOString() } : m)));
-    setReactions(prev => ({ ...prev, [msg.id]: [] }));
-    if (!isSupabaseConfigured()) return;
-    const { error } = await supabase.rpc('delete_message_for_everyone', { p_message_id: msg.id });
-    if (error) {
-      setMessages(prev => prev.map(m => (m.id === msg.id ? before : m)));
-      showToast(error.message || 'Could not delete message', 'error');
-    }
+    enqueue(pendingItem);
+    void deliver(pendingItem);
   };
 
   const startReply = (msg: MessageItem) => {
     setEditing(null);
     setReplyTo(msg);
+    lightImpact();
     inputRef.current?.focus();
   };
 
@@ -700,52 +523,108 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     setReplyTo(null);
     setEditing(msg);
     setInputContent(msg.content);
+    lightImpact();
     inputRef.current?.focus();
   };
 
   const cancelComposerMode = () => {
-    if (editing) setInputContent(getDraft(conversationId));
-    setEditing(null);
     setReplyTo(null);
+    setEditing(null);
+    setInputContent('');
+    setDraft(conversationId, '');
+  };
+
+  const retrySend = (msg: MessageItem) => {
+    if (!msg.client_id || !userId) return;
+    const pendingList = pendingFor(conversationId, userId);
+    const target = pendingList.find(i => i.client_id === msg.client_id);
+    if (!target) return;
+    lightImpact();
+    setMessages(prev => prev.map(m => (m.client_id === msg.client_id ? { ...m, status: 'queued' } : m)));
+    void deliver(target);
+  };
+
+  const discardFailed = (msg: MessageItem) => {
+    mediumImpact();
+    setMessages(prev => prev.filter(m => m !== msg));
+  };
+
+  const deleteForEveryone = async (msg: MessageItem) => {
+    mediumImpact();
+    if (!isSupabaseConfigured()) {
+      setMessages(prev => prev.filter(m => m.id !== msg.id));
+      showToast('Message removed', 'info');
+      return;
+    }
+    const { error } = await supabase
+      .from('messages')
+      .update({ content: '[DELETED]', deleted_at: new Date().toISOString() })
+      .eq('id', msg.id);
+
+    if (error) {
+      showToast(error.message || 'Could not delete message', 'error');
+      errorWarning();
+    } else {
+      showToast('Message deleted for everyone', 'info');
+    }
+  };
+
+  const toggleReaction = async (msg: MessageItem, emoji: ReactionEmoji) => {
+    if (!userId || !isSupabaseConfigured() || isDeleted(msg)) return;
+    selectionChange();
+    const existing = reactions[msg.id]?.find(r => r.user_id === userId);
+    if (existing?.emoji === emoji) {
+      await supabase.from('message_reactions').delete().eq('message_id', msg.id).eq('user_id', userId);
+      setReactions(prev => ({
+        ...prev,
+        [msg.id]: (prev[msg.id] ?? []).filter(r => r.user_id !== userId),
+      }));
+    } else {
+      await supabase.from('message_reactions').upsert({
+        message_id: msg.id,
+        user_id: userId,
+        emoji,
+      });
+      setReactions(prev => {
+        const withoutMine = (prev[msg.id] ?? []).filter(r => r.user_id !== userId);
+        return { ...prev, [msg.id]: [...withoutMine, { user_id: userId, emoji }] };
+      });
+    }
   };
 
   const messagesById = useMemo(() => {
     const map: Record<string, MessageItem> = {};
-    for (const m of messages) map[m.id] = m;
+    for (const m of messages) {
+      map[m.id] = m;
+      if (m.client_id) map[m.client_id] = m;
+    }
     return map;
   }, [messages]);
 
-  // Latest values for the initial-attachment effect below, which intentionally only
-  // re-runs when `initialAttachment` changes (not on every render) but must never act
-  // on a stale conversationId/handleSend if this component is ever reused across
-  // conversations instead of remounted per conversationId.
-  const latestSendContextRef = useRef({ conversationId, user, handleSend, onClearInitialAttachment, showToast });
-  useEffect(() => {
-    latestSendContextRef.current = { conversationId, user, handleSend, onClearInitialAttachment, showToast };
-  });
+  const sendScoreCard = (gameId: string, bestScore: number) => {
+    setShowExtras(false);
+    void handleSend(`[SCORE:${gameId}|${bestScore}]`);
+  };
 
-  // Process initial media attachment from camera
+  const sendSticker = (stickerId: string) => {
+    setShowExtras(false);
+    void handleSend(`[STICKER:${stickerId}]`);
+  };
+
+  const startGame = (gameId: CoverGameType) => {
+    setShowExtras(false);
+    void handleSend(`[GAME:${gameId}]`);
+  };
+
   useEffect(() => {
-    if (initialAttachment && latestSendContextRef.current.user) {
+    if (initialAttachment && user) {
       const sendInitialMedia = async () => {
-        const { conversationId: convId, handleSend: send, onClearInitialAttachment: clearAttachment, showToast: toast } = latestSendContextRef.current;
         setIsUploadingMedia(true);
         try {
-          let mediaUrl = initialAttachment;
-          if (initialAttachment.startsWith('data:')) {
-            const res = await fetch(initialAttachment);
-            const blob = await res.blob();
-            const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-            mediaUrl = await uploadChatMedia(file, convId);
-          }
-          await send(`[IMAGE]${mediaUrl}`);
-          toast('Photo sent to chat', 'success');
-        } catch (err) {
-          console.error('Error sending initial photo:', err);
-          latestSendContextRef.current.showToast('Failed to attach photo', 'error');
+          await handleSend(`[IMAGE]${initialAttachment}`);
+          onClearInitialAttachment?.();
         } finally {
           setIsUploadingMedia(false);
-          if (clearAttachment) clearAttachment();
         }
       };
       sendInitialMedia();
@@ -760,21 +639,23 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     setIsUploadingMedia(true);
     try {
       const mediaUrl = await uploadChatMedia(file, conversationId);
-      await handleSend(`[IMAGE]${mediaUrl}`);
-      showToast('Photo sent', 'success');
+      const tag = sendAsViewOnce ? '[IMAGE:VIEW_ONCE]' : sendAsSpoiler ? '[IMAGE:spoiler]' : '[IMAGE]';
+      await handleSend(`${tag}${mediaUrl}`);
+      showToast(sendAsViewOnce ? 'View once photo sent' : sendAsSpoiler ? 'Sensitive photo sent with spoiler blur' : 'Photo sent', 'success');
+      notificationSuccess();
     } catch (err) {
       console.error('File upload error:', err);
       showToast('Photo upload failed', 'error');
+      errorWarning();
     } finally {
       setIsUploadingMedia(false);
+      setSendAsSpoiler(false);
+      setSendAsViewOnce(false);
     }
   };
 
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [audioSeconds, setAudioSeconds] = useState(0);
-  // The recorder's onstop handler is created when recording starts, so it can't read audioSeconds
-  // (it would always see 0, which is why voice notes were never sent). The length is captured
-  // here when the user presses Send, before the counter resets.
   const recordedSecondsRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -819,22 +700,28 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               uploadChatMedia(audioFile, conversationId),
               computeWaveform(audioBlob),
             ]);
-            await handleSend(`[VOICE_NOTE:${dur}${levels ? `|w=${levels}` : ''}]${mediaUrl}`);
-            showToast('Voice note shared', 'success');
+            const tag = sendAsViewOnce ? `[VOICE_NOTE:VIEW_ONCE:${dur}${levels ? `|w=${levels}` : ''}]` : `[VOICE_NOTE:${dur}${levels ? `|w=${levels}` : ''}]`;
+            await handleSend(`${tag}${mediaUrl}`);
+            showToast(sendAsViewOnce ? 'View once voice note sent' : 'Voice note shared', 'success');
+            notificationSuccess();
           } catch (err) {
             console.error('Voice note upload error:', err);
             showToast('Voice note upload failed', 'error');
+            errorWarning();
           } finally {
             setIsUploadingMedia(false);
+            setSendAsViewOnce(false);
           }
         }
       };
 
       recorder.start();
       setIsRecordingAudio(true);
+      lightImpact();
     } catch (err) {
       console.error('Voice record error:', err);
       showToast('Microphone access denied', 'error');
+      errorWarning();
     }
   };
 
@@ -843,8 +730,10 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       if (send) {
         recordedSecondsRef.current = audioSeconds;
         mediaRecorderRef.current.stop();
+        mediumImpact();
       } else {
         mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+        lightImpact();
       }
       setIsRecordingAudio(false);
     }
@@ -853,28 +742,28 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const playingAudioIdRef = useRef<string | null>(null);
   playingAudioIdRef.current = playingAudioId;
 
-  // Stable identity, so memoised message rows do not re-render when the parent does.
   const toggleAudio = useCallback((msgId: string, audioUrl: string) => {
     if (playingAudioIdRef.current === msgId || !audioUrl) {
       audioElementRef.current?.pause();
       setPlayingAudioId(prev => (prev === msgId ? null : audioUrl ? prev : msgId));
+      lightImpact();
       return;
     }
 
     audioElementRef.current?.pause();
-
     setPlayingAudioId(msgId);
     setAudioProgress(0);
+    lightImpact();
 
-    // Voice notes are private: play them through a short-lived signed link.
     void resolveChatMediaUrl(audioUrl).then(src => {
-      if (playingAudioIdRef.current !== msgId) return; // user tapped something else meanwhile
+      if (playingAudioIdRef.current !== msgId) return;
       if (!src) {
         setPlayingAudioId(null);
         return;
       }
       const audio = new Audio(src);
       audioElementRef.current = audio;
+      audio.playbackRate = audioSpeed;
       audio.ontimeupdate = () => {
         if (audio.duration && Number.isFinite(audio.duration)) setAudioProgress(audio.currentTime / audio.duration);
       };
@@ -885,11 +774,149 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       audio.onerror = () => setPlayingAudioId(null);
       audio.play().catch(() => setPlayingAudioId(null));
     });
+  }, [audioSpeed]);
+
+  const handleOpenViewOncePhoto = useCallback(async (msg: MessageItem, rawUrl: string) => {
+    if (msg.view_once_opened_at || viewOnceConsumedIds.has(msg.id)) {
+      showToast('This photo has already been viewed', 'info');
+      return;
+    }
+    setClaimingViewOnceId(msg.id);
+    lightImpact();
+    try {
+      const claimRes = await claimViewOnceMedia(msg.id, userId);
+      if (!claimRes.success) {
+        setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
+        if (claimRes.reason === 'already_viewed') {
+          showToast('This photo has already been viewed', 'info');
+        } else {
+          showToast('Could not open view once photo', 'error');
+        }
+        errorWarning();
+        return;
+      }
+
+      setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
+      setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, view_once_opened_at: claimRes.opened_at || new Date().toISOString() } : m)));
+
+      const resolved = await resolveChatMediaUrl(rawUrl);
+      if (!resolved) {
+        showToast('Photo unavailable', 'error');
+        errorWarning();
+        return;
+      }
+
+      notificationSuccess();
+      setActiveViewOnceItem({
+        id: msg.id,
+        url: resolved,
+        created_at: msg.created_at,
+        sender_id: msg.sender_id,
+      });
+    } catch (err) {
+      console.error('Error opening view once photo:', err);
+      showToast('Error opening photo', 'error');
+      errorWarning();
+    } finally {
+      setClaimingViewOnceId(null);
+    }
+  }, [userId, viewOnceConsumedIds, showToast]);
+
+  const handleToggleViewOnceAudio = useCallback(async (msg: MessageItem, rawUrl: string) => {
+    if (msg.view_once_opened_at || viewOnceConsumedIds.has(msg.id)) {
+      showToast('This voice note has already been played', 'info');
+      return;
+    }
+
+    if (playingAudioIdRef.current === msg.id) {
+      audioElementRef.current?.pause();
+      setPlayingAudioId(null);
+      setAudioProgress(0);
+      setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
+      setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, view_once_opened_at: new Date().toISOString() } : m)));
+      lightImpact();
+      return;
+    }
+
+    setClaimingViewOnceId(msg.id);
+    lightImpact();
+
+    try {
+      const claimRes = await claimViewOnceMedia(msg.id, userId);
+      if (!claimRes.success) {
+        setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
+        if (claimRes.reason === 'already_viewed') {
+          showToast('This voice note has already been played', 'info');
+        } else {
+          showToast('Could not play view once voice note', 'error');
+        }
+        errorWarning();
+        return;
+      }
+
+      setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
+      setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, view_once_opened_at: claimRes.opened_at || new Date().toISOString() } : m)));
+
+      const resolved = await resolveChatMediaUrl(rawUrl);
+      if (!resolved) {
+        showToast('Voice note unavailable', 'error');
+        errorWarning();
+        return;
+      }
+
+      audioElementRef.current?.pause();
+      setPlayingAudioId(msg.id);
+      setAudioProgress(0);
+
+      const audio = new Audio(resolved);
+      audioElementRef.current = audio;
+      audio.playbackRate = audioSpeed;
+      audio.ontimeupdate = () => {
+        if (audio.duration && Number.isFinite(audio.duration)) {
+          setAudioProgress(audio.currentTime / audio.duration);
+        }
+      };
+      audio.onended = () => {
+        setPlayingAudioId(null);
+        setAudioProgress(0);
+        mediumImpact();
+      };
+      audio.onerror = () => {
+        setPlayingAudioId(null);
+        setAudioProgress(0);
+      };
+      audio.play().catch(() => setPlayingAudioId(null));
+    } catch (err) {
+      console.error('Error playing view once audio:', err);
+      showToast('Error playing voice note', 'error');
+      errorWarning();
+    } finally {
+      setClaimingViewOnceId(null);
+    }
+  }, [userId, viewOnceConsumedIds, audioSpeed, showToast]);
+
+  const handleScrubAudio = useCallback((progress: number) => {
+    const audio = audioElementRef.current;
+    if (audio && audio.duration && Number.isFinite(audio.duration)) {
+      audio.currentTime = progress * audio.duration;
+      setAudioProgress(progress);
+      selectionChange();
+    }
+  }, []);
+
+  const cycleSpeed = useCallback(() => {
+    selectionChange();
+    setAudioSpeed(prev => {
+      const next = prev === 1 ? 1.5 : prev === 1.5 ? 2 : 1;
+      if (audioElementRef.current) {
+        audioElementRef.current.playbackRate = next;
+      }
+      return next;
+    });
   }, []);
 
   useEffect(() => () => audioElementRef.current?.pause(), []);
 
-  // The message box grows with its text, up to its max-height (then it scrolls).
   useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -897,9 +924,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
   }, [inputContent]);
 
-  // Android back button: close whatever is open on top, otherwise leave the chat.
-  // (Later registrations take priority, so the chat itself comes first.)
   useBackHandler(true, onBack);
+  useBackHandler(Boolean(activeViewOnceItem), () => setActiveViewOnceItem(null));
   useBackHandler(Boolean(replyTo || editing), cancelComposerMode);
   useBackHandler(isRecordingAudio, () => handleStopVoiceRecord(false));
   useBackHandler(showContactModal, () => setShowContactModal(false));
@@ -909,23 +935,22 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   useBackHandler(showExtras, () => setShowExtras(false));
   useBackHandler(showReportModal, () => setShowReportModal(false));
   useBackHandler(Boolean(actionMsg), () => setActionMsg(null));
+  useBackHandler(Boolean(showDetailsModal), () => setShowDetailsModal(null));
 
   return (
-    <div className="flex flex-col h-full bg-vault-950 lg:border lg:border-vault-800 lg:rounded-2xl overflow-hidden select-none animate-fade-in">
+    <div className="relative flex flex-col h-full bg-vault-950 lg:border lg:border-vault-800 lg:rounded-2xl overflow-hidden select-none animate-fade-in">
       {/* 1. CHAT WORKSPACE HEADER */}
-      <header className="h-16 px-4 sm:px-5 bg-vault-900 border-b border-vault-800 flex items-center justify-between shrink-0">
+      <header className="h-16 px-4 sm:px-5 glass-header flex items-center justify-between shrink-0 z-20">
         <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
             onClick={onBack}
-            className="ib ib-s lg:hidden"
+            className="ib ib-s lg:hidden rounded-full"
             aria-label="Back to conversations"
           >
             <ArrowLeft className="i" aria-hidden />
           </button>
 
-          {/* Tapping the name/avatar opens contact info — the ⋮ menu next to it is for chat
-              actions (theme, timer, report, block), not the same thing. */}
           <button
             type="button"
             onClick={() => setShowContactModal(true)}
@@ -946,7 +971,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               </h2>
               <div className="flex items-center gap-1.5 text-[11px] leading-tight mt-0.5">
                 {isTyping ? (
-                  <span className="text-emerald font-sans">typing…</span>
+                  <span className="text-emerald font-sans font-semibold animate-pulse">typing…</span>
                 ) : presenceLabel ? (
                   <span className={`font-sans ${partnerPresence?.isOnline ? 'text-emerald' : 'text-vault-400'}`}>{presenceLabel}</span>
                 ) : (
@@ -962,7 +987,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
         <div className="flex items-center gap-1.5">
           {disappearAfter ? (
-            <span className="text-emerald" title={`Disappearing messages: ${timerLabel(disappearAfter)}`} aria-label={`Disappearing messages: ${timerLabel(disappearAfter)}`}>
+            <span className="text-emerald p-1" title={`Disappearing messages: ${timerLabel(disappearAfter)}`} aria-label={`Disappearing messages: ${timerLabel(disappearAfter)}`}>
               <Timer className="w-4 h-4" aria-hidden />
             </span>
           ) : null}
@@ -978,11 +1003,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         </div>
       </header>
 
-      {/* 2. MESSAGE STREAM (High Readability 15px/22px, 70% Max Width, Grouped) */}
+      {/* 2. MESSAGE STREAM */}
       <div
         ref={listRef}
         onScroll={handleListScroll}
-        className={`flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 ${theme.wallpaper} min-h-0 [-webkit-overflow-scrolling:touch]`}
+        className={`flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:p-5 ${theme.wallpaper} min-h-0 [-webkit-overflow-scrolling:touch] touch-pan-y`}
       >
         {(loadingOlder || hasOlder) && messages.length > 0 && (
           <div className="flex justify-center py-2">
@@ -1009,23 +1034,37 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           messages.map((msg, index) => {
             const prevMsg = messages[index - 1];
             const nextMsg = messages[index + 1];
+            const isMe = msg.sender_id === userId;
+            const sameSenderAsPrev = prevMsg && prevMsg.sender_id === msg.sender_id && !isSystem(prevMsg.content) && !isSystem(msg.content);
+            const sameSenderAsNext = nextMsg && nextMsg.sender_id === msg.sender_id && !isSystem(nextMsg.content) && !isSystem(msg.content);
+
             return (
               <MessageRow
                 key={msg.client_id ?? msg.id}
                 msg={msg}
-                isMe={msg.sender_id === userId}
-                isFirstInGroup={!prevMsg || prevMsg.sender_id !== msg.sender_id}
-                isLastInGroup={!nextMsg || nextMsg.sender_id !== msg.sender_id}
+                isMe={isMe}
+                isFirstInGroup={!sameSenderAsPrev}
+                isLastInGroup={!sameSenderAsNext}
+                isMiddleInGroup={Boolean(sameSenderAsPrev && sameSenderAsNext)}
                 isPlaying={playingAudioId === msg.id}
                 onToggleAudio={toggleAudio}
+                onScrubAudio={handleScrubAudio}
+                audioSpeed={audioSpeed}
+                onCycleSpeed={cycleSpeed}
                 onOpenMedia={onOpenMedia}
                 onMediaLoaded={handleMediaLoaded}
+                onOpenViewOncePhoto={handleOpenViewOncePhoto}
+                onToggleViewOnceAudio={handleToggleViewOnceAudio}
+                claimingViewOnceId={claimingViewOnceId}
+                viewOnceConsumedIds={viewOnceConsumedIds}
                 reactions={reactions[msg.id]}
                 replyTarget={msg.reply_to_id ? messagesById[msg.reply_to_id] ?? null : undefined}
                 replyTargetIsMe={msg.reply_to_id ? messagesById[msg.reply_to_id]?.sender_id === userId : false}
                 partnerName={partner.display_name}
                 myUserId={userId}
                 onOpenActions={setActionMsg}
+                onOpenDetails={setShowDetailsModal}
+                onReply={startReply}
                 onToggleReaction={toggleReaction}
                 onRetry={retrySend}
                 mineClass={theme.mine}
@@ -1037,17 +1076,33 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         )}
 
         {isTyping && (
-          <div className="flex items-center gap-1.5 bg-vault-900 border border-vault-800 px-3.5 py-2 rounded-full w-20 text-emerald animate-pulse">
+          <div className="flex items-center gap-1.5 bg-vault-900/90 backdrop-blur-md border border-vault-800 px-3.5 py-2 rounded-full w-20 text-emerald animate-pulse mt-2">
             <div className="w-1.5 h-1.5 bg-emerald rounded-full animate-bounce" />
             <div className="w-1.5 h-1.5 bg-emerald rounded-full animate-bounce [animation-delay:0.2s]" />
             <div className="w-1.5 h-1.5 bg-emerald rounded-full animate-bounce [animation-delay:0.4s]" />
           </div>
         )}
-
       </div>
 
+      {/* Floating Scroll to Bottom Button */}
+      {showScrollBottom && (
+        <button
+          type="button"
+          onClick={() => scrollToBottom(true)}
+          className="absolute right-4 bottom-20 z-30 glass-pill p-2.5 rounded-full text-vault-200 hover:text-white flex items-center gap-1.5 shadow-xl transition-transform active:scale-95 anim-spring-pop"
+          aria-label="Scroll to newest message"
+        >
+          <ChevronDown className="w-5 h-5 text-emerald" />
+          {unreadWhileScrolled > 0 && (
+            <span className="badge !h-5 !min-w-[20px] text-[10px] font-bold">
+              {unreadWhileScrolled}
+            </span>
+          )}
+        </button>
+      )}
+
       {/* 3. ALWAYS VISIBLE COMPOSER BAR */}
-      <footer className="bg-vault-900 border-t border-vault-800 p-3 shrink-0">
+      <footer className="bg-vault-900 border-t border-vault-800 p-3 shrink-0 z-20">
         <input
           type="file"
           ref={fileInputRef}
@@ -1058,7 +1113,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         />
 
         {(replyTo || editing) && !isRecordingAudio && !blockStatus.blocked && (
-          <div className="flex items-center gap-2 mb-2 pl-3 pr-1 py-1.5 rounded-xl bg-vault-950 border-l-2 border-emerald">
+          <div className="flex items-center gap-2 mb-2 pl-3 pr-1 py-1.5 rounded-xl bg-vault-950 border-l-2 border-emerald anim-sheet">
             {editing ? <Pencil className="w-4 h-4 text-emerald shrink-0" aria-hidden /> : <Reply className="w-4 h-4 text-emerald shrink-0" aria-hidden />}
             <div className="min-w-0 flex-1">
               <div className="text-xs font-bold text-emerald">
@@ -1086,7 +1141,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           <div className="flex items-center justify-between bg-red-950/80 border border-red-600/50 rounded-xl px-4 py-2.5 text-red-300 animate-pulse">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-              <span className="text-xs font-mono font-bold">RECORDING {audioSeconds}s</span>
+              <span className="text-xs font-mono font-bold">
+                RECORDING {audioSeconds}s {sendAsViewOnce && '· 1 VIEW ONCE'}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -1107,20 +1164,65 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           </div>
         ) : (
           <div className="flex items-end gap-2">
-            <button
-              type="button"
-              onClick={() => { expectExternalActivity(); fileInputRef.current?.click(); }}
-              disabled={isUploadingMedia}
-              className="ib ib-s rounded-xl shrink-0"
-              aria-label="Attach photo"
-              title="Attach photo"
-            >
-              {isUploadingMedia ? (
-                <RotateCcw className="w-5 h-5 text-emerald animate-spin" />
-              ) : (
-                <ImageIcon className="w-5 h-5 text-vault-300" />
-              )}
-            </button>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => { expectExternalActivity(); fileInputRef.current?.click(); }}
+                disabled={isUploadingMedia}
+                className="ib ib-s rounded-xl shrink-0"
+                aria-label="Attach photo"
+                title="Attach photo"
+              >
+                {isUploadingMedia ? (
+                  <RotateCcw className="w-5 h-5 text-emerald animate-spin" />
+                ) : (
+                  <ImageIcon className="w-5 h-5 text-vault-300" />
+                )}
+              </button>
+
+              {/* View Once Mode Toggle */}
+              <button
+                type="button"
+                onClick={() => {
+                  selectionChange();
+                  setSendAsViewOnce(prev => {
+                    if (!prev) setSendAsSpoiler(false);
+                    return !prev;
+                  });
+                }}
+                className={`ib ib-s rounded-xl shrink-0 !w-8 !h-8 relative ${
+                  sendAsViewOnce ? '!bg-emerald/20 !border-emerald !text-emerald shadow-sm' : 'text-vault-400'
+                }`}
+                aria-label={sendAsViewOnce ? 'View once active for media' : 'Toggle view once for media'}
+                title={sendAsViewOnce ? 'View Once enabled (1 view only)' : 'Send as View Once (1 view)'}
+              >
+                <EyeOff className="w-4 h-4" />
+                <span className={`absolute -top-1 -right-1 text-[9px] font-black leading-none rounded-full w-3.5 h-3.5 flex items-center justify-center ${
+                  sendAsViewOnce ? 'bg-emerald text-vault-950 font-bold' : 'bg-vault-800 text-vault-400'
+                }`}>
+                  1
+                </span>
+              </button>
+
+              {/* Spoiler Mode Toggle */}
+              <button
+                type="button"
+                onClick={() => {
+                  selectionChange();
+                  setSendAsSpoiler(prev => {
+                    if (!prev) setSendAsViewOnce(false);
+                    return !prev;
+                  });
+                }}
+                className={`ib ib-s rounded-xl shrink-0 !w-8 !h-8 ${
+                  sendAsSpoiler ? '!bg-emerald/20 !border-emerald !text-emerald' : 'text-vault-400'
+                }`}
+                aria-label={sendAsSpoiler ? 'Spoiler blur active for photo' : 'Toggle spoiler blur for photo'}
+                title={sendAsSpoiler ? 'Spoiler blur enabled' : 'Hide with Spoiler blur'}
+              >
+                {sendAsSpoiler ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
 
             <form
               onSubmit={e => {
@@ -1129,7 +1231,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               }}
               className="flex-1 min-w-0 flex items-end gap-2"
             >
-              {/* Stickers open from inside the message field, next to where you're typing. */}
               <div className="relative flex-1 min-w-0">
                 <button
                   type="button"
@@ -1147,8 +1248,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                   onChange={e => handleInputChange(e.target.value)}
                   onKeyDown={e => {
                     if (e.key === 'Escape' && (replyTo || editing)) cancelComposerMode();
-                    // With a keyboard and mouse, Enter sends and Shift+Enter adds a line.
-                    // On a phone, Enter adds a line and the Send button sends.
                     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !isTouchDevice()) {
                       e.preventDefault();
                       void handleSend();
@@ -1161,8 +1260,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 />
               </div>
 
-              {/* One button, not two: a mic to record while the field is empty, a send arrow the
-                  moment there's text to send — never both at once. */}
               {inputContent.trim() ? (
                 <button
                   type="submit"
@@ -1196,111 +1293,124 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           onClick={() => { setShowChatMenu(false); setConfirmBlock(false); }}
           onKeyDown={e => { if (e.key === 'Escape') { setShowChatMenu(false); setConfirmBlock(false); } }}
         >
-          <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl anim-sheet" onClick={e => e.stopPropagation()}>
             <p className="px-4 pt-2 pb-2 text-xs text-vault-400 truncate">{partner.display_name}</p>
-            <button type="button" className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
-              onClick={() => { setShowChatMenu(false); setShowThemeSheet(true); }}>
-              <Palette className="w-4 h-4" aria-hidden /> Chat theme
+            <button
+              type="button"
+              className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+              onClick={() => { setShowChatMenu(false); setShowThemeSheet(true); }}
+            >
+              <Palette className="w-4 h-4 text-emerald" /> Chat theme ({theme.label})
             </button>
-            {isSupabaseConfigured() && !blockStatus.blocked && (
-              <button type="button" className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
-                onClick={() => { setShowChatMenu(false); setShowTimerSheet(true); }}>
-                <Timer className="w-4 h-4" aria-hidden /> Disappearing messages
-                <span className="ml-auto text-xs text-vault-400">{disappearAfter ? timerLabel(disappearAfter) : 'Off'}</span>
-              </button>
-            )}
-            <button type="button" className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
-              onClick={() => { setShowChatMenu(false); setShowReportModal(true); }}>
-              <Flag className="w-4 h-4" aria-hidden /> Report {partner.display_name}
+            <button
+              type="button"
+              className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+              onClick={() => { setShowChatMenu(false); setShowTimerSheet(true); }}
+            >
+              <Timer className="w-4 h-4 text-emerald" /> Disappearing messages ({timerLabel(disappearAfter ?? 0)})
+            </button>
+            <button
+              type="button"
+              className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+              onClick={() => { setShowChatMenu(false); setShowReportModal(true); }}
+            >
+              <Flag className="w-4 h-4 text-amber-400" /> Report user
             </button>
             {blockStatus.iBlocked ? (
-              <button type="button" className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
-                onClick={() => void toggleBlock()}>
-                <Ban className="w-4 h-4" aria-hidden /> Unblock {partner.display_name}
+              <button
+                type="button"
+                className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-emerald hover:bg-vault-800 rounded-xl"
+                onClick={() => void toggleBlock()}
+              >
+                <Ban className="w-4 h-4" /> Unblock {partner.display_name}
               </button>
             ) : confirmBlock ? (
-              <div className="px-4 py-2 space-y-2">
-                <p className="text-xs text-vault-300 m-0">
-                  {partner.display_name} won't be able to message you, see when you're online, or play games with you. They aren't told you blocked them.
-                </p>
-                <button type="button" className="btn btn-sm w-full min-h-[44px] bg-rose-600 text-white" onClick={() => void toggleBlock()}>
-                  Block {partner.display_name}
-                </button>
-              </div>
+              <button
+                type="button"
+                className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-rose-400 hover:bg-vault-800 rounded-xl"
+                onClick={() => void toggleBlock()}
+              >
+                <Ban className="w-4 h-4" /> Tap again to block
+              </button>
             ) : (
-              <button type="button" className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-rose-400 hover:bg-vault-800 rounded-xl"
-                onClick={() => setConfirmBlock(true)}>
-                <Ban className="w-4 h-4" aria-hidden /> Block {partner.display_name}
+              <button
+                type="button"
+                className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-rose-400 hover:bg-vault-800 rounded-xl"
+                onClick={() => setConfirmBlock(true)}
+              >
+                <Ban className="w-4 h-4" /> Block {partner.display_name}
               </button>
             )}
-            <div className="divider my-1 mx-2" />
-            <button type="button" className="w-full flex items-center justify-center px-4 min-h-[48px] text-sm font-semibold text-vault-300 hover:bg-vault-800 rounded-xl"
-              onClick={() => { setShowChatMenu(false); setConfirmBlock(false); }}>
-              Cancel
-            </button>
           </div>
         </div>
-      )}
-
-      {showExtras && (
-        <ChatExtrasSheet
-          canPlayGames={isSupabaseConfigured()}
-          onClose={() => setShowExtras(false)}
-          onSticker={id => { setShowExtras(false); void handleSend(`[STICKER:${id}]`); }}
-          onStartGame={() => void startGame()}
-          onShareScore={(gameId, score) => { setShowExtras(false); void handleSend(`[SCORE:${gameId}:${score}]`); }}
-        />
-      )}
-
-      {showThemeSheet && (
-        <ChatThemeSheet current={themeId} onPick={id => void pickTheme(id)} onClose={() => setShowThemeSheet(false)} />
       )}
 
       {showTimerSheet && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Disappearing messages"
+          aria-label="Disappearing timer"
           className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center anim-fade"
           onClick={() => setShowTimerSheet(false)}
-          onKeyDown={e => { if (e.key === 'Escape') setShowTimerSheet(false); }}
         >
-          <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="px-4 pt-2 pb-3">
-              <h3 className="t-body font-bold text-white m-0 flex items-center gap-2"><Timer className="w-4 h-4 text-emerald" aria-hidden /> Disappearing messages</h3>
-              <p className="text-xs text-vault-400 mt-1 mb-0">
-                New messages in this chat disappear for both of you after the time you pick. {partner.display_name} will see that you changed it.
-                The app's moderators can still review disappeared and deleted messages and photos from this chat for safety reasons.
-              </p>
+          <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl anim-sheet" onClick={e => e.stopPropagation()}>
+            <h3 className="t-h3 font-bold text-white mb-3">Disappearing Messages</h3>
+            <div className="space-y-1">
+              {[
+                { label: 'Off', seconds: null },
+                { label: '24 hours', seconds: 86400 },
+                { label: '7 days', seconds: 604800 },
+                { label: '90 days', seconds: 7776000 },
+              ].map(opt => (
+                <button
+                  key={String(opt.seconds)}
+                  type="button"
+                  onClick={() => void changeDisappearing(opt.seconds)}
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium ${
+                    disappearAfter === opt.seconds ? 'bg-emerald text-vault-950 font-bold' : 'text-vault-200 hover:bg-vault-800'
+                  }`}
+                >
+                  <span>{opt.label}</span>
+                  {disappearAfter === opt.seconds && <Check className="w-4 h-4" />}
+                </button>
+              ))}
             </div>
-            {([null, 86400, 604800] as (number | null)[]).map(opt => (
-              <button
-                key={String(opt)}
-                type="button"
-                role="radio"
-                aria-checked={disappearAfter === opt}
-                onClick={() => void changeDisappearing(opt)}
-                className="w-full flex items-center justify-between px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
-              >
-                <span>{opt ? timerLabel(opt) : 'Off'}</span>
-                {disappearAfter === opt && <Check className="w-4 h-4 text-emerald" aria-hidden />}
-              </button>
-            ))}
           </div>
         </div>
+      )}
+
+      {showThemeSheet && (
+        <ChatThemeSheet
+          current={themeId}
+          onPick={changeTheme}
+          onClose={() => setShowThemeSheet(false)}
+        />
+      )}
+
+      {showExtras && (
+        <ChatExtrasSheet
+          canPlayGames={true}
+          onSticker={sendSticker}
+          onStartGame={() => startGame('tic_tac_toe')}
+          onShareScore={sendScoreCard}
+          onClose={() => setShowExtras(false)}
+        />
       )}
 
       {actionMsg && (
         <MessageActionSheet
           msg={actionMsg}
           isMe={actionMsg.sender_id === userId}
-          myReaction={(reactions[actionMsg.id] ?? []).find(r => r.user_id === userId)?.emoji}
+          myReaction={reactions[actionMsg.id]?.find(r => r.user_id === userId)?.emoji}
           onClose={() => setActionMsg(null)}
-          onReact={emoji => { void toggleReaction(actionMsg, emoji); setActionMsg(null); }}
+          onReact={emoji => {
+            void toggleReaction(actionMsg, emoji);
+            setActionMsg(null);
+          }}
           onReply={() => { startReply(actionMsg); setActionMsg(null); }}
           onCopy={() => {
             void navigator.clipboard?.writeText(actionMsg.content).then(
-              () => showToast('Copied', 'success'),
+              () => showToast('Copied to clipboard', 'success'),
               () => showToast('Could not copy', 'error'),
             );
             setActionMsg(null);
@@ -1308,7 +1418,53 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           onEdit={() => { startEdit(actionMsg); setActionMsg(null); }}
           onDelete={() => { void deleteForEveryone(actionMsg); setActionMsg(null); }}
           onDiscard={() => { discardFailed(actionMsg); setActionMsg(null); }}
+          onDetails={() => {
+            setShowDetailsModal(actionMsg);
+            setActionMsg(null);
+          }}
         />
+      )}
+
+      {showDetailsModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 anim-fade"
+          onClick={() => setShowDetailsModal(null)}
+        >
+          <div className="w-full max-w-sm glass-panel rounded-2xl p-5 shadow-2xl anim-modal" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between pb-3 border-b border-vault-800">
+              <h3 className="t-h3 font-bold text-white flex items-center gap-2">
+                <Info className="w-4 h-4 text-emerald" /> Message Info
+              </h3>
+              <button type="button" onClick={() => setShowDetailsModal(null)} className="ib ib-s rounded-full">
+                <X className="i" />
+              </button>
+            </div>
+            <div className="py-3 space-y-2 text-xs">
+              <div className="flex justify-between text-vault-300">
+                <span>Sent by:</span>
+                <span className="font-semibold text-white">{showDetailsModal.sender_id === userId ? 'You' : partner.display_name}</span>
+              </div>
+              <div className="flex justify-between text-vault-300">
+                <span>Timestamp:</span>
+                <span className="font-mono text-vault-100">{new Date(showDetailsModal.created_at).toLocaleString()}</span>
+              </div>
+              {showDetailsModal.edited_at && (
+                <div className="flex justify-between text-vault-300">
+                  <span>Edited at:</span>
+                  <span className="font-mono text-vault-100">{new Date(showDetailsModal.edited_at).toLocaleString()}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-vault-300">
+                <span>Status:</span>
+                <span className="capitalize font-semibold text-emerald">
+                  {showDetailsModal.status ?? (showDetailsModal.is_read ? 'Read' : 'Delivered')}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {showReportModal && (
@@ -1326,7 +1482,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         />
       )}
 
-      {/* Contact Settings & Notification Modal */}
       {showContactModal && (
         <div
           role="dialog"
@@ -1356,18 +1511,33 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           </div>
         </div>
       )}
+
+      {/* 4. VIEW ONCE EPHEMERAL FULLSCREEN VIEWER */}
+      {activeViewOnceItem && (
+        <LightboxViewer
+          item={{
+            id: activeViewOnceItem.id,
+            user_id: activeViewOnceItem.sender_id,
+            image_url: activeViewOnceItem.url,
+            storage_path: '',
+            caption: 'View once photo',
+            created_at: activeViewOnceItem.created_at,
+          }}
+          isViewOnce={true}
+          onClose={() => {
+            lightImpact();
+            setActiveViewOnceItem(null);
+          }}
+        />
+      )}
     </div>
   );
 };
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
-
-/** Phones and tablets: Enter adds a line in the message box instead of sending. */
 const isTouchDevice = () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
-/** Messages loaded at a time (newest first, then older pages as you scroll up). */
 const PAGE_SIZE = 50;
 
-/** An outbox entry shown in the thread before the server has it. */
 function outboxToMessage(item: OutboxItem, status: MessageItem['status']): MessageItem {
   return {
     id: `local:${item.client_id}`,
@@ -1383,13 +1553,13 @@ function outboxToMessage(item: OutboxItem, status: MessageItem['status']): Messa
 }
 
 const isDeleted = (m: MessageItem) => Boolean(m.deleted_at) || m.content === '[DELETED]';
-
 const isSystem = isSystemMessage;
 const systemText = systemMessageText;
 
-/** One-line description of a message, for reply quotes and banners. */
 function previewText(content: string): string {
   if (isSystem(content)) return 'Chat setting changed';
+  if (content.startsWith('[IMAGE:VIEW_ONCE]') || content.startsWith('[IMAGE:view_once]')) return '1 View Once Photo';
+  if (content.startsWith('[IMAGE:SPOILER]') || content.startsWith('[IMAGE:spoiler]')) return '📷 Sensitive Photo';
   return readableMessagePreview(content);
 }
 
@@ -1398,54 +1568,35 @@ interface MessageRowProps {
   isMe: boolean;
   isFirstInGroup: boolean;
   isLastInGroup: boolean;
+  isMiddleInGroup: boolean;
   isPlaying: boolean;
   onToggleAudio: (msgId: string, audioUrl: string) => void;
+  onScrubAudio: (progress: number) => void;
+  audioSpeed: number;
+  onCycleSpeed: () => void;
   onOpenMedia?: (url: string) => void;
   onMediaLoaded: () => void;
+  onOpenViewOncePhoto: (msg: MessageItem, rawUrl: string) => void;
+  onToggleViewOnceAudio: (msg: MessageItem, rawUrl: string) => void;
+  claimingViewOnceId: string | null;
+  viewOnceConsumedIds: Set<string>;
   reactions?: MessageReaction[];
-  /** undefined: not a reply. null: a reply whose original isn't loaded or was removed. */
   replyTarget?: MessageItem | null;
   replyTargetIsMe: boolean;
   partnerName: string;
   myUserId?: string;
   onOpenActions: (msg: MessageItem) => void;
+  onOpenDetails: (msg: MessageItem) => void;
+  onReply: (msg: MessageItem) => void;
   onToggleReaction: (msg: MessageItem, emoji: ReactionEmoji) => void;
   onRetry: (msg: MessageItem) => void;
-  /** Colour classes for your own bubbles (chat theme). */
   mineClass: string;
-  /** 0..1 while this voice note plays. */
   playProgress: number;
-  onRematch: () => void;
+  onRematch: (gameId: CoverGameType) => void;
 }
 
-/**
- * One message. Memoised: typing in the composer or a change to another message does not
- * re-render every bubble. Image bubbles reserve their box before the image arrives, so the
- * thread does not jump when photos finish loading.
- *
- * Long-press (touch) or right-click opens the actions: react, reply, copy, edit, delete.
- */
-const MessageRow = memo(function MessageRow({
-  msg,
-  isMe,
-  isFirstInGroup,
-  isLastInGroup,
-  isPlaying,
-  onToggleAudio,
-  onOpenMedia,
-  onMediaLoaded,
-  reactions,
-  replyTarget,
-  replyTargetIsMe,
-  partnerName,
-  myUserId,
-  onOpenActions,
-  onToggleReaction,
-  onRetry,
-  mineClass,
-  playProgress,
-  onRematch,
-}: MessageRowProps) {
+const MessageRow = memo(function MessageRow(props: MessageRowProps) {
+  const { msg, isMe, partnerName } = props;
   if (isSystem(msg.content)) {
     return (
       <div className="flex justify-center my-3" role="note">
@@ -1456,7 +1607,7 @@ const MessageRow = memo(function MessageRow({
       </div>
     );
   }
-  return <MessageBubble {...{ msg, isMe, isFirstInGroup, isLastInGroup, isPlaying, onToggleAudio, onOpenMedia, onMediaLoaded, reactions, replyTarget, replyTargetIsMe, partnerName, myUserId, onOpenActions, onToggleReaction, onRetry, mineClass, playProgress, onRematch }} />;
+  return <MessageBubble {...props} />;
 });
 
 function MessageBubble({
@@ -1464,16 +1615,25 @@ function MessageBubble({
   isMe,
   isFirstInGroup,
   isLastInGroup,
+  isMiddleInGroup,
   isPlaying,
   onToggleAudio,
+  onScrubAudio,
+  audioSpeed,
+  onCycleSpeed,
   onOpenMedia,
   onMediaLoaded,
+  onOpenViewOncePhoto,
+  onToggleViewOnceAudio,
+  claimingViewOnceId,
+  viewOnceConsumedIds,
   reactions,
   replyTarget,
   replyTargetIsMe,
   partnerName,
   myUserId,
   onOpenActions,
+  onReply,
   onToggleReaction,
   onRetry,
   mineClass,
@@ -1483,65 +1643,104 @@ function MessageBubble({
   const [imageFailed, setImageFailed] = useState(false);
   const { getHighScore } = useGame();
   const deleted = isDeleted(msg);
-  const isImage = !deleted && msg.content.startsWith('[IMAGE]');
+  const isViewOnceImage = !deleted && Boolean(
+    (msg.is_view_once && (msg.content.startsWith('[IMAGE') || !msg.content.startsWith('['))) ||
+    msg.content.startsWith('[IMAGE:VIEW_ONCE]') ||
+    msg.content.startsWith('[IMAGE:view_once]')
+  );
+  const isSpoiler = !deleted && !isViewOnceImage && (msg.content.startsWith('[IMAGE:SPOILER]') || msg.content.startsWith('[IMAGE:spoiler]'));
+  const isImage = !deleted && (msg.content.startsWith('[IMAGE]') || isSpoiler || isViewOnceImage);
   const voice = deleted ? undefined : parseVoiceNote(msg.content);
   const isVoice = Boolean(voice);
-  const imageUrl = isImage ? msg.content.slice('[IMAGE]'.length) : '';
+  const isViewOnceVoice = !deleted && Boolean(voice?.isViewOnce || (msg.is_view_once && isVoice));
+  const isViewOnceOpened = Boolean(msg.view_once_opened_at) || viewOnceConsumedIds.has(msg.id);
+
+  const imageUrl = isViewOnceImage
+    ? msg.content.replace(/^\[IMAGE:VIEW_ONCE\]|^\[IMAGE:view_once\]|^\[IMAGE\]/, '')
+    : isSpoiler
+    ? msg.content.replace(/^\[IMAGE:spoiler\]|^\[IMAGE:SPOILER\]/, '')
+    : isImage
+    ? msg.content.slice('[IMAGE]'.length)
+    : '';
   const voiceDuration = voice?.duration ?? '0:00';
   const voiceUrl = voice?.url ?? '';
   const sticker = deleted ? undefined : parseSticker(msg.content);
   const score = deleted ? undefined : parseScore(msg.content);
   const gameRef = deleted ? undefined : parseGame(msg.content);
-  // Stickers, games and score cards sit on the wallpaper, not in a bubble.
-  // Photos get no chat-bubble background/border, same as stickers: a colored frame around a
-  // photo just adds visual weight without meaning anything (there's no "your colour" for a photo).
-  const bare = Boolean(sticker || score || gameRef || isImage);
+  const bare = Boolean(sticker || score || gameRef || (isImage && !isViewOnceImage));
 
-  // Long-press detection. Moving the finger (scrolling) cancels it; a completed long-press
-  // swallows the following click so it doesn't also open the photo.
+  const [dragOffset, setDragOffset] = useState(0);
+  const [isSwiping, setIsSwiping] = useState(false);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const touchDirectionRef = useRef<'horizontal' | 'vertical' | null>(null);
+  const thresholdTriggeredRef = useRef(false);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pressStart = useRef<{ x: number; y: number } | null>(null);
-  const longPressed = useRef(false);
+
   const cancelPress = () => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
     pressTimer.current = null;
-    pressStart.current = null;
   };
-  const canAct = !msg.status || msg.status === 'failed';
-  const pressHandlers = canAct
-    ? {
-        onPointerDown: (e: React.PointerEvent) => {
-          if (e.pointerType === 'mouse') return;
-          longPressed.current = false;
-          pressStart.current = { x: e.clientX, y: e.clientY };
-          pressTimer.current = setTimeout(() => {
-            longPressed.current = true;
-            navigator.vibrate?.(15);
-            onOpenActions(msg);
-          }, 450);
-        },
-        onPointerMove: (e: React.PointerEvent) => {
-          const start = pressStart.current;
-          if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) cancelPress();
-        },
-        onPointerUp: cancelPress,
-        onPointerCancel: cancelPress,
-        onContextMenu: (e: React.MouseEvent) => {
-          e.preventDefault();
-          cancelPress();
-          onOpenActions(msg);
-        },
-        onClickCapture: (e: React.MouseEvent) => {
-          if (longPressed.current) {
-            e.stopPropagation();
-            e.preventDefault();
-            longPressed.current = false;
-          }
-        },
-      }
-    : {};
 
-  // Group identical emojis: "❤️ 2".
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    touchDirectionRef.current = null;
+    thresholdTriggeredRef.current = false;
+
+    pressTimer.current = setTimeout(() => {
+      lightImpact();
+      onOpenActions(msg);
+    }, 450);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartRef.current || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchStartRef.current.x;
+    const dy = touch.clientY - touchStartRef.current.y;
+
+    if (!touchDirectionRef.current) {
+      if (Math.hypot(dx, dy) > 8) {
+        cancelPress();
+        if (Math.abs(dx) > Math.abs(dy)) {
+          touchDirectionRef.current = 'horizontal';
+          setIsSwiping(true);
+        } else {
+          touchDirectionRef.current = 'vertical';
+        }
+      }
+    }
+
+    if (touchDirectionRef.current === 'horizontal') {
+      if (dx > 0) {
+        const bounded = dx > 50 ? 50 + Math.pow(dx - 50, 0.65) * 4 : dx;
+        setDragOffset(bounded);
+
+        if (bounded >= 45 && !thresholdTriggeredRef.current) {
+          thresholdTriggeredRef.current = true;
+          lightImpact();
+        } else if (bounded < 45 && thresholdTriggeredRef.current) {
+          thresholdTriggeredRef.current = false;
+        }
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    cancelPress();
+    if (touchDirectionRef.current === 'horizontal') {
+      if (dragOffset >= 45) {
+        onReply(msg);
+      }
+    }
+    setDragOffset(0);
+    setIsSwiping(false);
+    touchStartRef.current = null;
+    touchDirectionRef.current = null;
+    thresholdTriggeredRef.current = false;
+  };
+
   const reactionGroups = useMemo(() => {
     const groups: { emoji: ReactionEmoji; count: number; mine: boolean }[] = [];
     for (const r of reactions ?? []) {
@@ -1556,8 +1755,25 @@ function MessageBubble({
     return groups;
   }, [reactions, myUserId]);
 
+  const bubbleRadiusClass = useMemo(() => {
+    if (bare) return '';
+    if (isMe) {
+      if (isFirstInGroup && isLastInGroup) return 'rounded-2xl';
+      if (isFirstInGroup) return 'rounded-2xl rounded-br-md';
+      if (isMiddleInGroup) return 'rounded-2xl rounded-r-md';
+      if (isLastInGroup) return 'rounded-2xl rounded-br-xs';
+      return 'rounded-2xl';
+    } else {
+      if (isFirstInGroup && isLastInGroup) return 'rounded-2xl';
+      if (isFirstInGroup) return 'rounded-2xl rounded-bl-md';
+      if (isMiddleInGroup) return 'rounded-2xl rounded-l-md';
+      if (isLastInGroup) return 'rounded-2xl rounded-bl-xs';
+      return 'rounded-2xl';
+    }
+  }, [bare, isMe, isFirstInGroup, isLastInGroup, isMiddleInGroup]);
+
   const image = (
-    <span className="relative block w-48 max-w-full aspect-[4/5] rounded-lg overflow-hidden bg-black/20 border border-white/10">
+    <span className="relative block w-56 max-w-full aspect-[4/5] rounded-2xl overflow-hidden bg-vault-900 border border-white/10 shadow-md">
       {imageFailed ? (
         <span className="absolute inset-0 flex items-center justify-center text-center text-xs p-3 opacity-80">
           Photo unavailable
@@ -1570,36 +1786,70 @@ function MessageBubble({
           decoding="async"
           onLoad={onMediaLoaded}
           onError={() => setImageFailed(true)}
+          isSpoiler={isSpoiler}
           className="absolute inset-0 w-full h-full object-cover"
           fallback={
             <span className="absolute inset-0 flex items-center justify-center text-center text-xs p-3 opacity-80">Photo unavailable</span>
           }
         />
       )}
+      <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
     </span>
   );
 
   return (
-    <div className={`group flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isFirstInGroup ? 'mt-3' : 'mt-0.5'} ${reactionGroups.length ? 'mb-2' : ''}`}>
-      <div className={`relative flex items-center gap-1 max-w-[80%] ${isMe ? 'flex-row-reverse' : ''}`}>
+    <div
+      className={`relative group flex flex-col ${isMe ? 'items-end' : 'items-start'} ${
+        isFirstInGroup ? 'mt-3.5' : 'mt-0.5'
+      } ${reactionGroups.length ? 'mb-2' : ''}`}
+    >
+      {/* Swipe to Reply Affordance Icon */}
+      {dragOffset > 5 && (
         <div
-          {...pressHandlers}
-          className={`relative min-w-0 ${bare ? 'p-0' : isImage ? 'p-1.5' : 'p-3'} text-[15px] leading-[22px] break-words ${bare ? '' : 'shadow-sm'} select-text ${
+          className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center justify-center w-9 h-9 rounded-full bg-emerald text-vault-950 shadow-md transition-opacity"
+          style={{
+            transform: `translateY(-50%) scale(${Math.min(1, dragOffset / 40)})`,
+            opacity: Math.min(1, dragOffset / 35),
+          }}
+        >
+          <Reply className="w-4 h-4 fill-current stroke-[2.5]" />
+        </div>
+      )}
+
+      <div
+        className={`relative flex items-center gap-1.5 max-w-[84%] sm:max-w-[76%] ${
+          isMe ? 'flex-row-reverse' : ''
+        }`}
+        style={{
+          transform: `translateX(${dragOffset}px)`,
+          transition: isSwiping ? 'none' : 'transform 240ms cubic-bezier(0.16, 1, 0.3, 1)',
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        onContextMenu={e => {
+          e.preventDefault();
+          onOpenActions(msg);
+        }}
+      >
+        <div
+          className={`relative min-w-0 ${bare ? 'p-0' : isImage && !isViewOnceImage ? 'p-1' : isViewOnceImage || isViewOnceVoice ? 'p-0 bg-transparent shadow-none' : 'px-3.5 py-2.5'} text-[15px] leading-[22px] break-words select-text ${
             msg.status ? 'opacity-70' : ''
           } ${
-            bare
+            bare || isViewOnceImage || isViewOnceVoice
               ? 'bg-transparent'
               : deleted
               ? 'bg-transparent border border-vault-750 text-vault-400 italic rounded-2xl'
               : isMe
-              ? `${mineClass} font-medium ${isLastInGroup ? 'rounded-2xl rounded-br-xs' : 'rounded-2xl'}`
-              : `bg-[#1B1D21] border border-[#1E2025] text-[#F4F5F6] ${isLastInGroup ? 'rounded-2xl rounded-bl-xs' : 'rounded-2xl'}`
+              ? `${mineClass} font-normal shadow-sm ${bubbleRadiusClass}`
+              : `bg-[#1B1D21] border border-white/[0.06] text-[#F4F5F6] shadow-sm ${bubbleRadiusClass}`
           }`}
         >
           {replyTarget !== undefined && !deleted && (
             <div
-              className={`mb-1.5 px-2 py-1 rounded-lg border-l-2 text-xs ${
-                isMe ? 'bg-black/10 border-[#04120C]/60' : 'bg-black/20 border-emerald'
+              className={`mb-1.5 px-2.5 py-1 rounded-lg border-l-2 text-xs ${
+                isMe ? 'bg-black/20 border-emerald-300' : 'bg-black/30 border-emerald'
               }`}
             >
               <div className="font-bold opacity-90">{replyTarget ? (replyTargetIsMe ? 'You' : partnerName) : 'Original message'}</div>
@@ -1622,7 +1872,7 @@ function MessageBubble({
               </span>
             )
           ) : score ? (
-            <div className="w-[216px] rounded-2xl bg-vault-900 border border-amber-500/40 p-3 text-white">
+            <div className="w-[220px] rounded-2xl bg-vault-900/90 backdrop-blur-md border border-amber-500/40 p-3.5 text-white shadow-lg">
               <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
                 <Trophy className="w-4 h-4" aria-hidden /> {COVER_GAMES.find(g => g.id === score.gameId)?.name ?? 'Game'}
               </div>
@@ -1638,13 +1888,31 @@ function MessageBubble({
               </div>
             </div>
           ) : gameRef ? (
-            <ChatGameCard gameId={gameRef.id} myUserId={myUserId} partnerName={partnerName} onRematch={onRematch} />
+            <ChatGameCard gameId={gameRef.id} myUserId={myUserId} partnerName={partnerName} onRematch={() => onRematch(gameRef.id as CoverGameType)} />
+          ) : isViewOnceImage ? (
+            <ViewOnceImageBubble
+              isMe={isMe}
+              isOpened={isViewOnceOpened}
+              onOpen={() => onOpenViewOncePhoto(msg, imageUrl)}
+              isLoading={claimingViewOnceId === msg.id}
+            />
+          ) : isViewOnceVoice ? (
+            <ViewOnceAudioBubble
+              isMe={isMe}
+              isOpened={isViewOnceOpened}
+              duration={voiceDuration}
+              levels={voice?.levels ?? null}
+              isPlaying={isPlaying}
+              onTogglePlay={() => onToggleViewOnceAudio(msg, voiceUrl)}
+              isLoading={claimingViewOnceId === msg.id}
+              playProgress={playProgress}
+            />
           ) : isImage ? (
             onOpenMedia && !imageFailed ? (
               <button
                 type="button"
                 onClick={() => void resolveChatMediaUrl(imageUrl).then(src => { if (src) onOpenMedia(src); })}
-                className="block p-0 border-0 bg-transparent cursor-pointer"
+                className="block p-0 border-0 bg-transparent cursor-pointer rounded-2xl overflow-hidden"
                 aria-label="Open photo"
               >
                 {image}
@@ -1653,33 +1921,60 @@ function MessageBubble({
               image
             )
           ) : isVoice ? (
-            <div className="flex items-center gap-3 min-w-[200px] py-1">
+            <div className="flex items-center gap-3 min-w-[220px] py-1">
               <button
                 type="button"
                 onClick={() => onToggleAudio(msg.id, voiceUrl)}
                 className={`w-11 h-11 shrink-0 rounded-full flex items-center justify-center ${
-                  isMe ? 'bg-black/80 text-white' : 'bg-[#10B981] text-[#04120C]'
-                } active:scale-90 transition-transform`}
+                  isMe ? 'bg-black/70 text-white border border-white/15' : 'bg-[#10B981] text-[#04120C]'
+                } active:scale-95 transition-transform shadow-md`}
                 aria-label={isPlaying ? 'Pause voice message' : 'Play voice message'}
               >
-                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+                {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
               </button>
-              <div className="flex-1 space-y-1">
-                <div className="flex items-center gap-[2px] h-7" aria-hidden>
+              <div className="flex-1 space-y-1.5">
+                {/* Interactive Scrubber Waveform */}
+                <div
+                  className="flex items-center gap-[2.5px] h-8 cursor-pointer py-1"
+                  onClick={e => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const p = Math.max(0, Math.min(1, x / rect.width));
+                    onScrubAudio(p);
+                  }}
+                  aria-hidden
+                >
                   {(voice?.levels ?? Array.from({ length: WAVEFORM_BARS }, (_, i) => 0.25 + 0.2 * Math.abs(Math.sin(i * 1.7)))).map((level, i, all) => {
                     const played = isPlaying && i / all.length < playProgress;
                     return (
                       <span
                         key={i}
-                        className={`flex-1 rounded-full ${isMe ? 'bg-current' : 'bg-[#10B981]'} ${played ? 'opacity-100' : 'opacity-35'}`}
-                        style={{ height: `${Math.max(12, Math.round(level * 100))}%` }}
+                        className={`flex-1 rounded-full transition-all ${
+                          isMe ? 'bg-current' : 'bg-[#10B981]'
+                        } ${played ? 'opacity-100 scale-y-105' : 'opacity-35'}`}
+                        style={{ height: `${Math.max(16, Math.round(level * 100))}%` }}
                       />
                     );
                   })}
                 </div>
-                <span className={`text-[11px] font-mono ${isMe ? 'opacity-75' : 'text-vault-400'}`}>
-                  Voice message ({voiceDuration})
-                </span>
+                <div className="flex items-center justify-between text-[11px] font-mono">
+                  <span className={isMe ? 'opacity-75' : 'text-vault-400'}>
+                    {voiceDuration}
+                  </span>
+                  {isPlaying && (
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        onCycleSpeed();
+                      }}
+                      className="px-1.5 py-0.5 rounded bg-black/40 text-emerald text-[10px] font-bold border border-emerald/30 hover:bg-black/60"
+                      aria-label="Change playback speed"
+                    >
+                      {audioSpeed}x
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
@@ -1687,31 +1982,31 @@ function MessageBubble({
           )}
 
           {reactionGroups.length > 0 && (
-            <div className={`absolute -bottom-3.5 ${isMe ? 'right-2' : 'left-2'} flex gap-1`}>
+            <div className={`absolute -bottom-3.5 ${isMe ? 'right-2' : 'left-2'} flex gap-1 z-10`}>
               {reactionGroups.map(g => (
                 <button
                   key={g.emoji}
                   type="button"
                   onClick={() => onToggleReaction(msg, g.emoji)}
-                  className={`h-6 px-1.5 rounded-full text-xs flex items-center gap-0.5 border shadow ${
-                    g.mine ? 'bg-emerald/20 border-emerald' : 'bg-vault-900 border-vault-750'
+                  className={`h-6 px-2 rounded-full text-xs flex items-center gap-1 border shadow-md ${
+                    g.mine ? 'bg-emerald/20 border-emerald text-emerald-300' : 'bg-vault-900 border-vault-750 text-white'
                   }`}
                   aria-label={`${g.emoji} ${g.count}${g.mine ? ', including you. Tap to remove' : ''}`}
                 >
                   <span>{g.emoji}</span>
-                  {g.count > 1 && <span className="text-vault-200">{g.count}</span>}
+                  {g.count > 1 && <span className="font-semibold text-[11px]">{g.count}</span>}
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        {/* Desktop: a visible button for the same actions (long-press isn't available with a mouse). */}
-        {canAct && !deleted && (
+        {/* Desktop context action affordance */}
+        {!deleted && !msg.status && (
           <button
             type="button"
             onClick={() => onOpenActions(msg)}
-            className="hidden md:flex opacity-0 group-hover:opacity-100 focus:opacity-100 w-8 h-8 rounded-full items-center justify-center text-vault-400 hover:text-white hover:bg-vault-800 shrink-0"
+            className="hidden md:flex opacity-0 group-hover:opacity-100 focus:opacity-100 w-8 h-8 rounded-full items-center justify-center text-vault-400 hover:text-white hover:bg-vault-800 shrink-0 transition-opacity"
             aria-label="Message actions"
           >
             <Reply className="w-4 h-4" aria-hidden />
@@ -1728,14 +2023,14 @@ function MessageBubble({
           <AlertCircle className="w-3.5 h-3.5" aria-hidden /> Not sent. Tap to retry
         </button>
       ) : (isLastInGroup || msg.status || isImage) && (
-        <div className={`flex items-center gap-1.5 text-[11px] text-vault-500 font-mono mt-1 px-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
-          {msg.edited_at && !deleted && <span className="font-sans italic">edited</span>}
+        <div className={`flex items-center gap-1.5 text-[11px] text-vault-400 font-mono mt-1 px-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
+          {msg.edited_at && !deleted && <span className="font-sans italic text-vault-500">edited</span>}
           <span>{formatTimestamp(msg.created_at)}</span>
           {isMe &&
             (msg.status ? (
-              <span className="flex items-center gap-1" aria-label={msg.status === 'queued' ? 'Waiting for connection' : 'Sending'}>
+              <span className="flex items-center gap-1 text-vault-500" aria-label={msg.status === 'queued' ? 'Waiting for connection' : 'Sending'}>
                 <Clock className="w-3.5 h-3.5" aria-hidden />
-                {msg.status === 'queued' && <span className="font-sans">Waiting for connection</span>}
+                {msg.status === 'queued' && <span className="font-sans text-[10px]">Queued</span>}
               </span>
             ) : msg.is_read ? (
               <CheckCheck className="w-3.5 h-3.5 text-emerald" aria-label="Read" />
@@ -1759,9 +2054,9 @@ interface MessageActionSheetProps {
   onEdit: () => void;
   onDelete: () => void;
   onDiscard: () => void;
+  onDetails: () => void;
 }
 
-/** Bottom sheet with reactions and message actions. */
 function MessageActionSheet({
   msg,
   isMe,
@@ -1773,6 +2068,7 @@ function MessageActionSheet({
   onEdit,
   onDelete,
   onDiscard,
+  onDetails,
 }: MessageActionSheetProps) {
   const failed = msg.status === 'failed';
   const deleted = isDeleted(msg);
@@ -1782,32 +2078,33 @@ function MessageActionSheet({
   const canDelete = isMe && !failed && !deleted && withinWindow;
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const item = 'w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl';
+  const item = 'w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl transition-colors';
 
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Message actions"
-      className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center anim-fade"
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center anim-fade"
       onClick={onClose}
       onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
     >
       <div
-        className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl"
+        className="w-full sm:max-w-sm glass-panel rounded-t-2xl sm:rounded-2xl p-2.5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl anim-sheet"
         onClick={e => e.stopPropagation()}
       >
-        <p className="px-4 pt-2 pb-3 text-xs text-vault-400 truncate">{previewText(msg.content)}</p>
+        <p className="px-4 pt-2 pb-2.5 text-xs text-vault-400 truncate">{previewText(msg.content)}</p>
 
+        {/* Floating Quick-Reactions Bar */}
         {!failed && !deleted && (
-          <div className="flex justify-around px-2 pb-2 mb-1 border-b border-vault-800">
+          <div className="flex justify-around px-2 py-2 mb-2 bg-vault-950/60 rounded-2xl border border-white/[0.06]">
             {REACTION_EMOJIS.map(e => (
               <button
                 key={e}
                 type="button"
                 onClick={() => onReact(e)}
-                className={`w-11 h-11 rounded-full text-2xl flex items-center justify-center transition-transform active:scale-90 ${
-                  myReaction === e ? 'bg-emerald/25 ring-1 ring-emerald' : 'hover:bg-vault-800'
+                className={`w-11 h-11 rounded-full text-2xl flex items-center justify-center transition-transform active:scale-90 hover:scale-110 ${
+                  myReaction === e ? 'bg-emerald/25 ring-2 ring-emerald scale-105' : 'hover:bg-vault-800'
                 }`}
                 aria-label={myReaction === e ? `Remove ${e}` : `React ${e}`}
               >
@@ -1825,22 +2122,25 @@ function MessageActionSheet({
           <>
             {!deleted && (
               <button type="button" className={item} onClick={onReply}>
-                <Reply className="w-4 h-4" aria-hidden /> Reply
+                <Reply className="w-4 h-4 text-emerald" aria-hidden /> Reply
               </button>
             )}
             {!deleted && isText && (
               <button type="button" className={item} onClick={onCopy}>
-                <Copy className="w-4 h-4" aria-hidden /> Copy text
+                <Copy className="w-4 h-4 text-vault-300" aria-hidden /> Copy text
               </button>
             )}
             {canEdit && (
               <button type="button" className={item} onClick={onEdit}>
-                <Pencil className="w-4 h-4" aria-hidden /> Edit
+                <Pencil className="w-4 h-4 text-emerald" aria-hidden /> Edit message
               </button>
             )}
+            <button type="button" className={item} onClick={onDetails}>
+              <Info className="w-4 h-4 text-vault-300" aria-hidden /> Message details
+            </button>
             {canDelete && (
               confirmDelete ? (
-                <button type="button" className={`${item} text-rose-400`} onClick={onDelete}>
+                <button type="button" className={`${item} text-rose-400 bg-rose-950/30`} onClick={onDelete}>
                   <Trash2 className="w-4 h-4" aria-hidden /> Tap again to delete for everyone
                 </button>
               ) : (

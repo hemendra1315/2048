@@ -81,6 +81,10 @@ export interface MessageItem {
   deleted_at?: string | null;
   /** Set when the chat has disappearing messages on. */
   expires_at?: string | null;
+  /** Set when the media is one-time ephemeral view. */
+  is_view_once?: boolean;
+  /** Timestamp when the recipient claimed/opened the View Once media. */
+  view_once_opened_at?: string | null;
   /** Local only: not yet confirmed by the server. */
   status?: 'sending' | 'queued' | 'failed';
 }

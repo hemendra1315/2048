@@ -319,10 +319,10 @@
 .set-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 14px; }
 
 /* Messages */
-.bub { max-width: 70%; padding: 10px 14px 8px; font-size: 15px; line-height: 22px; }
-.bub-in { background: var(--s3); color: var(--t1); border-radius: 18px 18px 18px 4px; align-self: flex-start; }
-.bub-out { background: var(--em-deep); color: #EAFBF3; border-radius: 18px 18px 4px 18px; align-self: flex-end; }
-.meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 2px; font-size: 11px; line-height: 14px; color: rgba(234, 251, 243, 0.6); font-family: var(--m); }
+.bub { max-width: 76%; padding: 10px 14px 8px; font-size: 15px; line-height: 22px; position: relative; }
+.bub-in { background: var(--s3); color: var(--t1); border-radius: 18px 18px 18px 4px; align-self: flex-start; border: 1px solid rgba(255, 255, 255, 0.05); }
+.bub-out { background: linear-gradient(135deg, #0d5438 0%, #0b452e 100%); color: #F0FDF4; border-radius: 18px 18px 4px 18px; align-self: flex-end; border: 1px solid rgba(16, 185, 129, 0.25); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
+.meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 2px; font-size: 11px; line-height: 14px; color: rgba(240, 253, 244, 0.7); font-family: var(--m); }
 .bub-in .meta { color: var(--t3); }
 
 /* Navigation */
@@ -374,22 +374,78 @@
 .switch-on { background: var(--em); border-color: var(--em); }
 .switch-on::after { transform: translateX(20px); background: var(--on-em); }
 
+/* Glassmorphism & Surfaces */
+.glass-panel {
+  background: rgba(12, 13, 15, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.glass-header {
+  background: rgba(5, 5, 5, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.glass-pill {
+  background: rgba(27, 29, 33, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.shimmer-skeleton {
+  background: linear-gradient(90deg, rgba(27, 29, 33, 0.6) 25%, rgba(46, 49, 55, 0.6) 50%, rgba(27, 29, 33, 0.6) 75%);
+  background-size: 200% 100%;
+  animation: sk 1.6s infinite ease-in-out;
+}
+
+/* Telegram-Style Spoiler Shimmer & Particle Overlay */
+.spoiler-overlay {
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.15) 0%, rgba(0, 0, 0, 0.7) 100%),
+              repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.03) 0px, rgba(255, 255, 255, 0.03) 4px, transparent 4px, transparent 8px);
+  background-size: 200% 200%, 16px 16px;
+  animation: spoilerShimmer 8s ease infinite;
+}
+
 }
 
 @keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 @keyframes sheetUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes modalIn { from { transform: scale(0.97); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes springPop {
+  0% { transform: scale(0.6); opacity: 0; }
+  70% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes bounceInPill {
+  0% { transform: translate(-50%, 20px) scale(0.85); opacity: 0; }
+  60% { transform: translate(-50%, -4px) scale(1.02); opacity: 1; }
+  100% { transform: translate(-50%, 0) scale(1); opacity: 1; }
+}
+@keyframes spoilerShimmer {
+  0% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+  100% { background-position: 0% 0%; }
+}
 
 .anim-sheet { animation: sheetUp var(--dur-mid) var(--ease-spring); }
 .anim-modal { animation: modalIn var(--dur-mid) var(--ease-spring); }
 .anim-fade { animation: fadeIn var(--dur-fast) ease-out; }
+.anim-spring-pop { animation: springPop 260ms var(--ease-spring); }
+.anim-bounce-pill { animation: bounceInPill 320ms var(--ease-spring) forwards; }
+
+.touch-pan-y { touch-action: pan-y; }
+.will-change-transform { will-change: transform; }
 
 @media (prefers-reduced-motion: reduce) {
-  .sk, .anim-sheet, .anim-modal, .anim-fade, .badge { animation: none; }
+  .sk, .anim-sheet, .anim-modal, .anim-fade, .anim-spring-pop, .anim-bounce-pill, .shimmer-skeleton, .spoiler-overlay, .badge { animation: none; }
   .btn, .ib, .card-interactive, .chip, .row, .tab { transition: none; }
 }
-
 
 /* Android 15+ draws the app behind the status bar (edge-to-edge); the WebView reports its height
    as env(safe-area-inset-top). Full-screen overlays start below it so their top controls stay

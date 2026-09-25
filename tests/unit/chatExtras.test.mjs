@@ -26,9 +26,20 @@ assert.equal(x.parseScore('[SCORE:snake:-1]'), undefined);
 // games
 assert.equal(x.parseGame('[GAME:tictactoe:11111111-1111-4111-8111-111111111111]').id, '11111111-1111-4111-8111-111111111111');
 assert.equal(x.parseGame('[GAME:tictactoe:../../x]'), undefined);
+// voice notes: view once format
+let vo = x.parseVoiceNote('[VOICE_NOTE:VIEW_ONCE:0:15|w=0az5]https://a/vo.webm');
+assert.equal(vo.duration, '0:15'); assert.equal(vo.url, 'https://a/vo.webm');
+assert.equal(vo.isViewOnce, true);
+assert.deepEqual(vo.levels.map(n => Math.round(n * 35)), [0, 10, 35, 5]);
 // previews & themes
 assert.equal(x.extraPreview('[STICKER:gg]'), 'Sticker');
 assert.equal(x.extraPreview('plain'), undefined);
+assert.equal(x.readableMessagePreview('[IMAGE:VIEW_ONCE]https://a/b.jpg'), '1 View once photo');
+assert.equal(x.readableMessagePreview('[VOICE_NOTE:VIEW_ONCE:0:05]https://a/b.webm'), '1 View once voice message');
+assert.equal(x.readableMessagePreview('[IMAGE:SPOILER]https://a/b.jpg'), '📷 Sensitive photo');
+assert.equal(x.isViewOnceContent('[IMAGE:VIEW_ONCE]url'), true);
+assert.equal(x.isViewOnceContent('[VOICE_NOTE:VIEW_ONCE:0:05]url'), true);
+assert.equal(x.isViewOnceContent('[IMAGE]url'), false);
 assert.equal(x.themeById('ocean').id, 'ocean'); assert.equal(x.themeById('bogus').id, 'default');
 assert.equal(new Set(x.STICKERS.map(s => s.id)).size, x.STICKERS.length);
 console.log('chatExtras tests passed');
