@@ -15,7 +15,7 @@ import { useAuth } from '../../context/AuthContext';
 import { listAuditLogs, listProfiles, listConversations, listGalleryItems } from '../../lib/adminApi';
 import { listSafetyReports } from '../../lib/safetyApi';
 import { UserProfile } from '../../types';
-import { formatTimestamp } from '../../lib/utils';
+import { formatTimestamp, formatDayHeading } from '../../lib/utils';
 import { readableMessagePreview } from '../../lib/chatExtras';
 
 interface LiveActivityFeedProps {
@@ -58,6 +58,9 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
   const [events, setEvents] = useState<FeedEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState<string>('all');
+  // How many filtered events to render at once; grows on "Load more" instead of rendering the
+  // entire platform-wide event stream in one unbounded, ungrouped list.
+  const [shown, setShown] = useState(50);
 
   const loadFeed = useCallback(async () => {
     if (!user) return;
@@ -191,6 +194,27 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
     return true;
   });
 
+  // Reset pagination whenever the filter or underlying event list changes, so switching tabs
+  // doesn't strand you 200 events deep in a different category.
+  useEffect(() => {
+    setShown(50);
+  }, [filterType, events]);
+
+  const visibleEvents = filteredEvents.slice(0, shown);
+
+  // Grouped by day so a long stream reads as "Today / Yesterday / Sep 24" instead of one
+  // undifferentiated wall of rows.
+  const groupedEvents = (() => {
+    const groups: { heading: string; items: FeedEvent[] }[] = [];
+    for (const event of visibleEvents) {
+      const heading = formatDayHeading(event.timestamp);
+      const last = groups[groups.length - 1];
+      if (last && last.heading === heading) last.items.push(event);
+      else groups.push({ heading, items: [event] });
+    }
+    return groups;
+  })();
+
   const getEventIcon = (type: FeedEvent['type']) => {
     switch (type) {
       case 'user_created':
@@ -260,74 +284,94 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
             No events found in this category.
           </div>
         ) : (
-          filteredEvents.map(event => (
-            <div
-              key={event.id}
-              className={`p-3.5 bg-vault-900 border rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:border-vault-700 transition-all ${
-                event.severity === 'danger'
-                  ? 'border-rose-900/60 bg-rose-950/20'
-                  : event.severity === 'warning'
-                  ? 'border-amber-900/60 bg-amber-950/20'
-                  : 'border-vault-800'
-              }`}
-            >
-              <div className="flex items-start gap-3 min-w-0">
-                <div className="p-2.5 rounded-xl bg-vault-950 border border-vault-800 shrink-0 mt-0.5">
-                  {getEventIcon(event.type)}
+          <>
+            {groupedEvents.map(group => (
+              <div key={group.heading} className="space-y-2">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-vault-500 pt-1">
+                  {group.heading}
                 </div>
+                {group.items.map(event => (
+                  <div
+                    key={event.id}
+                    className={`p-3.5 bg-vault-900 border rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:border-vault-700 transition-all ${
+                      event.severity === 'danger'
+                        ? 'border-rose-900/60 bg-rose-950/20'
+                        : event.severity === 'warning'
+                        ? 'border-amber-900/60 bg-amber-950/20'
+                        : 'border-vault-800'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="p-2.5 rounded-xl bg-vault-950 border border-vault-800 shrink-0 mt-0.5">
+                        {getEventIcon(event.type)}
+                      </div>
 
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                    <span className="text-xs font-bold text-white">{event.title}</span>
-                    <span className="text-[11px] font-mono text-vault-500 flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {formatTimestamp(event.timestamp)}
-                    </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                          <span className="text-xs font-bold text-white">{event.title}</span>
+                          <span className="text-[11px] font-mono text-vault-500 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {formatTimestamp(event.timestamp)}
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-vault-300 m-0 line-clamp-2">
+                          {event.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Quick Action Links */}
+                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      {event.targetUserId && (
+                        <button
+                          type="button"
+                          onClick={() => navigateUser(event.targetUserId!)}
+                          className="px-2.5 py-1.5 rounded-xl bg-vault-800 hover:bg-emerald hover:text-black border border-vault-700 text-vault-200 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                          <span>User 360</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      )}
+
+                      {event.conversationId && (
+                        <button
+                          type="button"
+                          onClick={() => navigateConv(event.conversationId!, event.messageId)}
+                          className="px-2.5 py-1.5 rounded-xl bg-vault-800 hover:bg-cyan-500 hover:text-black border border-vault-700 text-vault-200 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                          <span>Chat Context</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      )}
+
+                      {event.reportId && (
+                        <button
+                          type="button"
+                          onClick={() => navigateReport(event.reportId!)}
+                          className="px-2.5 py-1.5 rounded-xl bg-rose-950 hover:bg-rose-600 hover:text-white border border-rose-800 text-rose-300 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                          <span>Investigate</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-
-                  <p className="text-xs text-vault-300 m-0 line-clamp-2">
-                    {event.description}
-                  </p>
-                </div>
+                ))}
               </div>
+            ))}
 
-              {/* Quick Action Links */}
-              <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                {event.targetUserId && (
-                  <button
-                    type="button"
-                    onClick={() => navigateUser(event.targetUserId!)}
-                    className="px-2.5 py-1.5 rounded-xl bg-vault-800 hover:bg-emerald hover:text-black border border-vault-700 text-vault-200 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
-                  >
-                    <span>User 360</span>
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                )}
-
-                {event.conversationId && (
-                  <button
-                    type="button"
-                    onClick={() => navigateConv(event.conversationId!, event.messageId)}
-                    className="px-2.5 py-1.5 rounded-xl bg-vault-800 hover:bg-cyan-500 hover:text-black border border-vault-700 text-vault-200 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
-                  >
-                    <span>Chat Context</span>
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                )}
-
-                {event.reportId && (
-                  <button
-                    type="button"
-                    onClick={() => navigateReport(event.reportId!)}
-                    className="px-2.5 py-1.5 rounded-xl bg-rose-950 hover:bg-rose-600 hover:text-white border border-rose-800 text-rose-300 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
-                  >
-                    <span>Investigate</span>
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
-            </div>
-          ))
+            {shown < filteredEvents.length && (
+              <button
+                type="button"
+                onClick={() => setShown(n => n + 50)}
+                className="w-full py-2.5 rounded-xl text-xs font-bold text-vault-300 bg-vault-900 hover:bg-vault-850 border border-vault-800 transition-colors"
+              >
+                Load {Math.min(50, filteredEvents.length - shown)} more
+                ({filteredEvents.length - shown} remaining)
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
