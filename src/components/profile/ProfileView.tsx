@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   FolderLock,
   ChevronRight,
+  KeyRound,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -25,10 +26,14 @@ interface ProfileViewProps {
 export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
   const { user, isSuperAdmin, logout, enrollBiometrics, disableBiometrics } = useAuth();
   const { showToast } = useToast();
-  const { preferences, updatePreferences, panicLock } = useVault();
+  const { preferences, updatePreferences, updateSecret, panicLock } = useVault();
 
   const [biometricsEnabled, setBiometricsEnabled] = useState(user?.biometric_enabled ?? false);
   const [readReceipts, setReadReceipts] = useState(true);
+  const [oldPin, setOldPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [pinUpdating, setPinUpdating] = useState(false);
 
   useEffect(() => {
     if (user?.biometric_enabled !== undefined) {
@@ -61,6 +66,29 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
     logout();
     panicLock();
     showToast('Signed out', 'info');
+  };
+
+  const handleUpdatePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPin.length < 4) {
+      showToast('PIN must be at least 4 characters', 'error');
+      return;
+    }
+    if (newPin !== confirmPin) {
+      showToast('New PINs do not match', 'error');
+      return;
+    }
+    setPinUpdating(true);
+    try {
+      await updateSecret(oldPin, newPin);
+      setOldPin('');
+      setNewPin('');
+      setConfirmPin('');
+    } catch {
+      // Error toast already triggered in VaultContext
+    } finally {
+      setPinUpdating(false);
+    }
   };
 
   return (
@@ -158,6 +186,55 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenVault }) => {
             <ChevronRight className="w-4 h-4 text-zinc-500" />
           </button>
         )}
+
+        {/* Change Vault PIN */}
+        <div className="p-3 rounded-xl bg-[#171717] border border-[#262626] space-y-2.5">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-[#222222] text-[#10B981]">
+              <KeyRound className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-white">Change Vault PIN</p>
+              <p className="text-[11px] text-zinc-500">Stored as a salted hash - not recoverable</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleUpdatePin} className="space-y-2">
+            <input
+              type="password"
+              required
+              value={oldPin}
+              onChange={e => setOldPin(e.target.value)}
+              placeholder="Current PIN"
+              className="w-full bg-[#0A0A0A] border border-[#262626] focus:border-[#10B981] rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-600 outline-none transition-colors"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="password"
+                required
+                value={newPin}
+                onChange={e => setNewPin(e.target.value)}
+                placeholder="New PIN (min 4)"
+                className="w-full bg-[#0A0A0A] border border-[#262626] focus:border-[#10B981] rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-600 outline-none transition-colors"
+              />
+              <input
+                type="password"
+                required
+                value={confirmPin}
+                onChange={e => setConfirmPin(e.target.value)}
+                placeholder="Confirm new PIN"
+                className="w-full bg-[#0A0A0A] border border-[#262626] focus:border-[#10B981] rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-600 outline-none transition-colors"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={pinUpdating || !oldPin || !newPin}
+              className="w-full bg-[#222222] hover:bg-[#2a2a2a] active:scale-98 disabled:opacity-40 text-white font-semibold py-2 rounded-lg text-xs border border-[#262626] transition-all"
+            >
+              {pinUpdating ? 'Updating...' : 'Update PIN'}
+            </button>
+          </form>
+        </div>
 
         {/* Stealth Cover Game Selector */}
         <div className="flex items-center justify-between p-3 rounded-xl bg-[#171717] border border-[#262626]">
