@@ -8,16 +8,6 @@ export default {
   theme: {
     extend: {
       colors: {
-        obsidian: {
-          950: '#050505',
-          900: '#0C0D0F',
-          850: '#131417',
-          800: '#1B1D21',
-          700: '#1E2025',
-          600: '#2E3137',
-          400: '#A7ABB3',
-          200: '#E4E6E9',
-        },
         // Neutral ramp of the redesign (AMOLED ground → text). 950 is the app background.
         vault: {
           50: '#F4F5F6',

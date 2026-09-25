@@ -7,7 +7,7 @@ export type Json =
   | Json[];
 
 export type UserRole = 'user' | 'super_admin';
-export type AccountStatus = 'active' | 'suspended' | 'banned';
+export type AccountStatus = 'active' | 'suspended' | 'banned' | 'deleted';
 export type RequestStatus = 'pending' | 'accepted' | 'rejected';
 export type UnlockMethodType = 'pin' | 'long_press_header' | 'tile_pattern' | 'secret_gesture' | 'score_threshold';
 export type CoverGameType =
@@ -382,6 +382,10 @@ export interface Database {
       admin_set_user_status: {
         Args: { p_target: string; p_status: AccountStatus; p_reason?: string | null };
         Returns: Database['public']['Tables']['profiles']['Row'];
+      };
+      delete_own_account: {
+        Args: { p_reason?: string | null };
+        Returns: undefined;
       };
       admin_delete_gallery_item: {
         Args: { p_item_id: string };

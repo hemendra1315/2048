@@ -307,9 +307,9 @@ export const GameSnake: React.FC = () => {
             <button
               type="button"
               onClick={restartGame}
-              className="min-h-[44px] min-w-[140px] bg-emerald hover:bg-emerald-400 text-black text-xs font-bold px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald/30 cursor-pointer transition-transform active:scale-95"
+              className="btn btn-p min-w-[140px]"
             >
-              <RotateCcw className="w-4 h-4" /> Play Again
+              <RotateCcw className="i-sm" /> Play Again
             </button>
           </div>
         )}

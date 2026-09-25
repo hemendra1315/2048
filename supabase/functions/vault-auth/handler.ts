@@ -65,7 +65,7 @@ const USERNAME_RE = /^[a-z0-9_]{2,24}$/;
 interface Account {
   user_id: string;
   username: string;
-  status: 'active' | 'suspended' | 'banned';
+  status: 'active' | 'suspended' | 'banned' | 'deleted';
   biometric_enabled: boolean;
   auth_migrated: boolean;
 }
@@ -80,6 +80,13 @@ class HttpError extends Error {
     this.code = code;
     this.retryAfter = retryAfter;
   }
+}
+
+/** 'deleted' is permanent and self-inflicted, so it gets its own message instead of "suspended". */
+function assertActiveStatus(status: unknown): void {
+  if (status === 'active') return;
+  if (status === 'deleted') throw new HttpError(403, 'account_deleted', 'This account has been deleted');
+  throw new HttpError(403, 'account_suspended', 'This account is suspended');
 }
 
 function passwordProblem(password: unknown): string | null {
@@ -209,7 +216,7 @@ export function createHandler(deps: { auth: AuthBackend; db: Db; config: Config 
         return await failAuth(bucket, LIMITS.loginAccount, ip, 'Invalid username or password');
       }
       await clear(bucket);
-      if (account.status !== 'active') throw new HttpError(403, 'account_suspended', 'This account is suspended');
+      assertActiveStatus(account.status);
       session ??= await auth.passwordSignIn(emailFor(account.user_id), password);
       if (!session) throw new HttpError(500, 'session_failed', 'Could not start a session');
       await db.rpc('auth_touch_login', { p_user_id: account.user_id });
@@ -233,7 +240,7 @@ export function createHandler(deps: { auth: AuthBackend; db: Db; config: Config 
       if (!account || !ok) {
         return await failAuth(bucket, LIMITS.recoveryAccount, ip, 'Invalid username or recovery key');
       }
-      if (account.status !== 'active') throw new HttpError(403, 'account_suspended', 'This account is suspended');
+      assertActiveStatus(account.status);
 
       await ensureAuthUser(account.user_id, newPassword as string);
       const newCode = await db.rpc<string>('auth_after_password_reset', {
@@ -373,7 +380,8 @@ export function createHandler(deps: { auth: AuthBackend; db: Db; config: Config 
       }
 
       const profile = await profileOf(stored.user_id);
-      if (!profile || profile.status !== 'active') throw new HttpError(403, 'account_suspended', 'This account is suspended');
+      if (!profile) throw new HttpError(403, 'account_suspended', 'This account is suspended');
+      assertActiveStatus(profile.status);
       if (!profile.biometric_enabled) throw new HttpError(401, 'biometrics_disabled', 'Fingerprint unlock is turned off');
       if (!(await auth.userExists(stored.user_id))) throw new HttpError(409, 'sign_in_with_password', 'Sign in with your password first');
 

@@ -309,17 +309,17 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => handleRespond(req.id, true)}
-                    className="p-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl shadow-md"
+                    className="ib ib-p"
                     title="Accept Request"
                   >
-                    <Check className="w-4 h-4" />
+                    <Check className="i-sm" />
                   </button>
                   <button
                     onClick={() => handleRespond(req.id, false)}
-                    className="p-2 bg-vault-800 hover:bg-vault-700 active:scale-95 text-vault-400 hover:text-rose-400 rounded-xl border border-vault-700"
+                    className="ib ib-s hover:!text-rose-400"
                     title="Decline Request"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="i-sm" />
                   </button>
                 </div>
               </div>

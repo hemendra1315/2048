@@ -13,6 +13,9 @@ import {
   Check,
   Smartphone,
   ChevronRight,
+  Download,
+  Trash2,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useVault } from '../../context/VaultContext';
@@ -21,6 +24,7 @@ import { useToast } from '../../context/ToastContext';
 import { getPresenceSharing, setPresenceSharing, getReadReceiptSharing, setReadReceiptSharing } from '../../lib/presence';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import { listBlocked, unblockUser } from '../../lib/blocks';
+import { exportMyData, downloadDataExport, deleteOwnAccount } from '../../lib/accountApi';
 import { UserProfile } from '../../types';
 import { CoverGameType } from '../../types';
 import { useBackHandler } from '../../lib/backButton';
@@ -51,6 +55,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [shareOnlineSaving, setShareOnlineSaving] = useState(false);
   const [blocked, setBlocked] = useState<{ profile: UserProfile; blockedAt: string }[]>([]);
   const [showBlocked, setShowBlocked] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!user || !isSupabaseConfigured()) return;
@@ -157,6 +165,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     logout();
     panicLock();
     showToast('Signed out', 'info');
+  };
+
+  const handleExportData = async () => {
+    if (!user) return;
+    setExporting(true);
+    try {
+      const data = await exportMyData(user.id);
+      downloadDataExport(data);
+      showToast('Your data has been downloaded', 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not export your data', 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!user || deleteConfirmText !== 'DELETE') return;
+    setDeleting(true);
+    try {
+      await deleteOwnAccount(user.id);
+      showToast('Your account has been deleted', 'info');
+      logout();
+      panicLock();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not delete your account', 'error');
+      setDeleting(false);
+    }
   };
 
   const dismissKeyboard = () => {
@@ -493,11 +529,109 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
             <LogOut className="i" aria-hidden />
             <span className="t-body flex-1 font-semibold">Sign Out</span>
           </button>
+
+          <div className="divider ml-4" />
+
+          <button
+            type="button"
+            onClick={handleExportData}
+            disabled={exporting}
+            className="set-row w-full text-left disabled:opacity-50"
+          >
+            <Download className="i c2" aria-hidden />
+            <div className="flex-1 min-w-0">
+              <span className="t-body block">Export my data</span>
+              <span className="t-cap c3">Download a copy as a JSON file</span>
+            </div>
+            {exporting && <span className="t-cap c3">Preparing…</span>}
+          </button>
+
+          <div className="divider ml-4" />
+
+          <button
+            type="button"
+            onClick={() => setDeleteOpen(true)}
+            className="set-row w-full text-left !text-[#FF8A93] hover:!text-red-300"
+          >
+            <Trash2 className="i" aria-hidden />
+            <div className="flex-1 min-w-0">
+              <span className="t-body block font-semibold">Delete Account</span>
+              <span className="t-cap !text-[#FF8A93]/70">Permanent. Your chats stay for the other person.</span>
+            </div>
+          </button>
         </div>
       </section>
 
       {/* App Version Footer */}
       <p className="t-cap mono text-center m-0">Games {__APP_VERSION__}</p>
+
+      {deleteOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-account-title"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center anim-fade"
+          onKeyDown={e => { if (e.key === 'Escape' && !deleting) { setDeleteOpen(false); setDeleteConfirmText(''); } }}
+        >
+          <div className="w-full sm:max-w-sm max-h-[90vh] bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col anim-modal">
+            <div className="p-4 border-b border-vault-800 flex items-center justify-between">
+              <span id="delete-account-title" className="t-body font-bold text-white flex items-center gap-2">
+                <Trash2 className="w-4 h-4 text-danger" aria-hidden /> Delete Account
+              </span>
+              <button
+                type="button"
+                onClick={() => { setDeleteOpen(false); setDeleteConfirmText(''); }}
+                disabled={deleting}
+                className="ib ib-s rounded-full"
+                aria-label="Cancel"
+              >
+                <X className="i" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <p className="t-sm c2 m-0">
+                This permanently deletes your profile photo, gallery, game scores, preferences and PIN.
+                Your username stays visible on chats you're already part of, but your name and photo will
+                show as <strong className="text-white">"Deleted Account"</strong> to the people you talked to.
+              </p>
+              <p className="t-sm c2 m-0">This cannot be undone.</p>
+
+              <label className="field">
+                <span className="lab">Type <span className="mono text-danger">DELETE</span> to confirm</span>
+                <input
+                  type="text"
+                  className="inp"
+                  value={deleteConfirmText}
+                  onChange={e => setDeleteConfirmText(e.target.value)}
+                  placeholder="DELETE"
+                  autoCapitalize="characters"
+                  disabled={deleting}
+                />
+              </label>
+            </div>
+
+            <div className="p-4 pt-0 flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setDeleteOpen(false); setDeleteConfirmText(''); }}
+                disabled={deleting}
+                className="btn btn-s flex-1"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteAccount}
+                disabled={deleting || deleteConfirmText !== 'DELETE'}
+                className="btn btn-d flex-1"
+              >
+                {deleting ? 'Deleting…' : 'Delete forever'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -221,10 +221,10 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
           <button
             type="button"
             onClick={() => setPhotoSheetOpen(true)}
-            className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-vault-800 border-2 border-vault-950 flex items-center justify-center text-vault-200 hover:bg-vault-700 active:scale-95 transition-all shadow-md cursor-pointer"
+            className="absolute bottom-0 right-0 w-10 h-10 rounded-full bg-vault-800 border-2 border-vault-950 flex items-center justify-center text-vault-200 hover:bg-vault-700 active:scale-95 transition-all shadow-md cursor-pointer"
             aria-label="Change profile photo"
           >
-            <Camera className="w-4 h-4" aria-hidden />
+            <Camera className="w-[18px] h-[18px]" aria-hidden />
           </button>
         </div>
 

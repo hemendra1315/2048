@@ -80,7 +80,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           await signOutAndReleasePush();
           setUser(null);
           showToast(
-            profile.status === 'banned'
+            profile.status === 'deleted'
+              ? 'This account has been deleted.'
+              : profile.status === 'banned'
               ? 'This account has been permanently suspended by administration.'
               : 'This account is suspended.',
             'error',

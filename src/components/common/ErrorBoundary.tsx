@@ -58,9 +58,9 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <button
               type="button"
               onClick={this.reset}
-              className="w-full min-h-[44px] flex items-center justify-center gap-2 bg-[#10B981] hover:bg-emerald-400 text-black font-bold py-2.5 rounded-xl text-sm transition-colors cursor-pointer"
+              className="btn btn-p btn-block"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="i-sm" />
               <span>Try again</span>
             </button>
             {secondaryAction && (
