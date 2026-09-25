@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { VaultProvider, useVault } from './context/VaultContext';
@@ -6,10 +6,12 @@ import { GameProvider } from './context/GameContext';
 import { LauncherCoverView } from './components/launcher/LauncherCoverView';
 import { AuthModal } from './components/auth/AuthModal';
 import { SocialLayout } from './components/layout/SocialLayout';
-import { AdminLayout } from './components/admin/AdminLayout';
 import { UnlockTipModal } from './components/launcher/UnlockTipModal';
 import { ErrorBoundary } from './components/system/ErrorBoundary';
 import { getInviteUidFromUrl, clearInviteFromUrl } from './lib/invite';
+
+// Only super admins ever navigate here - keep it out of everyone else's initial bundle.
+const AdminLayout = lazy(() => import('./components/admin/AdminLayout').then(m => ({ default: m.AdminLayout })));
 
 const MainNavigator: React.FC = () => {
   const { user, isSuperAdmin, recoveryCodeToShow, justRegistered, acknowledgeJustRegistered } = useAuth();
@@ -52,7 +54,11 @@ const MainNavigator: React.FC = () => {
 
   // 4. If Super Admin Hub is active (display only; admin data access is enforced by RLS on the server)
   if (isSuperAdmin && adminMode) {
-    return <AdminLayout onReturnToUserMode={() => setAdminMode(false)} />;
+    return (
+      <Suspense fallback={null}>
+        <AdminLayout onReturnToUserMode={() => setAdminMode(false)} />
+      </Suspense>
+    );
   }
 
   // 5. Authenticated Private Social Layer

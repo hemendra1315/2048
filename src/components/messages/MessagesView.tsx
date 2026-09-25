@@ -11,7 +11,6 @@ import {
   Link2,
   Copy,
 } from 'lucide-react';
-import QRCode from 'qrcode';
 import { ConversationItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -55,13 +54,22 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
   useEffect(() => {
     if (!newChatModalOpen || !user?.uid) return;
-    QRCode.toDataURL(buildInviteLink(user.uid), {
-      width: 200,
-      margin: 1,
-      color: { dark: '#0A0A0A', light: '#FFFFFF' },
-    })
-      .then(setInviteQrDataUrl)
+    let cancelled = false;
+    import('qrcode')
+      .then(({ default: QRCode }) =>
+        QRCode.toDataURL(buildInviteLink(user.uid), {
+          width: 200,
+          margin: 1,
+          color: { dark: '#0A0A0A', light: '#FFFFFF' },
+        })
+      )
+      .then(dataUrl => {
+        if (!cancelled) setInviteQrDataUrl(dataUrl);
+      })
       .catch(err => console.error('Failed to generate invite QR code:', err));
+    return () => {
+      cancelled = true;
+    };
   }, [newChatModalOpen, user?.uid]);
 
   const copyInviteLink = () => {
