@@ -1,27 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  ArrowLeft,
-  Send,
-  CheckCheck,
-  Check,
-  Image as ImageIcon,
-  Mic,
-  Play,
-  Pause,
-  Lock,
-  MoreVertical,
-  X,
-  Smile,
-  BellOff,
-  Trash2,
-  Info,
-} from 'lucide-react';
+import { ArrowLeft, Send, Lock, MoreVertical, Smile, Mic, Image as ImageIcon } from 'lucide-react';
 import { MessageItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { formatTimestamp, getAvatarUrl, handleImageError } from '../../lib/utils';
+import { getAvatarUrl } from '../../lib/utils';
 import { useToast } from '../../context/ToastContext';
+import { MessageBubble } from './chatRoom/MessageBubble';
+import { ChatOptionsSheet } from './chatRoom/ChatOptionsSheet';
+import { ContactInfoPanel } from './chatRoom/ContactInfoPanel';
 
 interface ChatRoomProps {
   conversationId: string;
@@ -408,107 +395,17 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             </p>
           </div>
         ) : (
-          messages.map(msg => {
-            const isMe = msg.sender_id === user?.id;
-            const isImage = msg.content.startsWith('[IMAGE]');
-            const isVoice = msg.content.startsWith('[VOICE_NOTE');
-            const isSticker = msg.content.startsWith('[STICKER]');
-            const voiceMatch = msg.content.match(/^\[VOICE_NOTE:(.*?)\](.*)$/);
-            const voiceDuration = voiceMatch ? voiceMatch[1] : '0:14';
-            const voiceDataUrl = voiceMatch ? voiceMatch[2] : '';
-
-            if (isSticker) {
-              return (
-                <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-fade-in`}>
-                  <span className="text-5xl leading-none">{msg.content.replace('[STICKER]', '')}</span>
-                  <div className="flex items-center gap-1 text-[10px] text-zinc-500 mt-1 px-1">
-                    <span>{formatTimestamp(msg.created_at)}</span>
-                    {isMe && (
-                      msg.is_read ? (
-                        <CheckCheck className="w-3.5 h-3.5 text-[#10B981]" />
-                      ) : (
-                        <Check className="w-3.5 h-3.5 text-zinc-500" />
-                      )
-                    )}
-                  </div>
-                </div>
-              );
-            }
-
-            return (
-              <div
-                key={msg.id}
-                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-fade-in`}
-              >
-                <div
-                  className={`max-w-[85%] sm:max-w-[70%] rounded-2xl text-sm leading-relaxed ${
-                    isImage
-                      ? 'p-1'
-                      : `p-3 ${
-                          isMe
-                            ? 'bg-[#10B981] text-black font-medium rounded-br-xs shadow-md'
-                            : 'bg-[#171717] border border-[#262626] text-white rounded-bl-xs shadow-sm'
-                        }`
-                  }`}
-                >
-                  {isImage ? (
-                    <div
-                      onClick={() => onOpenMedia && onOpenMedia(msg.content.replace('[IMAGE]', ''))}
-                      className="relative cursor-pointer rounded-lg overflow-hidden border border-white/10 max-w-[200px]"
-                    >
-                      <img
-                        src={msg.content.replace('[IMAGE]', '')}
-                        alt="Attachment"
-                        className="max-h-40 w-full object-cover"
-                        loading="lazy"
-                        onError={handleImageError}
-                      />
-                      <span className="absolute bottom-1 right-1.5 text-[10px] font-medium text-white bg-black/50 px-1.5 py-0.5 rounded-md">
-                        {formatTimestamp(msg.created_at)}
-                      </span>
-                    </div>
-                  ) : isVoice ? (
-                    <div className="flex items-center gap-3 min-w-[180px] py-1">
-                      <button
-                        onClick={() => voiceDataUrl ? playAudio(voiceDataUrl, msg.id) : setPlayingAudioId(playingAudioId === msg.id ? null : msg.id)}
-                        className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                          isMe ? 'bg-black text-[#10B981]' : 'bg-[#10B981] text-black'
-                        } active:scale-90 transition-transform`}
-                      >
-                        {playingAudioId === msg.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
-                      </button>
-                      <div className="flex-1 space-y-1">
-                        <div className="h-2 rounded-full bg-black/20 overflow-hidden">
-                          <div
-                            className={`h-full ${isMe ? 'bg-black' : 'bg-[#10B981]'} ${
-                              playingAudioId === msg.id ? 'w-3/4 animate-pulse' : 'w-1/4'
-                            }`}
-                          />
-                        </div>
-                        <span className={`text-[10px] font-mono ${isMe ? 'text-black/70' : 'text-zinc-400'}`}>
-                          Voice Note ({voiceDuration})
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <span>{msg.content}</span>
-                  )}
-                </div>
-
-                {/* Meta info / Read receipt */}
-                <div className="flex items-center gap-1 text-[10px] text-zinc-500 mt-1 px-1">
-                  <span>{formatTimestamp(msg.created_at)}</span>
-                  {isMe && (
-                    msg.is_read ? (
-                      <CheckCheck className="w-3.5 h-3.5 text-[#10B981]" />
-                    ) : (
-                      <Check className="w-3.5 h-3.5 text-zinc-500" />
-                    )
-                  )}
-                </div>
-              </div>
-            );
-          })
+          messages.map(msg => (
+            <MessageBubble
+              key={msg.id}
+              msg={msg}
+              isMe={msg.sender_id === user?.id}
+              onOpenMedia={onOpenMedia}
+              playingAudioId={playingAudioId}
+              setPlayingAudioId={setPlayingAudioId}
+              onPlayAudio={playAudio}
+            />
+          ))
         )}
 
         {isTyping && (
@@ -623,83 +520,22 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
       {/* Chat Options Sheet */}
       {showChatOptions && (
-        <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-end justify-center"
-          onClick={() => setShowChatOptions(false)}
-        >
-          <div
-            className="bg-[#111111] border-t border-[#262626] rounded-t-2xl w-full max-w-lg p-3 space-y-1.5 animate-fade-in"
-            onClick={e => e.stopPropagation()}
-          >
-            <button
-              onClick={() => { setShowChatOptions(false); setShowContactInfo(true); }}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-white hover:bg-[#171717] transition-colors"
-            >
-              <Info className="w-4 h-4 text-zinc-400" />
-              View contact
-            </button>
-            <button
-              onClick={() => { setShowChatOptions(false); showToast('Notifications muted', 'success'); }}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-white hover:bg-[#171717] transition-colors"
-            >
-              <BellOff className="w-4 h-4 text-zinc-400" />
-              Mute notifications
-            </button>
-            <button
-              onClick={handleClearChat}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-red-400 hover:bg-[#171717] transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              Clear chat
-            </button>
-            <div className="pt-1.5 border-t border-[#262626]">
-              <button
-                onClick={() => setShowChatOptions(false)}
-                className="w-full px-4 py-3 rounded-xl text-sm font-semibold text-zinc-300 hover:bg-[#171717] transition-colors text-center"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+        <ChatOptionsSheet
+          onClose={() => setShowChatOptions(false)}
+          onViewContact={() => {
+            setShowChatOptions(false);
+            setShowContactInfo(true);
+          }}
+          onMute={() => {
+            setShowChatOptions(false);
+            showToast('Notifications muted', 'success');
+          }}
+          onClearChat={handleClearChat}
+        />
       )}
 
       {/* Contact Info Panel */}
-      {showContactInfo && (
-        <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
-          onClick={() => setShowContactInfo(false)}
-        >
-          <div
-            className="bg-[#111111] border border-[#262626] rounded-2xl w-full max-w-sm p-6 space-y-4 animate-fade-in"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white">Contact info</h3>
-              <button onClick={() => setShowContactInfo(false)} className="text-zinc-500 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="flex flex-col items-center gap-2 py-2">
-              <img
-                src={partner.avatar_url || getAvatarUrl(partner.uid)}
-                alt={partner.display_name}
-                className="w-20 h-20 rounded-2xl bg-[#171717] border border-[#262626] object-cover"
-              />
-              <h4 className="text-base font-bold text-white">{partner.display_name}</h4>
-              <p className="text-xs font-mono text-zinc-500">{partner.uid}</p>
-            </div>
-
-            <div className="flex items-start gap-3 p-3 bg-[#171717] rounded-xl">
-              <Lock className="w-4 h-4 text-[#10B981] mt-0.5 shrink-0" />
-              <p className="text-xs text-zinc-400">
-                Messages and calls in this chat are end-to-end encrypted. Only you and {partner.display_name} can read or listen to them.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+      {showContactInfo && <ContactInfoPanel partner={partner} onClose={() => setShowContactInfo(false)} />}
     </div>
   );
 };
