@@ -232,7 +232,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     const cleanUid = extractUidFromInput(newChatUidInput);
 
     if (user.uid === cleanUid) {
-      alert("That's your own invite link or UID.");
+      showToast("That's your own invite link or UID.", 'error');
       return;
     }
 
@@ -245,7 +245,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           .maybeSingle();
 
         if (error || !rawProfile) {
-          alert(`No one found with that invite link or UID "${cleanUid}"`);
+          showToast(`No one found with that invite link or UID "${cleanUid}"`, 'error');
           return;
         }
 
@@ -279,7 +279,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         }
       } catch (err) {
         console.error('Error initiating conversation:', err);
-        alert('Failed to initialize encrypted channel with peer');
+        showToast('Failed to initialize encrypted channel with peer', 'error');
       }
     } else {
       const allProfiles = mockBackend.getProfiles();
@@ -294,7 +294,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         setNewChatModalOpen(false);
         setNewChatUidInput('');
       } else {
-        alert(`No one found with that invite link or UID "${cleanUid}"`);
+        showToast(`No one found with that invite link or UID "${cleanUid}"`, 'error');
       }
     }
   };
