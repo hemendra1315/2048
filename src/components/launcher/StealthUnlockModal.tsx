@@ -43,11 +43,14 @@ export const StealthUnlockModal: React.FC = () => {
     setBiometricLoading(true);
     try {
       const avail = await BiometricService.isAvailable();
-      if (avail.available) {
-        unlockWithBiometric();
-      } else {
+      if (!avail.available) {
         showToast('Biometric hardware not detected. Enter your PIN.', 'info');
+        return;
       }
+      // unlockWithBiometric runs a real, server-verified WebAuthn ceremony - it only
+      // unlocks on a signature match against the enrolled credential, never on
+      // hardware presence alone.
+      await unlockWithBiometric();
     } catch {
       showToast('Biometrics unavailable. Enter your PIN.', 'info');
     } finally {

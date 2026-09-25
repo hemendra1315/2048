@@ -38,7 +38,7 @@ interface VaultContextType {
   openUnlockModal: () => void;
   closeUnlockModal: () => void;
   verifyAndUnlock: (secret: string) => Promise<boolean>;
-  unlockWithBiometric: () => void;
+  unlockWithBiometric: () => Promise<boolean>;
   panicLock: () => void;
   updatePreferences: (updates: Partial<UserPreferences>) => Promise<void>;
   updateSecret: (oldSecret: string, newSecret: string) => Promise<void>;
@@ -47,7 +47,7 @@ interface VaultContextType {
 const VaultContext = createContext<VaultContextType | undefined>(undefined);
 
 export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
+  const { user, loginWithBiometrics } = useAuth();
   const { showToast } = useToast();
   const [isUnlocked, setIsUnlocked] = useState(() => !!getInviteUidFromUrl());
   const [unlockModalOpen, setUnlockModalOpen] = useState(false);
@@ -169,11 +169,19 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   };
 
-  const unlockWithBiometric = useCallback(() => {
-    setIsUnlocked(true);
-    setUnlockModalOpen(false);
-    showToast('Unlocked', 'success');
-  }, [showToast]);
+  const unlockWithBiometric = useCallback(async (): Promise<boolean> => {
+    try {
+      // Runs the same server-verified WebAuthn ceremony as fingerprint login: a real signature
+      // check against the user's enrolled credential, not just a hardware-presence check.
+      await loginWithBiometrics(user?.username);
+      setIsUnlocked(true);
+      setUnlockModalOpen(false);
+      return true;
+    } catch {
+      // loginWithBiometrics already surfaced a toast for the failure.
+      return false;
+    }
+  }, [loginWithBiometrics, user?.username]);
 
   const updatePreferences = async (updates: Partial<UserPreferences>) => {
     if (!user) return;
