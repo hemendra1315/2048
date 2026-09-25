@@ -386,6 +386,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     if (error) {
       console.error('Start game error:', error);
       showToast(error.message || 'Could not start a game', 'error');
+    } else {
+      await loadMessages();
     }
   };
 
