@@ -8,6 +8,7 @@ import {
   Trash2,
   Copy,
   ExternalLink,
+  ArrowLeft,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -53,6 +54,9 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
   const [highlightMsgId, setHighlightMsgId] = useState<string | null>(targetHighlightId || null);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  // Below `lg` the list and thread can't sit side by side (no room), so only one shows at a
+  // time, like the phone chat view elsewhere in the app. Irrelevant at lg+, where both show.
+  const [mobileListOpen, setMobileListOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const highlightedMessageRef = useRef<HTMLDivElement>(null);
@@ -163,7 +167,7 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-140px)] min-h-[600px] bg-vault-950 border border-vault-800 rounded-3xl overflow-hidden shadow-2xl">
       {/* Left Sidebar: Conversation Index */}
-      <div className="w-full lg:w-80 border-b lg:border-b-0 lg:border-r border-vault-800 flex flex-col bg-vault-950/80">
+      <div className={`w-full lg:w-80 border-b lg:border-b-0 lg:border-r border-vault-800 flex-col bg-vault-950/80 ${mobileListOpen ? 'flex' : 'hidden'} lg:flex`}>
         <div className="p-3.5 border-b border-vault-800">
           <div className="relative">
             <Search className="w-4 h-4 text-vault-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -197,6 +201,7 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
                   onClick={() => {
                     setSelectedConvId(c.id);
                     setHighlightMsgId(null);
+                    setMobileListOpen(false);
                   }}
                   className={`w-full p-3 rounded-2xl text-left flex items-start gap-3 transition-all cursor-pointer border ${
                     isSelected
@@ -233,12 +238,20 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
       </div>
 
       {/* Right Main Chat Panel: Real Message Stream */}
-      <div className="flex-1 flex flex-col min-w-0 bg-vault-900">
+      <div className={`flex-1 flex-col min-w-0 bg-vault-900 ${mobileListOpen ? 'hidden' : 'flex'} lg:flex`}>
         {activeConv ? (
           <>
             {/* Conversation Header */}
             <div className="p-4 border-b border-vault-800 bg-vault-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setMobileListOpen(true)}
+                  className="lg:hidden ib ib-s shrink-0"
+                  aria-label="Back to conversation list"
+                >
+                  <ArrowLeft className="i" />
+                </button>
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="flex items-center gap-2 bg-vault-900 px-3 py-1.5 rounded-xl border border-vault-750">
                     <Avatar src={userA?.avatar_url} name={userA?.display_name || 'User A'} size={32} />
