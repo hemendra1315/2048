@@ -42,7 +42,7 @@ import {
   SafetyReport,
   getSafetyReports,
 } from '../../lib/safetyApi';
-import { formatDetailedDate } from '../../lib/utils';
+import { formatDetailedDate, formatDayHeading } from '../../lib/utils';
 import { readableMessagePreview } from '../../lib/chatExtras';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -58,6 +58,49 @@ interface User360ViewProps {
 
 export type User360Tab = 'overview' | 'chats' | 'media' | 'reports' | 'activity' | 'notes';
 
+type ActivityEventType = 'registration' | 'chat' | 'media' | 'report' | 'connection' | 'status';
+
+/** One color/icon per event type so a scanning eye can tell them apart at a glance, not just by
+ * reading the title text - the "Complete User Activity Log" used to render every type identically. */
+const ACTIVITY_ICON: Record<ActivityEventType, { Icon: typeof MessageSquare; className: string }> = {
+  chat: { Icon: MessageSquare, className: 'text-cy bg-cy/10 border-cy/20' },
+  media: { Icon: Image, className: 'text-emerald bg-emerald/10 border-emerald/20' },
+  report: { Icon: AlertTriangle, className: 'text-rose-400 bg-rose-500/10 border-rose-500/20' },
+  registration: { Icon: User, className: 'text-arcade-gold bg-arcade-gold/10 border-arcade-gold/20' },
+  connection: { Icon: Users, className: 'text-arcade-gold bg-arcade-gold/10 border-arcade-gold/20' },
+  status: { Icon: Activity, className: 'text-arcade-gold bg-arcade-gold/10 border-arcade-gold/20' },
+};
+
+function ActivityRow({ item }: { item: { id: string; title: string; description: string; date: string; type: ActivityEventType; onClick?: () => void } }) {
+  const { Icon, className } = ACTIVITY_ICON[item.type];
+  return (
+    <div
+      onClick={item.onClick}
+      className={`p-3 rounded-2xl border transition-all flex items-start justify-between gap-3 ${
+        item.onClick
+          ? 'bg-vault-950 hover:bg-vault-850 border-vault-800 hover:border-arcade-gold/50 cursor-pointer shadow-sm'
+          : 'bg-vault-950 border-vault-800/60'
+      }`}
+    >
+      <div className="flex items-start gap-3 min-w-0">
+        <div className={`p-2 rounded-xl border mt-0.5 shrink-0 ${className}`}>
+          <Icon className="w-3.5 h-3.5" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-xs font-bold text-white flex items-center gap-2">
+            <span>{item.title}</span>
+            {item.onClick && <ExternalLink className="w-3 h-3 text-vault-500 shrink-0" />}
+          </div>
+          <p className="text-[11px] text-vault-400 mt-0.5 truncate">{item.description}</p>
+        </div>
+      </div>
+      <span className="text-[10px] text-vault-500 font-mono whitespace-nowrap">
+        {formatDetailedDate(item.date)}
+      </span>
+    </div>
+  );
+}
+
 export const User360View: React.FC<User360ViewProps> = ({
   userId,
   initialTab = 'overview',
@@ -72,6 +115,9 @@ export const User360View: React.FC<User360ViewProps> = ({
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // How many of the full activity log to render at once; grows on "Load more" instead of
+  // rendering every event a user has ever generated in one unbounded, ungrouped list.
+  const [activityShown, setActivityShown] = useState(50);
 
   // Metrics
   const [metrics, setMetrics] = useState({
@@ -156,6 +202,10 @@ export const User360View: React.FC<User360ViewProps> = ({
   useEffect(() => {
     loadAllUserData();
   }, [loadAllUserData]);
+
+  useEffect(() => {
+    setActivityShown(50);
+  }, [userId]);
 
   // Handle status update
   const handleApplyStatus = async (status: 'active' | 'suspended' | 'banned') => {
@@ -320,6 +370,19 @@ export const User360View: React.FC<User360ViewProps> = ({
 
     return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [profile, conversations, galleryItems, safetyReports, userId, onNavigateToConversation, onNavigateToReport]);
+
+  // The visible slice of activityTimeline, grouped under a day heading so a long history reads
+  // as "Today / Yesterday / Sep 24" instead of one undifferentiated wall of rows.
+  const groupedActivity = useMemo(() => {
+    const groups: { heading: string; items: typeof activityTimeline }[] = [];
+    for (const item of activityTimeline.slice(0, activityShown)) {
+      const heading = formatDayHeading(item.date);
+      const last = groups[groups.length - 1];
+      if (last && last.heading === heading) last.items.push(item);
+      else groups.push({ heading, items: [item] });
+    }
+    return groups;
+  }, [activityTimeline, activityShown]);
 
   if (loading) {
     return (
@@ -613,39 +676,7 @@ export const User360View: React.FC<User360ViewProps> = ({
             ) : (
               <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
                 {activityTimeline.slice(0, 15).map(item => (
-                  <div
-                    key={item.id}
-                    onClick={item.onClick}
-                    className={`p-3 rounded-2xl border transition-all flex items-start justify-between gap-3 ${
-                      item.onClick
-                        ? 'bg-vault-950 hover:bg-vault-850 border-vault-800 hover:border-arcade-gold/50 cursor-pointer shadow-sm'
-                        : 'bg-vault-950 border-vault-800/60'
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 rounded-xl bg-vault-900 border border-vault-800 text-arcade-gold mt-0.5">
-                        {item.type === 'chat' && <MessageSquare className="w-3.5 h-3.5" />}
-                        {item.type === 'media' && <Image className="w-3.5 h-3.5" />}
-                        {item.type === 'report' && <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />}
-                        {item.type === 'registration' && <User className="w-3.5 h-3.5" />}
-                        {item.type === 'connection' && <Users className="w-3.5 h-3.5" />}
-                      </div>
-
-                      <div>
-                        <div className="text-xs font-bold text-white flex items-center gap-2">
-                          <span>{item.title}</span>
-                          {item.onClick && (
-                            <ExternalLink className="w-3 h-3 text-vault-500" />
-                          )}
-                        </div>
-                        <p className="text-[11px] text-vault-400 mt-0.5">{item.description}</p>
-                      </div>
-                    </div>
-
-                    <span className="text-[10px] text-vault-500 font-mono whitespace-nowrap">
-                      {formatDetailedDate(item.date)}
-                    </span>
-                  </div>
+                  <ActivityRow key={item.id} item={item} />
                 ))}
               </div>
             )}
@@ -833,35 +864,40 @@ export const User360View: React.FC<User360ViewProps> = ({
       {/* ========================================================================= */}
       {activeTab === 'activity' && (
         <div className="space-y-3 animate-fade-in">
-          <div className="bg-vault-900 border border-vault-800 rounded-3xl p-5 space-y-3">
+          <div className="bg-vault-900 border border-vault-800 rounded-3xl p-5 space-y-4">
             <h3 className="text-xs font-bold uppercase tracking-wider text-vault-400 border-b border-vault-800 pb-2">
               Complete User Activity Log ({activityTimeline.length} events)
             </h3>
 
-            <div className="space-y-2">
-              {activityTimeline.map(item => (
-                <div
-                  key={item.id}
-                  onClick={item.onClick}
-                  className={`p-3 rounded-2xl border transition-all flex items-start justify-between gap-3 ${
-                    item.onClick
-                      ? 'bg-vault-950 hover:bg-vault-850 border-vault-800 hover:border-arcade-gold/50 cursor-pointer shadow-sm'
-                      : 'bg-vault-950 border-vault-800/60'
-                  }`}
-                >
-                  <div>
-                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                      <span>{item.title}</span>
-                      {item.onClick && <ExternalLink className="w-3 h-3 text-vault-500" />}
+            {groupedActivity.length === 0 ? (
+              <div className="text-center text-xs text-vault-500 py-6">
+                No recorded activity found for this user.
+              </div>
+            ) : (
+              <>
+                {groupedActivity.map(group => (
+                  <div key={group.heading} className="space-y-2">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-vault-500 sticky top-0 bg-vault-900 py-1">
+                      {group.heading}
                     </div>
-                    <p className="text-[11px] text-vault-400 mt-0.5">{item.description}</p>
+                    {group.items.map(item => (
+                      <ActivityRow key={item.id} item={item} />
+                    ))}
                   </div>
-                  <span className="text-[10px] text-vault-500 font-mono whitespace-nowrap">
-                    {formatDetailedDate(item.date)}
-                  </span>
-                </div>
-              ))}
-            </div>
+                ))}
+
+                {activityShown < activityTimeline.length && (
+                  <button
+                    type="button"
+                    onClick={() => setActivityShown(n => n + 50)}
+                    className="w-full py-2.5 rounded-xl text-xs font-bold text-vault-300 bg-vault-850 hover:bg-vault-800 border border-vault-800 transition-colors"
+                  >
+                    Load {Math.min(50, activityTimeline.length - activityShown)} more
+                    ({activityTimeline.length - activityShown} remaining)
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}

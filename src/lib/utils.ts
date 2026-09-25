@@ -23,6 +23,18 @@ export function formatTimestamp(isoString: string): string {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** "Today", "Yesterday", or a full date - the day-group heading for an activity/event list. */
+export function formatDayHeading(isoString: string): string {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) return 'Today';
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return date.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric', year: date.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+}
+
 export function formatDetailedDate(isoString: string): string {
   if (!isoString) return '';
   const date = new Date(isoString);
