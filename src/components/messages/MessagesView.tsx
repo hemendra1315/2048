@@ -1,24 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  MessageSquare,
-  Search,
-  Pin,
-  Image as ImageIcon,
-  Mic,
-  UserPlus,
-  Lock,
-  Camera,
-  Link2,
-  Copy,
-} from 'lucide-react';
+import { MessageSquare, Search, Pin, UserPlus, Lock, Camera } from 'lucide-react';
 import { ConversationItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { formatTimestamp, getAvatarUrl } from '../../lib/utils';
 import { buildInviteLink, extractUidFromInput } from '../../lib/invite';
 import { ChatRoom } from './ChatRoom';
+import { PinnedContact } from './messagesView/PinnedContact';
+import { ConversationRow } from './messagesView/ConversationRow';
+import { AddFriendModal } from './messagesView/AddFriendModal';
 
 interface MessagesViewProps {
   initialPartnerId?: string | null;
@@ -393,27 +384,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
           <div className="flex items-center gap-2.5 overflow-x-auto pb-1 scrollbar-none">
             {conversations.slice(0, 5).map(c => (
-              <button
+              <PinnedContact
                 key={c.id}
+                conversation={c}
+                isSelected={activeConversation?.id === c.id}
                 onClick={() => handleStartDirectChat(c.partner, c.id)}
-                className={`flex flex-col items-center gap-1.5 p-2 rounded-xl border min-w-[76px] transition-all active:scale-95 ${
-                  activeConversation?.id === c.id
-                    ? 'bg-[#171717] border-[#10B981]'
-                    : 'bg-[#111111] border-[#262626] hover:border-[#10B981]/60'
-                }`}
-              >
-                <div className="relative">
-                  <img
-                    src={c.partner.avatar_url || getAvatarUrl(c.partner.uid)}
-                    alt={c.partner.display_name}
-                    className="w-11 h-11 rounded-xl bg-[#171717] border border-[#262626] object-cover"
-                  />
-                  <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#10B981] border-2 border-[#111111]" />
-                </div>
-                <span className="text-[11px] font-semibold text-zinc-300 truncate max-w-[68px]">
-                  {c.partner.display_name.split(' ')[0]}
-                </span>
-              </button>
+              />
             ))}
           </div>
         </div>
@@ -444,69 +420,14 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           </div>
         ) : (
           <div className="space-y-1.5">
-            {filteredConversations.map(c => {
-              const isSelected = activeConversation?.id === c.id;
-              return (
-                <div
-                  key={c.id}
-                  onClick={() => handleStartDirectChat(c.partner, c.id)}
-                  className={`group flex items-center justify-between p-3 border rounded-2xl cursor-pointer transition-all active:scale-98 ${
-                    isSelected
-                      ? 'bg-[#171717] border-[#10B981] shadow-sm'
-                      : 'bg-[#111111] border-[#262626] hover:bg-[#171717] hover:border-zinc-600'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="relative">
-                      <img
-                        src={c.partner.avatar_url || getAvatarUrl(c.partner.uid)}
-                        alt={c.partner.display_name}
-                        className="w-11 h-11 rounded-xl bg-[#171717] border border-[#262626] object-cover"
-                      />
-                      <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#10B981] border-2 border-[#111111]" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-white truncate leading-tight">
-                          {c.partner.display_name}
-                        </h4>
-                        <span className="text-[10px] font-mono text-[#10B981]">
-                          {c.partner.uid}
-                        </span>
-                      </div>
-
-                      <p className="text-xs text-[#A1A1AA] truncate mt-0.5 flex items-center gap-1">
-                        {c.lastMessage?.content.startsWith('[IMAGE]') ? (
-                          <>
-                            <ImageIcon className="w-3.5 h-3.5 text-[#10B981]" />
-                            <span>Encrypted photo</span>
-                          </>
-                        ) : c.lastMessage?.content.startsWith('[VOICE_NOTE') ? (
-                          <>
-                            <Mic className="w-3.5 h-3.5 text-[#10B981]" />
-                            <span>Voice message (0:14)</span>
-                          </>
-                        ) : (
-                          c.lastMessage?.content || 'Encrypted direct channel ready'
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-1 text-right pl-2">
-                    <span className="text-[10px] text-zinc-500 whitespace-nowrap">
-                      {c.lastMessage ? formatTimestamp(c.lastMessage.created_at) : ''}
-                    </span>
-                    {c.unreadCount > 0 && (
-                      <span className="px-2 py-0.5 bg-[#10B981] text-black font-bold text-[10px] rounded-full">
-                        {c.unreadCount}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            {filteredConversations.map(c => (
+              <ConversationRow
+                key={c.id}
+                conversation={c}
+                isSelected={activeConversation?.id === c.id}
+                onClick={() => handleStartDirectChat(c.partner, c.id)}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -563,66 +484,14 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
       {/* Add Friend Modal */}
       {newChatModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#111111] border border-[#262626] rounded-2xl p-6 max-w-sm w-full space-y-5 animate-fade-in shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white">Add a friend</h3>
-              <button
-                onClick={() => setNewChatModalOpen(false)}
-                className="text-zinc-500 hover:text-white text-sm"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Share my invite */}
-            <div className="space-y-3 text-center">
-              <p className="text-xs text-[#A1A1AA]">Share this to let someone message you</p>
-
-              <div className="flex items-center justify-center p-3 bg-white rounded-2xl w-fit mx-auto">
-                {inviteQrDataUrl ? (
-                  <img src={inviteQrDataUrl} alt="Your invite QR code" className="w-40 h-40" />
-                ) : (
-                  <div className="w-40 h-40 animate-pulse bg-zinc-200 rounded-lg" />
-                )}
-              </div>
-
-              <button
-                onClick={copyInviteLink}
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#171717] hover:bg-[#222222] border border-[#262626] rounded-xl text-white text-xs font-bold transition-all active:scale-98"
-              >
-                <Link2 className="w-4 h-4 text-[#10B981]" />
-                <span>Copy my invite link</span>
-                <Copy className="w-3.5 h-3.5 opacity-60" />
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3 text-zinc-600">
-              <div className="flex-1 h-px bg-[#262626]" />
-              <span className="text-[10px] uppercase font-mono tracking-widest">or</span>
-              <div className="flex-1 h-px bg-[#262626]" />
-            </div>
-
-            {/* Have someone else's invite */}
-            <form onSubmit={handleCreateChatByUid} className="space-y-3">
-              <p className="text-xs text-[#A1A1AA]">Paste a friend's invite link or UID</p>
-              <input
-                type="text"
-                placeholder="Invite link or UID..."
-                value={newChatUidInput}
-                onChange={e => setNewChatUidInput(e.target.value)}
-                className="w-full py-2.5 px-4 bg-[#171717] border border-[#262626] focus:border-[#10B981] rounded-xl text-white font-mono text-sm placeholder:text-zinc-600 focus:outline-none"
-              />
-
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-[#10B981] hover:bg-emerald-400 active:scale-98 text-black text-xs font-bold rounded-xl shadow-lg transition-all"
-              >
-                Start Chat
-              </button>
-            </form>
-          </div>
-        </div>
+        <AddFriendModal
+          onClose={() => setNewChatModalOpen(false)}
+          inviteQrDataUrl={inviteQrDataUrl}
+          onCopyInviteLink={copyInviteLink}
+          newChatUidInput={newChatUidInput}
+          setNewChatUidInput={setNewChatUidInput}
+          onSubmit={handleCreateChatByUid}
+        />
       )}
     </div>
   );
