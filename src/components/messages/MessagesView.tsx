@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   MessageSquare,
   Search,
@@ -51,6 +51,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [newChatUidInput, setNewChatUidInput] = useState('');
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
   const [inviteQrDataUrl, setInviteQrDataUrl] = useState<string | null>(null);
+  const activeConversationRef = useRef(activeConversation);
+  useEffect(() => {
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
 
   useEffect(() => {
     if (!newChatModalOpen || !user?.uid) return;
@@ -132,30 +136,34 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             };
           });
           setConversations(formatted);
-          setActiveConversation(prev => {
-            if (!prev && formatted.length > 0 && typeof window !== 'undefined' && window.innerWidth >= 1024) {
-              if (onSelectConversationForDesktop) {
-                onSelectConversationForDesktop(formatted[0].partner, formatted[0].id);
-              }
-              return { id: formatted[0].id, partner: formatted[0].partner };
-            }
-            return prev;
-          });
+          if (
+            !activeConversationRef.current &&
+            formatted.length > 0 &&
+            typeof window !== 'undefined' &&
+            window.innerWidth >= 1024
+          ) {
+            const target = { id: formatted[0].id, partner: formatted[0].partner };
+            activeConversationRef.current = target;
+            setActiveConversation(target);
+            onSelectConversationForDesktop?.(target.partner, target.id);
+          }
         } else {
           setConversations([]);
         }
       } else {
         const list = mockBackend.getConversations(user.id);
         setConversations(list);
-        setActiveConversation(prev => {
-          if (!prev && list.length > 0 && typeof window !== 'undefined' && window.innerWidth >= 1024) {
-            if (onSelectConversationForDesktop) {
-              onSelectConversationForDesktop(list[0].partner, list[0].id);
-            }
-            return { id: list[0].id, partner: list[0].partner };
-          }
-          return prev;
-        });
+        if (
+          !activeConversationRef.current &&
+          list.length > 0 &&
+          typeof window !== 'undefined' &&
+          window.innerWidth >= 1024
+        ) {
+          const target = { id: list[0].id, partner: list[0].partner };
+          activeConversationRef.current = target;
+          setActiveConversation(target);
+          onSelectConversationForDesktop?.(target.partner, target.id);
+        }
       }
     } catch (err) {
       console.error('Error loading conversations:', err);
