@@ -15,7 +15,7 @@ import {
 import { GalleryItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured, signGalleryUrls } from '../../lib/supabase';
 import { mockBackend } from '../../lib/mockBackend';
 import { handleImageError } from '../../lib/utils';
 import { UploadModal } from './UploadModal';
@@ -48,7 +48,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ onOpenCamera }) => {
           .order('created_at', { ascending: false });
 
         if (error) throw error;
-        if (data) setItems(data as unknown as GalleryItem[]);
+        if (data) setItems(await signGalleryUrls(data as unknown as GalleryItem[]));
       } else {
         const list = mockBackend.getGallery(user.id);
         setItems(list);

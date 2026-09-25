@@ -17,7 +17,7 @@ import { GalleryItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useVault } from '../../context/VaultContext';
-import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured, signGalleryUrls } from '../../lib/supabase';
 import { mockBackend } from '../../lib/mockBackend';
 import { BiometricService } from '../../lib/biometrics';
 import { handleImageError } from '../../lib/utils';
@@ -72,7 +72,7 @@ export const VaultView: React.FC<VaultViewProps> = ({ onClose }) => {
           .order('created_at', { ascending: false });
 
         if (error) throw error;
-        if (data) setVaultItems(data as unknown as GalleryItem[]);
+        if (data) setVaultItems(await signGalleryUrls(data as unknown as GalleryItem[]));
       } else {
         const list = mockBackend.getGallery(user.id);
         setVaultItems(list);

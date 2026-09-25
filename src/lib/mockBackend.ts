@@ -9,7 +9,7 @@ import {
   AdminAccessLogItem,
   CoverGameType,
 } from '../types';
-import { hashSecret } from './utils';
+import { hashSecret, getAvatarUrl } from './utils';
 
 // Offline mock backend for local UI development. It accepts any password, so every
 // sign-in entry point refuses to run in a production build.
@@ -320,7 +320,7 @@ class MockBackendService {
       uid: newUid,
       username: cleanUsername,
       display_name: params.username.trim(),
-      avatar_url: params.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${newUid}`,
+      avatar_url: params.avatarUrl || getAvatarUrl(newUid),
       biometric_enabled: params.enableBiometrics,
       role: 'user',
       status: 'active',

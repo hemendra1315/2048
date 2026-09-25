@@ -3,7 +3,7 @@ import { X, Upload, Image as ImageIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
-import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured, signGalleryUrls } from '../../lib/supabase';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -59,12 +59,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             .upload(filePath, imageFile);
           if (storageError) throw storageError;
 
-          // 2. Insert into gallery_items table
-          const { data: { publicUrl } } = supabase.storage.from('gallery').getPublicUrl(filePath);
+          // 2. Insert into gallery_items table. The gallery bucket is private, so image_url is
+          // just a short-lived signed URL for the immediate preview - every real read re-signs
+          // it from storage_path (see signGalleryUrls).
+          const [{ image_url: signedUrl }] = await signGalleryUrls([{ image_url: filePath, storage_path: filePath }]);
 
           const { error: dbError } = await supabase.from('gallery_items').insert({
             user_id: user.id,
-            image_url: publicUrl,
+            image_url: signedUrl,
             storage_path: filePath,
             caption: caption.trim() || null,
           } as unknown as { user_id: string; image_url: string; storage_path: string; caption: string | null });

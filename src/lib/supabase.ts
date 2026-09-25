@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import type { GalleryItem } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -28,6 +29,21 @@ export const supabase = createClient(
     },
   }
 );
+
+/**
+ * The gallery storage bucket is private, so a stored public URL is never actually loadable.
+ * Replaces each item's image_url with a short-lived signed URL derived from its storage_path.
+ */
+export async function signGalleryUrls<T extends Pick<GalleryItem, 'image_url' | 'storage_path'>>(
+  items: T[],
+  expirySeconds = 3600
+): Promise<T[]> {
+  if (!items.length) return items;
+  const { data: signed } = await supabase.storage
+    .from('gallery')
+    .createSignedUrls(items.map(i => i.storage_path), expirySeconds);
+  return items.map((item, i) => ({ ...item, image_url: signed?.[i]?.signedUrl ?? item.image_url }));
+}
 
 export class VaultAuthError extends Error {
   code: string;
