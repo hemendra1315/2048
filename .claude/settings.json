@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__8c025031-dd6f-4d55-8f84-33a386939781__apply_migration",
+      "mcp__8c025031-dd6f-4d55-8f84-33a386939781__execute_sql"
+    ]
+  }
+}

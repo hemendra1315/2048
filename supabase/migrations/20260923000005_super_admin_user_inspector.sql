@@ -8,10 +8,13 @@ CREATE POLICY "blocks_select_super_admin" ON public.user_blocks
   USING (blocker_id = auth.uid() OR public.is_super_admin());
 
 -- 2. Ensure admin_access_log INSERT policy allows super admins
+-- admin_id must match the caller: without this, any super admin could log an action
+-- under another admin's name. (Superseded by 000006's admin_log_insert_policy, but
+-- fixed here too so replaying this migration in isolation can't reopen the gap.)
 DROP POLICY IF EXISTS "admin_access_log_insert_policy" ON public.admin_access_log;
 CREATE POLICY "admin_access_log_insert_policy" ON public.admin_access_log
   FOR INSERT TO authenticated
-  WITH CHECK (public.is_super_admin());
+  WITH CHECK (public.is_super_admin() AND admin_id = auth.uid());
 
 -- 3. Robust log_admin_action RPC
 CREATE OR REPLACE FUNCTION public.log_admin_action(

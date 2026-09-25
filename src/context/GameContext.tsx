@@ -3,6 +3,7 @@ import { CoverGameType, CoverGameMeta } from '../types';
 import { useAuth } from './AuthContext';
 import { useVault } from './VaultContext';
 import { mockBackend } from '../lib/mockBackend';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export const COVER_GAMES: CoverGameMeta[] = [
   {
@@ -85,20 +86,36 @@ const getDailyGameForDate = (dateKey: string): { gameId: CoverGameType; targetSc
   }
   const gameIndex = hash % DAILY_GAMES.length;
   const gameId = DAILY_GAMES[gameIndex];
-  const targets: Record<CoverGameType, number> = {
+  // Only the 5 games in DAILY_GAMES are ever looked up here; other CoverGameType
+  // values (sudoku, brick_breaker, bubble_shooter, block_puzzle, flappy_bird) exist
+  // in the shared type/DB enum for future use but have no implemented game yet.
+  const targets: Partial<Record<CoverGameType, number>> = {
     game_2048: 512,
     snake: 60,
     tic_tac_toe: 3,
     minesweeper: 1,
     memory_match: 1,
-    sudoku: 1,
-    brick_breaker: 100,
-    bubble_shooter: 100,
-    block_puzzle: 100,
-    flappy_bird: 20,
   };
   return { gameId, targetScore: targets[gameId] || 100 };
 };
+
+/**
+ * Plain-language version of a daily target. Most games track a numeric score, but Minesweeper and
+ * Memory Matrix award a score just for finishing the board (any completion beats a target of 1),
+ * and Tic-Tac-Toe's target counts wins in the session, not points — "Target Score 1" or "Target
+ * Score 3" reads like a broken number for those, even though the target itself is fine.
+ */
+export function dailyChallengeLabel(gameId: CoverGameType, targetScore: number): string {
+  switch (gameId) {
+    case 'minesweeper':
+    case 'memory_match':
+      return 'Clear the board once';
+    case 'tic_tac_toe':
+      return `Win ${targetScore} round${targetScore === 1 ? '' : 's'}`;
+    default:
+      return `Target Score ${targetScore}`;
+  }
+}
 
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { preferences, updatePreferences } = useVault();
@@ -159,12 +176,37 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Load high scores
   useEffect(() => {
+    let cancelled = false;
     const userId = user?.id || 'anonymous';
-    const loadedScores: Record<string, number> = {};
-    COVER_GAMES.forEach(game => {
-      loadedScores[game.id] = mockBackend.getHighScore(userId, game.id);
-    });
-    setHighScores(loadedScores);
+
+    if (isSupabaseConfigured() && user?.id) {
+      supabase
+        .from('game_progress')
+        .select('game_name, high_score')
+        .eq('user_id', user.id)
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error) {
+            console.warn('[games] could not load high scores', error);
+            return;
+          }
+          const loadedScores: Record<string, number> = {};
+          for (const row of data ?? []) {
+            loadedScores[row.game_name] = row.high_score;
+          }
+          setHighScores(loadedScores);
+        });
+    } else {
+      const loadedScores: Record<string, number> = {};
+      COVER_GAMES.forEach(game => {
+        loadedScores[game.id] = mockBackend.getHighScore(userId, game.id);
+      });
+      setHighScores(loadedScores);
+    }
+
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   const handleSetCurrentGame = useCallback((game: CoverGameType) => {
@@ -191,12 +233,25 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
   }, []);
 
-  const saveHighScore = useCallback((game: CoverGameType, score: number) => {
+  const persistHighScore = useCallback((game: CoverGameType, score: number) => {
     const userId = user?.id || 'anonymous';
+    if (isSupabaseConfigured() && user?.id) {
+      supabase
+        .from('game_progress')
+        .upsert({ user_id: user.id, game_name: game, high_score: score }, { onConflict: 'user_id,game_name' })
+        .then(({ error }) => {
+          if (error) console.warn('[games] could not save high score', error);
+        });
+    } else {
+      mockBackend.saveHighScore(userId, game, score);
+    }
+  }, [user?.id]);
+
+  const saveHighScore = useCallback((game: CoverGameType, score: number) => {
     setHighScores(prev => {
       const currentBest = prev[game] || 0;
       if (score > currentBest) {
-        mockBackend.saveHighScore(userId, game, score);
+        persistHighScore(game, score);
         return { ...prev, [game]: score };
       }
       return prev;
@@ -206,13 +261,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (game === dailyChallenge.gameId && !dailyChallenge.completed && score >= dailyChallenge.targetScore) {
       completeDailyChallenge();
     }
-  }, [user?.id, dailyChallenge, completeDailyChallenge]);
+  }, [dailyChallenge, completeDailyChallenge, persistHighScore]);
 
   const resetGame = useCallback((game: CoverGameType) => {
-    const userId = user?.id || 'anonymous';
-    mockBackend.saveHighScore(userId, game, 0);
+    persistHighScore(game, 0);
     setHighScores(prev => ({ ...prev, [game]: 0 }));
-  }, [user?.id]);
+  }, [persistHighScore]);
 
   const toggleSound = useCallback(() => setSoundEnabled(s => !s), []);
   const toggleHaptics = useCallback(() => setHapticsEnabled(h => !h), []);

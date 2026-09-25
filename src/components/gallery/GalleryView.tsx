@@ -106,7 +106,7 @@ export const GalleryView: React.FC = () => {
       loadGallery();
     } catch (err) {
       console.error('Delete error:', err);
-      showToast('Delete failed', 'error');
+      showToast(err instanceof Error ? err.message : 'Delete failed', 'error');
     }
   };
 

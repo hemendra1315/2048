@@ -53,13 +53,16 @@ export async function getProfileMap(): Promise<Record<string, UserProfile>> {
   return map;
 }
 
+// "Connections" is counted from conversations (people someone actually chats with), not the
+// connections/connection_requests tables: the live app starts chats directly by UID, so nothing
+// ever writes to those tables and counting them read 0 for every account.
 export async function getConnectionCounts(): Promise<Record<string, number>> {
   const counts: Record<string, number> = {};
   if (!backendIsSupabase()) {
-    for (const p of mockBackend.getProfiles()) counts[p.id] = mockBackend.getConnections(p.id).length;
+    for (const p of mockBackend.getProfiles()) counts[p.id] = mockBackend.getUserConversationsForAdmin(p.id, '').length;
     return counts;
   }
-  const { data, error } = await supabase.from('connections').select('user_a, user_b');
+  const { data, error } = await supabase.from('conversations').select('user_a, user_b');
   fail(error);
   for (const c of (data ?? []) as { user_a: string; user_b: string }[]) {
     counts[c.user_a] = (counts[c.user_a] ?? 0) + 1;
@@ -81,11 +84,15 @@ export async function setUserStatus(adminId: string, targetId: string, status: A
   fail(error);
 }
 
-export async function listAuditLogs(limit = 200): Promise<AdminAccessLogItem[]> {
+export async function listAuditLogs(
+  limit = 200,
+  /** Pass an already-loaded profile map (e.g. from getProfileMap()) to skip re-fetching all profiles. */
+  preloadedProfiles?: Record<string, UserProfile>
+): Promise<AdminAccessLogItem[]> {
   if (!backendIsSupabase()) return mockBackend.getAdminAuditLogs().slice(0, limit);
   const [{ data, error }, profiles] = await Promise.all([
     supabase.from('admin_access_log').select('*').order('created_at', { ascending: false }).limit(limit),
-    getProfileMap(),
+    preloadedProfiles ? Promise.resolve(preloadedProfiles) : getProfileMap(),
   ]);
   fail(error);
   return ((data ?? []) as unknown as AdminAccessLogItem[]).map(l => ({
@@ -124,13 +131,17 @@ export async function logConversationView(conversation: AdminConversation): Prom
   fail(error);
 }
 
-export async function listGalleryItems(adminId: string): Promise<AdminGalleryItem[]> {
+export async function listGalleryItems(
+  adminId: string,
+  /** Pass an already-loaded profile map (e.g. from getProfileMap()) to skip re-fetching all profiles. */
+  preloadedProfiles?: Record<string, UserProfile>
+): Promise<AdminGalleryItem[]> {
   if (!backendIsSupabase()) {
     return mockBackend.getAllGalleryItemsForAdmin(adminId).map(i => ({ ...i, previewUrl: i.image_url }));
   }
   const [{ data, error }, profiles] = await Promise.all([
     supabase.from('gallery_items').select('*').order('created_at', { ascending: false }),
-    getProfileMap(),
+    preloadedProfiles ? Promise.resolve(preloadedProfiles) : getProfileMap(),
   ]);
   fail(error);
   const items = (data ?? []) as unknown as GalleryItem[];
@@ -207,7 +218,7 @@ export async function getUserProfileDetail(userId: string): Promise<{
   const [profileRes, chatsRes, connsRes, galleryRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', userId).single(),
     supabase.from('conversations').select('id', { count: 'exact', head: true }).or(`user_a.eq.${userId},user_b.eq.${userId}`),
-    supabase.from('connections').select('id', { count: 'exact', head: true }).or(`user_a.eq.${userId},user_b.eq.${userId}`),
+    supabase.from('connections').select('user_a', { count: 'exact', head: true }).or(`user_a.eq.${userId},user_b.eq.${userId}`),
     supabase.from('gallery_items').select('id', { count: 'exact', head: true }).eq('user_id', userId),
   ]);
 
@@ -336,7 +347,11 @@ export async function getUserGalleryForAdmin(
   return galleryItems;
 }
 
-/** Connections Tab: Loads real active connections, pending requests, and blocked users from Supabase */
+/**
+ * Connections Tab: chat partners (from conversations — see getConnectionCounts), pending requests,
+ * and blocked users. Requests are read from connection_requests for completeness, but the live app
+ * never writes to it, so this list is normally empty even for active accounts.
+ */
 export async function getUserConnectionDetailsForAdmin(targetUserId: string): Promise<{
   connections: ConnectionItem[];
   incomingRequests: ConnectionRequestItem[];
@@ -348,12 +363,18 @@ export async function getUserConnectionDetailsForAdmin(targetUserId: string): Pr
   }
 
   const [connsRes, incomingRes, outgoingRes, blocksRes, allProfilesRes] = await Promise.all([
-    supabase.from('connections').select('*').or(`user_a.eq.${targetUserId},user_b.eq.${targetUserId}`),
+    supabase.from('conversations').select('id, user_a, user_b, created_at').or(`user_a.eq.${targetUserId},user_b.eq.${targetUserId}`),
     supabase.from('connection_requests').select('*').eq('receiver_id', targetUserId).eq('status', 'pending'),
     supabase.from('connection_requests').select('*').eq('sender_id', targetUserId).eq('status', 'pending'),
     supabase.from('user_blocks').select('*').eq('blocker_id', targetUserId),
     supabase.from('profiles').select('*'),
   ]);
+
+  fail(connsRes.error);
+  fail(incomingRes.error);
+  fail(outgoingRes.error);
+  fail(blocksRes.error);
+  fail(allProfilesRes.error);
 
   const profileMap: Record<string, UserProfile> = {};
   for (const p of (allProfilesRes.data ?? []) as unknown as UserProfile[]) {
@@ -456,9 +477,7 @@ export async function deleteMessageAsAdmin(
 ): Promise<void> {
   if (backendIsSupabase()) {
     const { error } = await supabase.from('messages').delete().eq('id', messageId);
-    if (error) {
-      console.warn('Failed to delete message from supabase:', error);
-    }
+    fail(error);
   }
   await logAdminAction(adminId, 'DELETE_MESSAGE', null, messageId, {
     conversationId,

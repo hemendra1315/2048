@@ -6,6 +6,7 @@ import { isAwayForExternalActivity, leavingForExternalActivity, returnedToApp } 
 import { useAuth } from './AuthContext';
 import { mockBackend } from '../lib/mockBackend';
 import { supabase, isSupabaseConfigured, isMockBackendAllowed } from '../lib/supabase';
+import { useToast } from './ToastContext';
 
 interface UnlockResult {
   ok: boolean;
@@ -31,7 +32,6 @@ function unlockErrorMessage(result: UnlockResult | null): string {
       return 'Incorrect password';
   }
 }
-import { useToast } from './ToastContext';
 
 interface VaultContextType {
   isUnlocked: boolean;

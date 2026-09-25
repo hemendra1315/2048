@@ -22,7 +22,7 @@ import { ContactDossier } from './ContactDossier';
 import { Avatar } from '../common/Avatar';
 import { useMediaQuery, DESKTOP_QUERY } from '../../lib/useMediaQuery';
 import { usePresence } from '../../lib/presence';
-import { extraPreview } from '../../lib/chatExtras';
+import { readableMessagePreview } from '../../lib/chatExtras';
 import { useToast } from '../../context/ToastContext';
 import { useBackHandler } from '../../lib/backButton';
 
@@ -32,6 +32,10 @@ interface MessagesViewProps {
   onClearInitialPartner?: () => void;
   onClearInitialAttachment?: () => void;
   onSelectConversationForDesktop?: (partner: UserProfile, convId: string) => void;
+  /** On a phone, an open chat should fill the screen — no app title, tab bar, or admin/lock
+   * buttons competing with it. This tells the parent when that's the case so it can hide its own
+   * chrome; on desktop the chat is one column among three and the parent ignores it. */
+  onActiveChatChange?: (active: boolean) => void;
 }
 
 export const MessagesView: React.FC<MessagesViewProps> = ({
@@ -40,6 +44,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   onClearInitialPartner,
   onClearInitialAttachment,
   onSelectConversationForDesktop,
+  onActiveChatChange,
 }) => {
   const { user } = useAuth();
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
@@ -48,6 +53,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     id: string;
     partner: UserProfile;
   } | null>(null);
+
+  useEffect(() => {
+    onActiveChatChange?.(Boolean(activeConversation));
+    return () => onActiveChatChange?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(activeConversation)]);
   const [loading, setLoading] = useState(true);
   const [newChatUidInput, setNewChatUidInput] = useState('');
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
@@ -109,7 +120,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
         if (list.length > 0) {
           const partnerIds = [...new Set(list.map(r => r.partner_id))];
-          const { data: rawProfiles } = await supabase.from('profiles').select('*').in('id', partnerIds);
+          const { data: rawProfiles, error: profilesError } = await supabase.from('profiles').select('*').in('id', partnerIds);
+          if (profilesError) {
+            console.warn('[messages] could not load partner profiles; showing placeholders', profilesError);
+          }
           const profiles = (rawProfiles || []) as unknown as UserProfile[];
 
           const formatted: ConversationItem[] = list.map(r => {
@@ -330,13 +344,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const previewText = (content?: string) => {
     if (!content) return 'Say hi';
     if (content === '[DELETED]') return 'Message deleted';
-    if (content.startsWith('[SYSTEM:disappearing:off')) return 'Disappearing messages turned off';
-    if (content.startsWith('[SYSTEM:disappearing:')) return 'Disappearing messages turned on';
-    const extra = extraPreview(content);
-    if (extra) return extra;
-    if (content.startsWith('[IMAGE]')) return 'Photo';
-    if (content.startsWith('[VOICE_NOTE')) return 'Voice message';
-    return content;
+    return readableMessagePreview(content);
   };
 
   const ConversationListView = (

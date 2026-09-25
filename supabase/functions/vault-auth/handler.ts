@@ -392,12 +392,16 @@ export function createHandler(deps: { auth: AuthBackend; db: Db; config: Config 
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       Vary: 'Origin',
     };
+    // Reflecting any *.vercel.app origin let an unrelated site on that shared,
+    // multi-tenant domain read the JSON response (including session tokens and
+    // recovery codes) of a browser-initiated register/login/reset call. Origins
+    // must be explicitly listed in WEBAUTHN_ALLOWED_ORIGINS (which already includes
+    // this app's real deployment URL) or be a local dev/native origin.
     if (
       config.allowedOrigins.includes(origin) ||
       origin.startsWith('http://localhost') ||
       origin.startsWith('https://localhost') ||
-      origin.startsWith('capacitor://localhost') ||
-      origin.endsWith('.vercel.app')
+      origin.startsWith('capacitor://localhost')
     ) {
       headers['Access-Control-Allow-Origin'] = origin;
     }

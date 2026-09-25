@@ -176,10 +176,18 @@ export async function submitReport(input: {
   if (error) throw new Error(error.message);
 }
 
-export async function listSafetyReports(_adminId: string = 'admin'): Promise<SafetyReport[]> {
-  const profiles = await listProfiles();
-  const profileMap: Record<string, UserProfile> = {};
-  for (const p of profiles) profileMap[p.id] = p;
+export async function listSafetyReports(
+  _adminId: string = 'admin',
+  /** Pass an already-loaded profile map to skip re-fetching all profiles. */
+  preloadedProfileMap?: Record<string, UserProfile>
+): Promise<SafetyReport[]> {
+  let profileMap: Record<string, UserProfile>;
+  if (preloadedProfileMap) {
+    profileMap = preloadedProfileMap;
+  } else {
+    profileMap = {};
+    for (const p of await listProfiles()) profileMap[p.id] = p;
+  }
 
   if (!backendIsSupabase()) {
     try {
@@ -391,15 +399,17 @@ export async function performUniversalSearch(
     return { users: [], messages: [], conversations: [], media: [], reports: [] };
   }
 
-  const [profiles, convs, gallery, reports] = await Promise.all([
-    listProfiles(),
-    listConversations(adminId),
-    listGalleryItems(adminId),
-    listSafetyReports(adminId),
-  ]);
-
+  const profiles = await listProfiles();
   const profileMap: Record<string, UserProfile> = {};
   for (const p of profiles) profileMap[p.id] = p;
+
+  // Profiles are loaded once above and passed through, instead of listGalleryItems and
+  // listSafetyReports each independently re-fetching the entire profiles table.
+  const [convs, gallery, reports] = await Promise.all([
+    listConversations(adminId),
+    listGalleryItems(adminId, profileMap),
+    listSafetyReports(adminId, profileMap),
+  ]);
 
   // 1. Search Users
   const matchedUsers = profiles

@@ -16,6 +16,7 @@ import { listAuditLogs, listProfiles, listConversations, listGalleryItems } from
 import { listSafetyReports } from '../../lib/safetyApi';
 import { UserProfile } from '../../types';
 import { formatTimestamp } from '../../lib/utils';
+import { readableMessagePreview } from '../../lib/chatExtras';
 
 interface LiveActivityFeedProps {
   onSelectUser?: (userId: string, tab?: User360Tab) => void;
@@ -62,16 +63,18 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
     if (!user) return;
     setLoading(true);
     try {
-      const [logs, profiles, convs, gallery, reports] = await Promise.all([
-        listAuditLogs(100),
-        listProfiles(),
-        listConversations(user.id),
-        listGalleryItems(user.id),
-        listSafetyReports(user.id),
-      ]);
-
+      const profiles = await listProfiles();
       const profileMap: Record<string, UserProfile> = {};
       for (const p of profiles) profileMap[p.id] = p;
+
+      // Profiles are loaded once above and passed through, instead of each call
+      // independently re-fetching the entire profiles table.
+      const [logs, convs, gallery, reports] = await Promise.all([
+        listAuditLogs(100, profileMap),
+        listConversations(user.id),
+        listGalleryItems(user.id, profileMap),
+        listSafetyReports(user.id, profileMap),
+      ]);
 
       const combined: FeedEvent[] = [];
 
@@ -100,7 +103,10 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
             id: `msg_${m.id}`,
             type: 'message_sent',
             title: `DM: ${sender?.display_name || 'User'} → ${receiver?.display_name || 'User'}`,
-            description: m.content.length > 80 ? `${m.content.slice(0, 80)}...` : m.content,
+            description: (() => {
+              const text = readableMessagePreview(m.content);
+              return text.length > 80 ? `${text.slice(0, 80)}...` : text;
+            })(),
             timestamp: m.created_at,
             user: sender,
             targetUserId: m.sender_id,

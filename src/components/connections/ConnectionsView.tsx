@@ -31,19 +31,21 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
     try {
       if (isSupabaseConfigured()) {
         // Connections
-        const { data: rawConns } = await supabase
+        const { data: rawConns, error: connsError } = await supabase
           .from('connections')
           .select('*')
           .or(`user_a.eq.${user.id},user_b.eq.${user.id}`);
+        if (connsError) throw connsError;
 
         const conns = (rawConns || []) as unknown as { id: string; user_a: string; user_b: string; created_at: string }[];
 
         if (conns.length > 0) {
           const partnerIds = conns.map(c => (c.user_a === user.id ? c.user_b : c.user_a));
-          const { data: rawProfiles } = await supabase
+          const { data: rawProfiles, error: profilesError } = await supabase
             .from('profiles')
             .select('*')
             .in('id', partnerIds);
+          if (profilesError) throw profilesError;
 
           const profiles = (rawProfiles || []) as unknown as UserProfile[];
 
@@ -73,11 +75,12 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
         }
 
         // Requests
-        const { data: rawReqs } = await supabase
+        const { data: rawReqs, error: reqsError } = await supabase
           .from('connection_requests')
           .select('*')
           .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
           .eq('status', 'pending');
+        if (reqsError) throw reqsError;
 
         const reqs = (rawReqs || []) as unknown as ConnectionRequestItem[];
         const inc = reqs.filter(r => r.receiver_id === user.id);
@@ -93,10 +96,11 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({ onStartChat })
       }
     } catch (err) {
       console.error('Error loading connections:', err);
+      showToast(err instanceof Error ? err.message : 'Could not load connections', 'error');
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, showToast]);
 
   useEffect(() => {
     loadData();

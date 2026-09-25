@@ -5,6 +5,7 @@ import { useToast } from '../../context/ToastContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { expectExternalActivity } from '../../lib/externalActivity';
+import { uploadGalleryMedia } from '../../lib/storageHelper';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -67,15 +68,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     try {
       if (isSupabaseConfigured()) {
         if (imageFile) {
-          const fileExt = imageFile.name.split('.').pop();
-          const filePath = `${user.id}/${Date.now()}.${fileExt}`;
-
-          const { error: storageError } = await supabase.storage
-            .from('gallery')
-            .upload(filePath, imageFile);
-          if (storageError) throw storageError;
-
-          const { data: { publicUrl } } = supabase.storage.from('gallery').getPublicUrl(filePath);
+          const { publicUrl, filePath } = await uploadGalleryMedia(imageFile, user.id);
 
           const { error: dbError } = await supabase.from('gallery_items').insert({
             user_id: user.id,

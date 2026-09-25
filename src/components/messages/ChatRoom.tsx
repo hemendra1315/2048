@@ -11,7 +11,6 @@ import {
   Pause,
   Lock,
   RotateCcw,
-  SlidersHorizontal,
   X,
   Flag,
   Reply,
@@ -53,11 +52,14 @@ import { describePresence, usePresence } from '../../lib/presence';
 import {
   ChatThemeId,
   computeWaveform,
-  extraPreview,
+  isSystemMessage,
   parseGame,
   parseScore,
   parseSticker,
   parseVoiceNote,
+  readableMessagePreview,
+  systemMessageText,
+  timerLabel,
   themeById,
   WAVEFORM_BARS,
 } from '../../lib/chatExtras';
@@ -713,10 +715,20 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     return map;
   }, [messages]);
 
+  // Latest values for the initial-attachment effect below, which intentionally only
+  // re-runs when `initialAttachment` changes (not on every render) but must never act
+  // on a stale conversationId/handleSend if this component is ever reused across
+  // conversations instead of remounted per conversationId.
+  const latestSendContextRef = useRef({ conversationId, user, handleSend, onClearInitialAttachment, showToast });
+  useEffect(() => {
+    latestSendContextRef.current = { conversationId, user, handleSend, onClearInitialAttachment, showToast };
+  });
+
   // Process initial media attachment from camera
   useEffect(() => {
-    if (initialAttachment && user) {
+    if (initialAttachment && latestSendContextRef.current.user) {
       const sendInitialMedia = async () => {
+        const { conversationId: convId, handleSend: send, onClearInitialAttachment: clearAttachment, showToast: toast } = latestSendContextRef.current;
         setIsUploadingMedia(true);
         try {
           let mediaUrl = initialAttachment;
@@ -724,21 +736,21 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             const res = await fetch(initialAttachment);
             const blob = await res.blob();
             const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-            mediaUrl = await uploadChatMedia(file, conversationId);
+            mediaUrl = await uploadChatMedia(file, convId);
           }
-          await handleSend(`[IMAGE]${mediaUrl}`);
-          showToast('Photo sent to chat', 'success');
+          await send(`[IMAGE]${mediaUrl}`);
+          toast('Photo sent to chat', 'success');
         } catch (err) {
           console.error('Error sending initial photo:', err);
-          showToast('Failed to attach photo', 'error');
+          latestSendContextRef.current.showToast('Failed to attach photo', 'error');
         } finally {
           setIsUploadingMedia(false);
-          if (onClearInitialAttachment) onClearInitialAttachment();
+          if (clearAttachment) clearAttachment();
         }
       };
       sendInitialMedia();
     }
-  }, [initialAttachment]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [initialAttachment]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -899,7 +911,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   useBackHandler(Boolean(actionMsg), () => setActionMsg(null));
 
   return (
-    <div className="flex flex-col h-full bg-vault-950 border border-vault-800 rounded-2xl overflow-hidden select-none animate-fade-in">
+    <div className="flex flex-col h-full bg-vault-950 lg:border lg:border-vault-800 lg:rounded-2xl overflow-hidden select-none animate-fade-in">
       {/* 1. CHAT WORKSPACE HEADER */}
       <header className="h-16 px-4 sm:px-5 bg-vault-900 border-b border-vault-800 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3 min-w-0">
@@ -912,32 +924,40 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             <ArrowLeft className="i" aria-hidden />
           </button>
 
-          <Avatar
-            name={partner.display_name}
-            seed={partner.uid}
-            src={partner.avatar_url}
-            size={40}
-            online={partnerPresence?.isOnline ?? false}
-          />
+          {/* Tapping the name/avatar opens contact info — the ⋮ menu next to it is for chat
+              actions (theme, timer, report, block), not the same thing. */}
+          <button
+            type="button"
+            onClick={() => setShowContactModal(true)}
+            className="flex items-center gap-3 min-w-0 text-left -ml-1 pl-1 pr-2 py-1 rounded-xl hover:bg-vault-850 transition-colors"
+            aria-label={`Contact info for ${partner.display_name}`}
+          >
+            <Avatar
+              name={partner.display_name}
+              seed={partner.uid}
+              src={partner.avatar_url}
+              size={40}
+              online={partnerPresence?.isOnline ?? false}
+            />
 
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
+            <div className="min-w-0">
               <h2 className="t-h3 font-bold text-white leading-tight truncate m-0">
                 {partner.display_name}
               </h2>
+              <div className="flex items-center gap-1.5 text-[11px] leading-tight mt-0.5">
+                {isTyping ? (
+                  <span className="text-emerald font-sans">typing…</span>
+                ) : presenceLabel ? (
+                  <span className={`font-sans ${partnerPresence?.isOnline ? 'text-emerald' : 'text-vault-400'}`}>{presenceLabel}</span>
+                ) : (
+                  <span className="text-vault-500 font-mono flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3" aria-hidden />
+                    {partner.uid}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] font-mono text-emerald leading-tight mt-0.5">
-              <ShieldCheck className="w-3.5 h-3.5" aria-hidden />
-              <span>{partner.uid}</span>
-              {isTyping ? (
-                <span className="text-emerald font-sans">typing…</span>
-              ) : presenceLabel ? (
-                <span className={`font-sans ${partnerPresence?.isOnline ? 'text-emerald' : 'text-vault-400'}`}>• {presenceLabel}</span>
-              ) : (
-                <span className="text-vault-500 font-sans hidden sm:inline">• Private Channel</span>
-              )}
-            </div>
-          </div>
+          </button>
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -954,15 +974,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             title="Chat options"
           >
             <MoreVertical className="i" aria-hidden />
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowContactModal(true)}
-            className="ib ib-s rounded-xl"
-            aria-label="Chat & notification settings"
-            title="Chat & notification settings"
-          >
-            <SlidersHorizontal className="i" aria-hidden />
           </button>
         </div>
       </header>
@@ -1098,18 +1109,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           <div className="flex items-end gap-2">
             <button
               type="button"
-              onClick={() => setShowExtras(true)}
-              className="ib ib-s rounded-xl"
-              aria-label="Stickers and games"
-              title="Stickers and games"
-            >
-              <Smile className="w-5 h-5 text-vault-300" />
-            </button>
-            <button
-              type="button"
               onClick={() => { expectExternalActivity(); fileInputRef.current?.click(); }}
               disabled={isUploadingMedia}
-              className="ib ib-s rounded-xl"
+              className="ib ib-s rounded-xl shrink-0"
               aria-label="Attach photo"
               title="Attach photo"
             >
@@ -1120,50 +1122,66 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               )}
             </button>
 
-            <button
-              type="button"
-              onClick={handleStartVoiceRecord}
-              className="ib ib-s rounded-xl"
-              aria-label="Record voice message"
-              title="Record voice note"
-            >
-              <Mic className="w-5 h-5 text-emerald" />
-            </button>
-
             <form
               onSubmit={e => {
                 e.preventDefault();
-                handleSend();
+                if (inputContent.trim()) void handleSend();
               }}
               className="flex-1 min-w-0 flex items-end gap-2"
             >
-              <textarea
-                ref={inputRef}
-                rows={1}
-                value={inputContent}
-                onChange={e => handleInputChange(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Escape' && (replyTo || editing)) cancelComposerMode();
-                  // With a keyboard and mouse, Enter sends and Shift+Enter adds a line.
-                  // On a phone, Enter adds a line and the Send button sends.
-                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !isTouchDevice()) {
-                    e.preventDefault();
-                    void handleSend();
-                  }
-                }}
-                maxLength={4000}
-                enterKeyHint={isTouchDevice() ? 'enter' : 'send'}
-                placeholder={editing ? 'Edit message…' : 'Message'}
-                className="inp flex-1 min-w-0 text-sm min-h-[44px] max-h-[132px] py-[11px] leading-[20px] resize-none overflow-y-auto"
-              />
-              <button
-                type="submit"
-                disabled={!inputContent.trim()}
-                className="btn btn-p btn-sm !w-11 !h-11 !p-0 rounded-xl"
-                aria-label="Send message"
-              >
-                <Send className="w-4 h-4 fill-current" />
-              </button>
+              {/* Stickers open from inside the message field, next to where you're typing. */}
+              <div className="relative flex-1 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setShowExtras(true)}
+                  className="absolute left-1.5 bottom-[7px] ib ib-s !w-8 !h-8 rounded-lg z-10"
+                  aria-label="Stickers and games"
+                  title="Stickers and games"
+                >
+                  <Smile className="w-5 h-5 text-vault-300" />
+                </button>
+                <textarea
+                  ref={inputRef}
+                  rows={1}
+                  value={inputContent}
+                  onChange={e => handleInputChange(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape' && (replyTo || editing)) cancelComposerMode();
+                    // With a keyboard and mouse, Enter sends and Shift+Enter adds a line.
+                    // On a phone, Enter adds a line and the Send button sends.
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !isTouchDevice()) {
+                      e.preventDefault();
+                      void handleSend();
+                    }
+                  }}
+                  maxLength={4000}
+                  enterKeyHint={isTouchDevice() ? 'enter' : 'send'}
+                  placeholder={editing ? 'Edit message…' : 'Message'}
+                  className="inp w-full text-sm min-h-[44px] max-h-[132px] py-[11px] pl-11 leading-[20px] resize-none overflow-y-auto"
+                />
+              </div>
+
+              {/* One button, not two: a mic to record while the field is empty, a send arrow the
+                  moment there's text to send — never both at once. */}
+              {inputContent.trim() ? (
+                <button
+                  type="submit"
+                  className="btn btn-p btn-sm !w-11 !h-11 !p-0 rounded-xl shrink-0"
+                  aria-label="Send message"
+                >
+                  <Send className="w-4 h-4 fill-current" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStartVoiceRecord}
+                  className="ib ib-s !w-11 !h-11 rounded-xl shrink-0"
+                  aria-label="Record voice message"
+                  title="Record voice note"
+                >
+                  <Mic className="w-5 h-5 text-emerald" />
+                </button>
+              )}
             </form>
           </div>
         )}
@@ -1215,6 +1233,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 <Ban className="w-4 h-4" aria-hidden /> Block {partner.display_name}
               </button>
             )}
+            <div className="divider my-1 mx-2" />
+            <button type="button" className="w-full flex items-center justify-center px-4 min-h-[48px] text-sm font-semibold text-vault-300 hover:bg-vault-800 rounded-xl"
+              onClick={() => { setShowChatMenu(false); setConfirmBlock(false); }}>
+              Cancel
+            </button>
           </div>
         </div>
       )}
@@ -1312,7 +1335,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         >
           <div className="w-full max-w-sm bg-vault-900 h-full border-l border-vault-800 shadow-2xl relative flex flex-col">
             <div className="p-3 border-b border-vault-800 flex items-center justify-between bg-vault-950">
-              <span className="t-body font-bold text-white">Contact & Notification Settings</span>
+              <span className="t-body font-bold text-white">Contact info</span>
               <button
                 type="button"
                 onClick={() => setShowContactModal(false)}
@@ -1361,32 +1384,13 @@ function outboxToMessage(item: OutboxItem, status: MessageItem['status']): Messa
 
 const isDeleted = (m: MessageItem) => Boolean(m.deleted_at) || m.content === '[DELETED]';
 
-const isSystem = (content: string) => content.startsWith('[SYSTEM:');
-
-function timerLabel(seconds: number): string {
-  return seconds >= 604800 ? '7 days' : '24 hours';
-}
-
-/** "[SYSTEM:disappearing:86400]" → "turned on disappearing messages (24 hours)". */
-function systemText(content: string): string {
-  const m = content.match(/^\[SYSTEM:disappearing:(\w+)\]$/);
-  if (m) {
-    return m[1] === 'off'
-      ? 'turned off disappearing messages'
-      : `turned on disappearing messages (${timerLabel(Number(m[1]))})`;
-  }
-  return 'updated the chat';
-}
+const isSystem = isSystemMessage;
+const systemText = systemMessageText;
 
 /** One-line description of a message, for reply quotes and banners. */
 function previewText(content: string): string {
-  if (content === '[DELETED]') return 'Deleted message';
   if (isSystem(content)) return 'Chat setting changed';
-  const extra = extraPreview(content);
-  if (extra) return extra;
-  if (content.startsWith('[IMAGE]')) return '📷 Photo';
-  if (content.startsWith('[VOICE_NOTE')) return '🎤 Voice message';
-  return content;
+  return readableMessagePreview(content);
 }
 
 interface MessageRowProps {
@@ -1489,7 +1493,9 @@ function MessageBubble({
   const score = deleted ? undefined : parseScore(msg.content);
   const gameRef = deleted ? undefined : parseGame(msg.content);
   // Stickers, games and score cards sit on the wallpaper, not in a bubble.
-  const bare = Boolean(sticker || score || gameRef);
+  // Photos get no chat-bubble background/border, same as stickers: a colored frame around a
+  // photo just adds visual weight without meaning anything (there's no "your colour" for a photo).
+  const bare = Boolean(sticker || score || gameRef || isImage);
 
   // Long-press detection. Moving the finger (scrolling) cancels it; a completed long-press
   // swallows the following click so it doesn't also open the photo.
@@ -1551,7 +1557,7 @@ function MessageBubble({
   }, [reactions, myUserId]);
 
   const image = (
-    <span className="relative block w-56 max-w-full aspect-[4/5] rounded-lg overflow-hidden bg-black/20">
+    <span className="relative block w-48 max-w-full aspect-[4/5] rounded-lg overflow-hidden bg-black/20 border border-white/10">
       {imageFailed ? (
         <span className="absolute inset-0 flex items-center justify-center text-center text-xs p-3 opacity-80">
           Photo unavailable
@@ -1721,7 +1727,7 @@ function MessageBubble({
         >
           <AlertCircle className="w-3.5 h-3.5" aria-hidden /> Not sent. Tap to retry
         </button>
-      ) : (isLastInGroup || msg.status) && (
+      ) : (isLastInGroup || msg.status || isImage) && (
         <div className={`flex items-center gap-1.5 text-[11px] text-vault-500 font-mono mt-1 px-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
           {msg.edited_at && !deleted && <span className="font-sans italic">edited</span>}
           <span>{formatTimestamp(msg.created_at)}</span>

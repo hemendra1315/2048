@@ -28,13 +28,21 @@ const LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8],
 export const ChatGameCard: React.FC<ChatGameCardProps> = ({ gameId, myUserId, partnerName, onRematch }) => {
   const [game, setGame] = useState<GameRow | null>(null);
   const [missing, setMissing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from('chat_games').select('*').eq('id', gameId).maybeSingle();
-    if (data) setGame(data as unknown as GameRow);
-    else setMissing(true);
+    setLoadError(false);
+    const { data, error: loadErr } = await supabase.from('chat_games').select('*').eq('id', gameId).maybeSingle();
+    if (loadErr) {
+      console.warn('[chat-game] could not load game', loadErr);
+      setLoadError(true);
+    } else if (data) {
+      setGame(data as unknown as GameRow);
+    } else {
+      setMissing(true);
+    }
   }, [gameId]);
 
   useEffect(() => {
@@ -50,6 +58,14 @@ export const ChatGameCard: React.FC<ChatGameCardProps> = ({ gameId, myUserId, pa
     };
   }, [gameId, load]);
 
+  if (loadError) {
+    return (
+      <div className="text-xs text-vault-400 p-2 flex items-center gap-2">
+        Couldn't load game.
+        <button onClick={() => void load()} className="text-cyan-400 underline">Retry</button>
+      </div>
+    );
+  }
   if (missing) {
     return <div className="text-xs text-vault-400 p-2">Game not available</div>;
   }
