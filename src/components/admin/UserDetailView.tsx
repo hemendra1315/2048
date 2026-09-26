@@ -1,16 +1,33 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, MessageSquare, Image as ImageIcon, Download, ExternalLink, X, Loader2 } from 'lucide-react';
-import { UserProfile, ConversationItem, MessageItem } from '../../types';
-import { getUserConversationsForAdmin, getUserAllMediaForAdmin, UserMediaGridItem } from '../../lib/adminApi';
+import {
+  ArrowLeft,
+  MessageSquare,
+  Image as ImageIcon,
+  FolderLock,
+  Download,
+  ExternalLink,
+  X,
+  Loader2,
+} from 'lucide-react';
+import { UserProfile, ConversationItem, MessageItem, GalleryItem } from '../../types';
+import {
+  getUserConversationsForAdmin,
+  getUserAllMediaForAdmin,
+  getUserVaultMediaForAdmin,
+  UserMediaGridItem,
+} from '../../lib/adminApi';
 import { formatTimestamp } from '../../lib/utils';
 import { Avatar } from '../common/Avatar';
 import { ConversationViewer } from './ConversationViewer';
 import { readableMessagePreview } from '../../lib/chatExtras';
+import { ChatImage } from '../common/ChatMedia';
+import { useAuth } from '../../context/AuthContext';
+import { resolveChatMediaUrl } from '../../lib/mediaUrls';
 
 interface UserDetailViewProps {
   user: UserProfile;
   onBack: () => void;
-  initialTab?: 'dms' | 'gallery';
+  initialTab?: 'dms' | 'gallery' | 'vault';
   initialConversationId?: string;
   initialHighlightMessageId?: string;
 }
@@ -22,8 +39,9 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
   initialConversationId,
   initialHighlightMessageId,
 }) => {
-  const [activeTab, setActiveTab] = useState<'dms' | 'gallery'>(initialTab);
-  
+  const { user: currentAdmin } = useAuth();
+  const [activeTab, setActiveTab] = useState<'dms' | 'gallery' | 'vault'>(initialTab);
+
   // DMs State
   const [conversations, setConversations] = useState<
     (ConversationItem & { partnerProfile: UserProfile; messages: MessageItem[] })[]
@@ -32,21 +50,35 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
   const [selectedConversation, setSelectedConversation] = useState<
     (ConversationItem & { partnerProfile: UserProfile; messages: MessageItem[] }) | null
   >(null);
-  const [highlightMessageId, setHighlightMessageId] = useState<string | null>(initialHighlightMessageId || null);
+  const [highlightMessageId, setHighlightMessageId] = useState<string | null>(
+    initialHighlightMessageId || null
+  );
 
-  // Gallery State
-  const [mediaItems, setMediaItems] = useState<UserMediaGridItem[]>([]);
-  const [loadingMedia, setLoadingMedia] = useState(true);
-  const [activeMediaItem, setActiveMediaItem] = useState<UserMediaGridItem | null>(null);
+  // Gallery (Chat Media) State
+  const [chatMediaItems, setChatMediaItems] = useState<UserMediaGridItem[]>([]);
+  const [loadingChatMedia, setLoadingChatMedia] = useState(true);
 
-  // Load Conversations for this user
+  // Vault (Saved Gallery) State
+  const [vaultItems, setVaultItems] = useState<GalleryItem[]>([]);
+  const [loadingVault, setLoadingVault] = useState(true);
+
+  // Active Media Viewer Modal State
+  const [activeMediaItem, setActiveMediaItem] = useState<{
+    id: string;
+    url: string;
+    created_at: string;
+    conversation_id?: string;
+    message_id?: string;
+    isVaultItem?: boolean;
+  } | null>(null);
+
+  // Load Conversations
   const loadConversations = useCallback(async () => {
     setLoadingConversations(true);
     try {
-      const convs = await getUserConversationsForAdmin(user.id, user.id);
+      const convs = await getUserConversationsForAdmin(user.id, currentAdmin?.id || user.id);
       setConversations(convs);
 
-      // If deep linked to a conversation
       if (initialConversationId) {
         const found = convs.find(c => c.id === initialConversationId);
         if (found) {
@@ -54,32 +86,46 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
         }
       }
     } catch (err) {
-      console.error('Failed to load user conversations:', err);
+      console.error('Failed to load conversations:', err);
     } finally {
       setLoadingConversations(false);
     }
-  }, [user.id, initialConversationId]);
+  }, [user.id, currentAdmin?.id, initialConversationId]);
 
-  // Load All Media sent or received by this user
-  const loadMedia = useCallback(async () => {
-    setLoadingMedia(true);
+  // Load Chat Media (Gallery tab)
+  const loadChatMedia = useCallback(async () => {
+    setLoadingChatMedia(true);
     try {
       const items = await getUserAllMediaForAdmin(user.id);
-      setMediaItems(items);
+      setChatMediaItems(items);
     } catch (err) {
-      console.error('Failed to load user media:', err);
+      console.error('Failed to load chat media:', err);
     } finally {
-      setLoadingMedia(false);
+      setLoadingChatMedia(false);
     }
   }, [user.id]);
 
+  // Load Vault Media (Vault tab)
+  const loadVaultMedia = useCallback(async () => {
+    setLoadingVault(true);
+    try {
+      const items = await getUserVaultMediaForAdmin(user.id, currentAdmin?.id || user.id);
+      setVaultItems(items);
+    } catch (err) {
+      console.error('Failed to load vault items:', err);
+    } finally {
+      setLoadingVault(false);
+    }
+  }, [user.id, currentAdmin?.id]);
+
   useEffect(() => {
     void loadConversations();
-    void loadMedia();
-  }, [loadConversations, loadMedia]);
+    void loadChatMedia();
+    void loadVaultMedia();
+  }, [loadConversations, loadChatMedia, loadVaultMedia]);
 
   // Handle "Go To Conversation" from Gallery Viewer
-  const handleGoToConversation = (item: UserMediaGridItem) => {
+  const handleGoToConversation = (item: { conversation_id?: string; message_id?: string }) => {
     if (!item.conversation_id) return;
     const targetConv = conversations.find(c => c.id === item.conversation_id);
     if (targetConv) {
@@ -93,7 +139,8 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
   // Handle direct file download
   const handleDownloadMedia = async (url: string, filename = 'media-download') => {
     try {
-      const res = await fetch(url);
+      const resolvedUrl = (await resolveChatMediaUrl(url)) || url;
+      const res = await fetch(resolvedUrl);
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -105,8 +152,8 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
       document.body.removeChild(a);
       URL.revokeObjectURL(blobUrl);
     } catch {
-      // Fallback
-      window.open(url, '_blank');
+      const fallbackUrl = (await resolveChatMediaUrl(url)) || url;
+      window.open(fallbackUrl, '_blank');
     }
   };
 
@@ -134,20 +181,24 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-base font-bold text-white m-0">{user.display_name}</h2>
-              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
-                user.gender === 'Female'
-                  ? 'bg-pink-950/50 text-pink-300 border-pink-700/50'
-                  : 'bg-cyan-950/50 text-cyan-300 border-cyan-700/50'
-              }`}>
+              <span
+                className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                  user.gender === 'Female'
+                    ? 'bg-pink-950/50 text-pink-300 border-pink-700/50'
+                    : 'bg-cyan-950/50 text-cyan-300 border-cyan-700/50'
+                }`}
+              >
                 {user.gender || 'Male'}
               </span>
-              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
-                user.status === 'banned'
-                  ? 'bg-rose-950/50 text-rose-300 border-rose-700/50'
-                  : user.status === 'suspended'
-                  ? 'bg-amber-950/50 text-amber-300 border-amber-700/50'
-                  : 'bg-emerald-950/50 text-emerald-300 border-emerald-700/50'
-              }`}>
+              <span
+                className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                  user.status === 'banned'
+                    ? 'bg-rose-950/50 text-rose-300 border-rose-700/50'
+                    : user.status === 'suspended'
+                    ? 'bg-amber-950/50 text-amber-300 border-amber-700/50'
+                    : 'bg-emerald-950/50 text-emerald-300 border-emerald-700/50'
+                }`}
+              >
                 {user.status.toUpperCase()}
               </span>
             </div>
@@ -157,15 +208,15 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
           </div>
         </div>
 
-        {/* 2-Section Tabs: DMs and Gallery */}
-        <div className="flex items-center bg-vault-950 border border-vault-800 p-1 rounded-xl self-stretch sm:self-auto">
+        {/* 3-Section Tabs: DMs, Gallery (Chat Media), and Vault (Saved Photos) */}
+        <div className="flex items-center bg-vault-950 border border-vault-800 p-1 rounded-xl self-stretch sm:self-auto overflow-x-auto">
           <button
             type="button"
             onClick={() => {
               setActiveTab('dms');
               setSelectedConversation(null);
             }}
-            className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all shrink-0 ${
               activeTab === 'dms'
                 ? 'bg-vault-800 text-white shadow'
                 : 'text-vault-400 hover:text-vault-200'
@@ -178,14 +229,27 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('gallery')}
-            className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all shrink-0 ${
               activeTab === 'gallery'
                 ? 'bg-vault-800 text-white shadow'
                 : 'text-vault-400 hover:text-vault-200'
             }`}
           >
             <ImageIcon className="w-4 h-4" />
-            <span>Gallery ({mediaItems.length})</span>
+            <span>Gallery ({chatMediaItems.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('vault')}
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all shrink-0 ${
+              activeTab === 'vault'
+                ? 'bg-vault-800 text-white shadow'
+                : 'text-vault-400 hover:text-vault-200'
+            }`}
+          >
+            <FolderLock className="w-4 h-4" />
+            <span>Vault ({vaultItems.length})</span>
           </button>
         </div>
       </div>
@@ -206,10 +270,12 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
               }}
             />
           ) : (
-            <div className="bg-vault-900 border border-vault-800 rounded-2xl overflow-hidden">
+            <div className="bg-vault-900 border border-vault-800 rounded-2xl overflow-hidden shadow-lg">
               <div className="p-4 border-b border-vault-800 bg-vault-900/80">
                 <h3 className="text-sm font-bold text-white m-0">All Conversations</h3>
-                <p className="text-xs text-vault-400 mt-0.5 m-0">Click any conversation to open its read-only transcript.</p>
+                <p className="text-xs text-vault-400 mt-0.5 m-0">
+                  Click any conversation to open its locked read-only transcript.
+                </p>
               </div>
 
               {loadingConversations ? (
@@ -279,37 +345,48 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
         </div>
       )}
 
-      {/* SECTION 2: GALLERY */}
+      {/* SECTION 2: GALLERY (Chat Media Sent / Received) */}
       {activeTab === 'gallery' && (
         <div>
-          {loadingMedia ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          {loadingChatMedia ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
               {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
-                <div key={i} className="aspect-square rounded-2xl bg-vault-900 animate-pulse border border-vault-800" />
+                <div
+                  key={i}
+                  className="aspect-square rounded-2xl bg-vault-900 animate-pulse border border-vault-800"
+                />
               ))}
             </div>
-          ) : mediaItems.length === 0 ? (
-            <div className="p-12 text-center bg-vault-900 border border-vault-800 rounded-2xl flex flex-col items-center justify-center gap-2 text-vault-400 text-xs">
+          ) : chatMediaItems.length === 0 ? (
+            <div className="p-12 text-center bg-vault-900 border border-vault-800 rounded-2xl flex flex-col items-center justify-center gap-2 text-vault-400 text-xs shadow-lg">
               <ImageIcon className="w-8 h-8 text-vault-600 mb-1" />
-              <p className="text-sm font-bold text-white m-0">No Media Found</p>
-              <p className="m-0">No media sent or received by this user.</p>
+              <p className="text-sm font-bold text-white m-0">No Chat Media Found</p>
+              <p className="m-0">No photos or media sent or received in this user's conversations.</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-              {mediaItems.map(item => (
+              {chatMediaItems.map(item => (
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setActiveMediaItem(item)}
+                  onClick={() =>
+                    setActiveMediaItem({
+                      id: item.id,
+                      url: item.image_url,
+                      created_at: item.created_at,
+                      conversation_id: item.conversation_id,
+                      message_id: item.message_id,
+                      isVaultItem: false,
+                    })
+                  }
                   className="group relative aspect-square rounded-2xl overflow-hidden bg-vault-950 border border-vault-800 hover:border-purple-500/50 shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-purple-500"
                 >
-                  <img
-                    src={item.image_url}
-                    alt="User media"
+                  <ChatImage
+                    url={item.image_url}
+                    alt="Chat media"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    loading="lazy"
                   />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2">
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2 pointer-events-none">
                     <span className="text-[10px] text-white/90 font-mono">
                       {new Date(item.created_at).toLocaleDateString()}
                     </span>
@@ -321,12 +398,64 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
         </div>
       )}
 
-      {/* GALLERY MEDIA VIEWER MODAL (ONLY Download and Go To Conversation buttons) */}
+      {/* SECTION 3: VAULT (Saved Personal Gallery Items) */}
+      {activeTab === 'vault' && (
+        <div>
+          {loadingVault ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+                <div
+                  key={i}
+                  className="aspect-square rounded-2xl bg-vault-900 animate-pulse border border-vault-800"
+                />
+              ))}
+            </div>
+          ) : vaultItems.length === 0 ? (
+            <div className="p-12 text-center bg-vault-900 border border-vault-800 rounded-2xl flex flex-col items-center justify-center gap-2 text-vault-400 text-xs shadow-lg">
+              <FolderLock className="w-8 h-8 text-vault-600 mb-1" />
+              <p className="text-sm font-bold text-white m-0">No Vault Images Saved</p>
+              <p className="m-0">This user has not saved any photos to their personal vault/gallery.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              {vaultItems.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() =>
+                    setActiveMediaItem({
+                      id: item.id,
+                      url: item.image_url,
+                      created_at: item.created_at,
+                      isVaultItem: true,
+                    })
+                  }
+                  className="group relative aspect-square rounded-2xl overflow-hidden bg-vault-950 border border-vault-800 hover:border-purple-500/50 shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <img
+                    src={item.image_url}
+                    alt="Vault photo"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2 pointer-events-none">
+                    <span className="text-[10px] text-white/90 font-mono">
+                      {new Date(item.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MEDIA VIEWER MODAL */}
       {activeMediaItem && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Media details viewer"
+          aria-label="Media viewer"
           className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in"
           onClick={() => setActiveMediaItem(null)}
         >
@@ -338,6 +467,7 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
             <div className="p-3.5 bg-vault-950 border-b border-vault-800 flex items-center justify-between">
               <span className="text-xs font-mono text-vault-400">
                 {new Date(activeMediaItem.created_at).toLocaleString()}
+                {activeMediaItem.isVaultItem ? ' · Saved Vault Photo' : ' · Chat Media'}
               </span>
               <button
                 type="button"
@@ -351,14 +481,23 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
 
             {/* Media Image Content */}
             <div className="flex-1 bg-black flex items-center justify-center p-2 overflow-hidden min-h-[300px]">
-              <img
-                src={activeMediaItem.image_url}
-                alt="Media preview"
-                className="max-h-[60vh] max-w-full object-contain rounded-lg"
-              />
+              {activeMediaItem.isVaultItem ? (
+                <img
+                  src={activeMediaItem.url}
+                  alt="Media preview"
+                  className="max-h-[60vh] max-w-full object-contain rounded-lg"
+                />
+              ) : (
+                <ChatImage
+                  url={activeMediaItem.url}
+                  allowFullscreen
+                  alt="Media preview"
+                  className="max-h-[60vh] max-w-full object-contain rounded-lg"
+                />
+              )}
             </div>
 
-            {/* Footer with ONLY Download and Go To Conversation buttons */}
+            {/* Footer with Actions */}
             <div className="p-4 bg-vault-950 border-t border-vault-800 flex items-center justify-end gap-3">
               {activeMediaItem.conversation_id && (
                 <button
@@ -373,7 +512,12 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => handleDownloadMedia(activeMediaItem.image_url, `user-${user.username || user.uid}-media`)}
+                onClick={() =>
+                  handleDownloadMedia(
+                    activeMediaItem.url,
+                    `user-${user.username || user.uid}-${activeMediaItem.isVaultItem ? 'vault' : 'chat'}`
+                  )
+                }
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold text-xs shadow-lg transition-transform active:scale-95"
               >
                 <Download className="w-4 h-4" />

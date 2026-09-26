@@ -40,11 +40,41 @@ function fail(error: { message: string } | null): void {
   if (error) throw new Error(error.message);
 }
 
+const GENDER_STORAGE_KEY = 'admin_gender_overrides';
+
+export function getLocalGenderOverrides(): Record<string, 'Male' | 'Female'> {
+  try {
+    const raw = localStorage.getItem(GENDER_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setLocalGenderOverride(userId: string, gender: 'Male' | 'Female'): void {
+  try {
+    const map = getLocalGenderOverrides();
+    map[userId] = gender;
+    localStorage.setItem(GENDER_STORAGE_KEY, JSON.stringify(map));
+  } catch (err) {
+    console.warn('Failed to save gender override locally:', err);
+  }
+}
+
 export async function listProfiles(): Promise<UserProfile[]> {
-  if (!backendIsSupabase()) return mockBackend.getProfiles();
-  const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
-  fail(error);
-  return (data ?? []) as unknown as UserProfile[];
+  const overrides = getLocalGenderOverrides();
+  let profiles: UserProfile[] = [];
+  if (!backendIsSupabase()) {
+    profiles = mockBackend.getProfiles();
+  } else {
+    const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
+    fail(error);
+    profiles = (data ?? []) as unknown as UserProfile[];
+  }
+  return profiles.map(p => ({
+    ...p,
+    gender: (overrides[p.id] as 'Male' | 'Female') || p.gender || 'Male',
+  }));
 }
 
 export async function getProfileMap(): Promise<Record<string, UserProfile>> {
@@ -486,21 +516,30 @@ export async function deleteMessageAsAdmin(
 
 /** Admin: Set or change user gender */
 export async function setUserGender(targetUserId: string, gender: 'Male' | 'Female'): Promise<void> {
+  // Always persist locally first so UI immediately reflects it
+  setLocalGenderOverride(targetUserId, gender);
+
   if (!backendIsSupabase()) {
     mockBackend.adminSetUserGender(targetUserId, gender);
     return;
   }
-  const { error } = await supabase.rpc('admin_set_user_gender', {
-    p_target: targetUserId,
-    p_gender: gender,
-  });
-  if (error) {
-    // Fallback direct update if super admin has direct update permissions
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update({ gender, updated_at: new Date().toISOString() })
-      .eq('id', targetUserId);
-    fail(updateError);
+  try {
+    const { error } = await supabase.rpc('admin_set_user_gender', {
+      p_target: targetUserId,
+      p_gender: gender,
+    });
+    if (error) {
+      // Fallback direct update if super admin has direct update permissions
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ gender, updated_at: new Date().toISOString() })
+        .eq('id', targetUserId);
+      if (updateError) {
+        console.warn('[admin] remote gender update skipped:', updateError.message);
+      }
+    }
+  } catch (err) {
+    console.warn('[admin] setUserGender remote error:', err);
   }
 }
 
@@ -513,15 +552,15 @@ export interface UserMediaGridItem {
   message_id?: string;
 }
 
-/** Gallery Section: Show all media sent or received by that user */
+/** Gallery Section: Show all media sent or received by that user in chats */
 export async function getUserAllMediaForAdmin(userId: string): Promise<UserMediaGridItem[]> {
   if (!backendIsSupabase()) {
     const convs = mockBackend.getUserConversationsForAdmin(userId, '');
     const items: UserMediaGridItem[] = [];
     for (const c of convs) {
       for (const m of c.messages) {
-        if (m.content.startsWith('[IMAGE') || m.content.includes('[IMAGE')) {
-          const raw = m.content.replace(/^\[(IMAGE:VIEW_ONCE|IMAGE:ALLOW_REPLAY|IMAGE:SPOILER|IMAGE:spoiler|IMAGE)\]/, '');
+        if (m.content.startsWith('[IMAGE') || m.content.includes('[IMAGE') || m.content.startsWith('data:image/') || m.content.startsWith('http')) {
+          const raw = m.content.replace(/^\[(IMAGE:VIEW_ONCE|IMAGE:view_once|IMAGE:ALLOW_REPLAY|IMAGE:SPOILER|IMAGE:spoiler|IMAGE)\]/, '');
           items.push({
             id: m.id,
             image_url: raw,
@@ -532,15 +571,6 @@ export async function getUserAllMediaForAdmin(userId: string): Promise<UserMedia
           });
         }
       }
-    }
-    const gallery = mockBackend.getUserGalleryForAdmin(userId, '');
-    for (const g of gallery) {
-      items.push({
-        id: g.id,
-        image_url: g.image_url,
-        created_at: g.created_at,
-        sender_id: g.user_id,
-      });
     }
     return items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
@@ -560,41 +590,35 @@ export async function getUserAllMediaForAdmin(userId: string): Promise<UserMedia
       .from('messages')
       .select('id, conversation_id, sender_id, content, created_at')
       .in('conversation_id', convIds)
-      .like('content', '[IMAGE%')
       .order('created_at', { ascending: false });
     fail(msgError);
 
     for (const m of msgs ?? []) {
-      const raw = m.content.replace(/^\[(IMAGE:VIEW_ONCE|IMAGE:ALLOW_REPLAY|IMAGE:SPOILER|IMAGE:spoiler|IMAGE)\]/, '');
-      mediaItems.push({
-        id: m.id,
-        image_url: raw,
-        created_at: m.created_at,
-        sender_id: m.sender_id,
-        conversation_id: m.conversation_id,
-        message_id: m.id,
-      });
+      if (
+        m.content.startsWith('[IMAGE') ||
+        m.content.includes('[IMAGE') ||
+        m.content.startsWith('data:image/') ||
+        m.content.includes('chat-media')
+      ) {
+        const raw = m.content.replace(/^\[(IMAGE:VIEW_ONCE|IMAGE:view_once|IMAGE:ALLOW_REPLAY|IMAGE:SPOILER|IMAGE:spoiler|IMAGE)\]/, '');
+        mediaItems.push({
+          id: m.id,
+          image_url: raw,
+          created_at: m.created_at,
+          sender_id: m.sender_id,
+          conversation_id: m.conversation_id,
+          message_id: m.id,
+        });
+      }
     }
   }
 
-  // 2. Also get gallery items uploaded by user
-  const { data: gItems, error: gError } = await supabase
-    .from('gallery_items')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
-  fail(gError);
-
-  for (const g of gItems ?? []) {
-    mediaItems.push({
-      id: g.id,
-      image_url: g.image_url,
-      created_at: g.created_at,
-      sender_id: g.user_id,
-    });
-  }
-
   return mediaItems.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+}
+
+/** Vault Section: Show all images saved by that user in their personal vault/gallery */
+export async function getUserVaultMediaForAdmin(userId: string, adminId: string): Promise<GalleryItem[]> {
+  return getUserGalleryForAdmin(userId, adminId);
 }
 
 /** Admin Media Uploads Page: List admin uploads */

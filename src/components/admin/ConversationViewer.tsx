@@ -4,6 +4,7 @@ import { MessageItem, UserProfile } from '../../types';
 import { formatTimestamp } from '../../lib/utils';
 import { Avatar } from '../common/Avatar';
 import { readableMessagePreview } from '../../lib/chatExtras';
+import { ChatImage } from '../common/ChatMedia';
 
 interface ConversationViewerProps {
   conversationId: string;
@@ -24,27 +25,31 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (highlightMessageId) {
-      const el = document.getElementById(`admin-msg-${highlightMessageId}`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.classList.add('ring-2', 'ring-purple-500', 'bg-purple-950/40');
-        setTimeout(() => {
-          el.classList.remove('ring-2', 'ring-purple-500', 'bg-purple-950/40');
-        }, 3000);
-        return;
+    const timer = setTimeout(() => {
+      if (highlightMessageId) {
+        const el = document.getElementById(`admin-msg-${highlightMessageId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('ring-2', 'ring-purple-500', 'bg-purple-950/40');
+          setTimeout(() => {
+            el.classList.remove('ring-2', 'ring-purple-500', 'bg-purple-950/40');
+          }, 3000);
+          return;
+        }
       }
-    }
-    // Default scroll to bottom
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
-    }
+      // Default scroll to bottom
+      if (listRef.current) {
+        listRef.current.scrollTop = listRef.current.scrollHeight;
+      }
+    }, 100);
+
+    return () => clearTimeout(timer);
   }, [messages, highlightMessageId]);
 
   return (
-    <div className="flex flex-col h-[75vh] max-h-[750px] bg-vault-950 border border-vault-800 rounded-2xl overflow-hidden shadow-2xl animate-fade-in">
-      {/* Header */}
-      <header className="p-3.5 bg-vault-900 border-b border-vault-800 flex items-center justify-between shrink-0">
+    <div className="flex flex-col h-[75vh] max-h-[750px] min-h-[450px] bg-vault-950 border border-vault-800 rounded-2xl overflow-hidden shadow-2xl animate-fade-in">
+      {/* Locked Header */}
+      <header className="p-3.5 bg-vault-900 border-b border-vault-800 flex items-center justify-between shrink-0 sticky top-0 z-20">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -72,7 +77,7 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-1 text-[11px] font-mono text-vault-400 px-2.5 py-1 rounded-full bg-vault-950 border border-vault-800">
+        <div className="flex items-center gap-1 text-[11px] font-mono text-vault-400 px-2.5 py-1 rounded-full bg-vault-950 border border-vault-800 shrink-0">
           <Lock className="w-3 h-3 text-emerald" />
           <span>Encrypted Log</span>
         </div>
@@ -81,7 +86,7 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
       {/* Message Stream */}
       <div
         ref={listRef}
-        className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#080808]"
+        className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-3 bg-[#080808]"
       >
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 text-xs text-vault-500 gap-1.5">
@@ -93,9 +98,9 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
           messages.map(msg => {
             const isMe = msg.sender_id === currentUserProfile.id;
             const isHighlighted = msg.id === highlightMessageId;
-            const isImage = msg.content.startsWith('[IMAGE') || msg.content.includes('[IMAGE');
+            const isImage = msg.content.startsWith('[IMAGE') || msg.content.includes('[IMAGE') || msg.content.startsWith('data:image/');
             const imageUrl = isImage
-              ? msg.content.replace(/^\[(IMAGE:VIEW_ONCE|IMAGE:ALLOW_REPLAY|IMAGE:SPOILER|IMAGE:spoiler|IMAGE)\]/, '')
+              ? msg.content.replace(/^\[(IMAGE:VIEW_ONCE|IMAGE:view_once|IMAGE:ALLOW_REPLAY|IMAGE:SPOILER|IMAGE:spoiler|IMAGE)\]/, '')
               : '';
 
             return (
@@ -119,12 +124,14 @@ export const ConversationViewer: React.FC<ConversationViewerProps> = ({
                 >
                   {isImage ? (
                     <div className="space-y-1.5">
-                      <img
-                        src={imageUrl}
-                        alt="Chat attachment"
-                        className="rounded-xl max-h-60 max-w-full object-cover"
-                        loading="lazy"
-                      />
+                      <div className="rounded-xl overflow-hidden max-h-60 max-w-full">
+                        <ChatImage
+                          url={imageUrl}
+                          allowFullscreen
+                          alt="Chat attachment"
+                          className="rounded-xl max-h-60 max-w-full object-cover"
+                        />
+                      </div>
                       {msg.content.startsWith('[IMAGE:VIEW_ONCE]') && (
                         <span className="text-[10px] block opacity-80 font-mono">1 View Once Photo</span>
                       )}

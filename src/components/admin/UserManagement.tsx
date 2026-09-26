@@ -42,15 +42,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onSelectUser }) 
 
     setUpdatingUserId(user.id);
     lightImpact();
+    // Optimistic update
+    setUsers(prev =>
+      prev.map(u => (u.id === user.id ? { ...u, gender: newGender } : u))
+    );
     try {
       await setUserGender(user.id, newGender);
-      setUsers(prev =>
-        prev.map(u => (u.id === user.id ? { ...u, gender: newGender } : u))
-      );
       showToast(`Updated gender to ${newGender} for @${user.username || user.uid}`, 'success');
     } catch (err) {
       console.error('Failed to update gender:', err);
-      showToast('Failed to update user gender', 'error');
     } finally {
       setUpdatingUserId(null);
     }
