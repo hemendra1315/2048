@@ -82,6 +82,7 @@ import { claimEphemeralMedia } from '../../lib/viewOnceApi';
 import { useBackHandler } from '../../lib/backButton';
 import { expectExternalActivity } from '../../lib/externalActivity';
 import { getDraft, setDraft } from '../../lib/chatDrafts';
+import { getCustomWallpaper, setCustomWallpaper, removeCustomWallpaper } from '../../lib/chatWallpaper';
 import { lightImpact, mediumImpact, selectionChange, notificationSuccess, errorWarning } from '../../lib/haptics';
 
 interface ChatRoomProps {
@@ -112,10 +113,12 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [claimingViewOnceId, setClaimingViewOnceId] = useState<string | null>(null);
   const [activeViewOnceItem, setActiveViewOnceItem] = useState<{ id: string; url: string; created_at: string; sender_id: string } | null>(null);
   const [activeMediaUrl, setActiveMediaUrl] = useState<string | null>(null);
+  const [activeChatMedia, setActiveChatMedia] = useState<{ msg: MessageItem; url: string } | null>(null);
   const onOpenMedia = useCallback((url: string) => {
     onOpenMediaProp?.(url);
     setActiveMediaUrl(url);
   }, [onOpenMediaProp]);
+  const [customWallpaper, setCustomWallpaperState] = useState<string | null>(() => getCustomWallpaper(conversationId));
   const [viewOnceConsumedIds, setViewOnceConsumedIds] = useState<Set<string>>(() => new Set());
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioSpeed, setAudioSpeed] = useState<number>(1);
@@ -300,6 +303,23 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       .eq('conversation_id', conversationId)
       .eq('user_id', userId);
   };
+
+  const handleSetCustomWallpaper = (dataUrl: string) => {
+    setCustomWallpaper(conversationId, dataUrl);
+    setCustomWallpaperState(dataUrl);
+    showToast('Custom wallpaper applied', 'success');
+  };
+
+  const handleRemoveCustomWallpaper = () => {
+    removeCustomWallpaper(conversationId);
+    setCustomWallpaperState(null);
+    showToast('Wallpaper reset to theme default', 'info');
+  };
+
+  const handleOpenChatImage = useCallback((msg: MessageItem, url: string) => {
+    lightImpact();
+    setActiveChatMedia({ msg, url });
+  }, []);
 
   const toggleMute = async () => {
     const next = !isMuted;
@@ -1042,6 +1062,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
   useBackHandler(true, onBack);
   useBackHandler(Boolean(activeViewOnceItem), () => setActiveViewOnceItem(null));
+  useBackHandler(Boolean(activeChatMedia), () => setActiveChatMedia(null));
   useBackHandler(Boolean(activeMediaUrl), () => setActiveMediaUrl(null));
   useBackHandler(Boolean(replyTo || editing), cancelComposerMode);
   useBackHandler(isRecordingAudio, () => handleStopVoiceRecord(false));
@@ -1126,7 +1147,13 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       <div
         ref={listRef}
         onScroll={handleListScroll}
-        className={`flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:p-5 ${theme.wallpaper} min-h-0 [-webkit-overflow-scrolling:touch] touch-pan-y`}
+        style={customWallpaper ? {
+          backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.70), rgba(0, 0, 0, 0.78)), url(${customWallpaper})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundAttachment: 'fixed',
+        } : undefined}
+        className={`flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:p-5 ${customWallpaper ? 'bg-vault-950' : theme.wallpaper} min-h-0 [-webkit-overflow-scrolling:touch] touch-pan-y`}
       >
         {(loadingOlder || hasOlder) && messages.length > 0 && (
           <div className="flex justify-center py-2">
@@ -1171,6 +1198,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 audioSpeed={audioSpeed}
                 onCycleSpeed={cycleSpeed}
                 onOpenMedia={onOpenMedia}
+                onOpenImage={handleOpenChatImage}
                 onMediaLoaded={handleMediaLoaded}
                 onOpenViewOncePhoto={handleOpenViewOncePhoto}
                 onToggleViewOnceAudio={handleToggleViewOnceAudio}
@@ -1589,7 +1617,10 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       {showThemeSheet && (
         <ChatThemeSheet
           current={themeId}
+          customWallpaper={customWallpaper}
           onPick={changeTheme}
+          onSetCustomWallpaper={handleSetCustomWallpaper}
+          onRemoveCustomWallpaper={handleRemoveCustomWallpaper}
           onClose={() => setShowThemeSheet(false)}
         />
       )}
@@ -1745,9 +1776,40 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         />
       )}
 
-      {/* Full-screen viewer for ordinary (non-ephemeral) chat photos — tap any photo to open it,
-          like a normal Instagram DM photo. */}
-      {activeMediaUrl && (
+      {/* 5. FULLSCREEN INSTAGRAM-STYLE CHAT PHOTO VIEWER (Reply, Save/Download, React, Info, Delete) */}
+      {activeChatMedia && (
+        <LightboxViewer
+          item={{
+            id: activeChatMedia.msg.id,
+            user_id: activeChatMedia.msg.sender_id,
+            image_url: activeChatMedia.url,
+            storage_path: '',
+            caption: activeChatMedia.msg.sender_id === userId ? 'Your photo' : `${partner.display_name}'s photo`,
+            created_at: activeChatMedia.msg.created_at,
+          }}
+          senderName={activeChatMedia.msg.sender_id === userId ? 'You' : partner.display_name}
+          isMyMessage={activeChatMedia.msg.sender_id === userId}
+          myReaction={reactions[activeChatMedia.msg.id]?.find(r => r.user_id === userId)?.emoji}
+          onReply={() => {
+            startReply(activeChatMedia.msg);
+            setActiveChatMedia(null);
+          }}
+          onReact={emoji => {
+            void toggleReaction(activeChatMedia.msg, emoji);
+          }}
+          onDelete={activeChatMedia.msg.sender_id === userId ? () => {
+            void deleteForEveryone(activeChatMedia.msg);
+            setActiveChatMedia(null);
+          } : undefined}
+          onClose={() => {
+            lightImpact();
+            setActiveChatMedia(null);
+          }}
+        />
+      )}
+
+      {/* Fallback for external media viewer */}
+      {activeMediaUrl && !activeChatMedia && (
         <LightboxViewer
           item={{
             id: 'chat-media',
@@ -1808,6 +1870,7 @@ interface MessageRowProps {
   audioSpeed: number;
   onCycleSpeed: () => void;
   onOpenMedia?: (url: string) => void;
+  onOpenImage?: (msg: MessageItem, url: string) => void;
   onMediaLoaded: () => void;
   onOpenViewOncePhoto: (msg: MessageItem, rawUrl: string) => void;
   onToggleViewOnceAudio: (msg: MessageItem, rawUrl: string) => void;
@@ -1855,6 +1918,7 @@ function MessageBubble({
   audioSpeed,
   onCycleSpeed,
   onOpenMedia,
+  onOpenImage,
   onMediaLoaded,
   onOpenViewOncePhoto,
   onToggleViewOnceAudio,
@@ -2176,10 +2240,15 @@ function MessageBubble({
               viewsUsed={ephemeralViewsUsed}
             />
           ) : isImage ? (
-            onOpenMedia && !imageFailed ? (
+            (onOpenImage || onOpenMedia) && !imageFailed ? (
               <button
                 type="button"
-                onClick={() => void resolveChatMediaUrl(imageUrl).then(src => { if (src) onOpenMedia(src); })}
+                onClick={() => void resolveChatMediaUrl(imageUrl).then(src => {
+                  if (src) {
+                    if (onOpenImage) onOpenImage(msg, src);
+                    else onOpenMedia?.(src);
+                  }
+                })}
                 className="block p-0 border-0 bg-transparent cursor-pointer rounded-2xl overflow-hidden"
                 aria-label="Open photo"
               >

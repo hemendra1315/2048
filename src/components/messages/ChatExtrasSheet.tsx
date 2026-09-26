@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { Check, Gamepad2, Smile, Trophy, X } from 'lucide-react';
+import { Check, Gamepad2, Smile, Trophy, X, ImagePlus, Trash2, Palette } from 'lucide-react';
 import { STICKERS, CHAT_THEMES, ChatThemeId } from '../../lib/chatExtras';
 import { COVER_GAMES, useGame } from '../../context/GameContext';
+import { compressWallpaperFile } from '../../lib/chatWallpaper';
+import { expectExternalActivity } from '../../lib/externalActivity';
+import { lightImpact, selectionChange, errorWarning } from '../../lib/haptics';
 
 interface ChatExtrasSheetProps {
   canPlayGames: boolean;
@@ -106,41 +109,174 @@ export const ChatExtrasSheet: React.FC<ChatExtrasSheetProps> = ({ canPlayGames, 
 
 interface ThemeSheetProps {
   current: ChatThemeId;
+  customWallpaper?: string | null;
   onPick: (id: ChatThemeId) => void;
+  onSetCustomWallpaper?: (dataUrl: string) => void;
+  onRemoveCustomWallpaper?: () => void;
   onClose: () => void;
 }
 
-/** Colour theme for this chat. Only you see your choice. */
-export const ChatThemeSheet: React.FC<ThemeSheetProps> = ({ current, onPick, onClose }) => (
-  <div
-    role="dialog"
-    aria-modal="true"
-    aria-label="Chat theme"
-    className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center anim-fade"
-    onClick={onClose}
-    onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
-  >
-    <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl" onClick={e => e.stopPropagation()}>
-      <h3 className="t-body font-bold text-white m-0 px-1">Chat theme</h3>
-      <p className="text-xs text-vault-400 mt-1 mb-3 px-1">Only you see the theme you pick for this chat.</p>
-      <div className="grid grid-cols-4 gap-3">
-        {CHAT_THEMES.map(t => (
-          <button
-            key={t.id}
-            type="button"
-            role="radio"
-            aria-checked={current === t.id}
-            onClick={() => onPick(t.id)}
-            className="flex flex-col items-center gap-1.5"
-          >
-            <span className={`relative w-14 h-14 rounded-2xl ${t.wallpaper} border ${current === t.id ? 'border-white' : 'border-vault-750'} flex items-end justify-end p-1.5`}>
-              <span className={`w-7 h-4 rounded-full ${t.swatch}`} />
-              {current === t.id && <Check className="absolute top-1 left-1 w-4 h-4 text-white" aria-hidden />}
-            </span>
-            <span className="text-[11px] text-vault-300">{t.label}</span>
+/** Colour theme & custom wallpaper for this chat. Only you see your choice. */
+export const ChatThemeSheet: React.FC<ThemeSheetProps> = ({
+  current,
+  customWallpaper,
+  onPick,
+  onSetCustomWallpaper,
+  onRemoveCustomWallpaper,
+  onClose,
+}) => {
+  const [isProcessing, setIsProcessing] = useState(false);
+  const wallpaperInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleWallpaperFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !onSetCustomWallpaper) return;
+    setIsProcessing(true);
+    try {
+      const compressed = await compressWallpaperFile(file);
+      onSetCustomWallpaper(compressed);
+      lightImpact();
+    } catch (err) {
+      console.error('Failed to set wallpaper:', err);
+      errorWarning();
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Chat theme and wallpaper"
+      className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center anim-fade"
+      onClick={onClose}
+      onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
+    >
+      <div className="w-full sm:max-w-md bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="w-9 h-1 rounded-full bg-vault-700 mx-auto mb-3 sm:hidden" aria-hidden />
+
+        <div className="flex items-center justify-between pb-2 border-b border-vault-800">
+          <div>
+            <h3 className="t-body font-bold text-white m-0">Chat Wallpaper & Theme</h3>
+            <p className="text-xs text-vault-400 mt-0.5 m-0">Personalize your chat background and bubble colors.</p>
+          </div>
+          <button type="button" onClick={onClose} className="ib ib-s rounded-full" aria-label="Close">
+            <X className="i" />
           </button>
-        ))}
+        </div>
+
+        {/* 1. Custom Image Wallpaper Section */}
+        <div className="mt-4">
+          <input
+            type="file"
+            ref={wallpaperInputRef}
+            onChange={handleWallpaperFile}
+            accept="image/*"
+            className="hidden"
+            aria-label="Upload custom wallpaper"
+          />
+
+          <div className="text-xs font-bold text-vault-300 mb-2 uppercase tracking-wider flex items-center gap-1.5">
+            <ImagePlus className="w-3.5 h-3.5 text-emerald" />
+            <span>Custom Background Photo</span>
+          </div>
+
+          {customWallpaper ? (
+            <div className="relative rounded-2xl overflow-hidden border border-emerald/50 bg-vault-950 p-3 flex items-center justify-between gap-3 shadow-lg">
+              <div
+                className="w-16 h-16 rounded-xl bg-cover bg-center border border-white/20 shrink-0 shadow-inner"
+                style={{ backgroundImage: `url(${customWallpaper})` }}
+              />
+              <div className="min-w-0 flex-1">
+                <span className="text-sm font-bold text-white block truncate">Custom Photo Active</span>
+                <span className="text-xs text-emerald block">Applied to chat background</span>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    expectExternalActivity();
+                    wallpaperInputRef.current?.click();
+                  }}
+                  disabled={isProcessing}
+                  className="btn btn-s btn-sm text-xs py-1.5 px-3 min-h-[36px]"
+                >
+                  Change
+                </button>
+                {onRemoveCustomWallpaper && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      selectionChange();
+                      onRemoveCustomWallpaper();
+                    }}
+                    className="ib ib-s rounded-xl text-rose-400 hover:text-rose-300 hover:bg-rose-950/40"
+                    aria-label="Remove custom wallpaper"
+                    title="Remove custom wallpaper"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                expectExternalActivity();
+                wallpaperInputRef.current?.click();
+              }}
+              disabled={isProcessing}
+              className="w-full flex items-center justify-center gap-3 p-3.5 rounded-2xl bg-vault-950 border border-dashed border-vault-700 hover:border-emerald active:scale-98 transition-all text-left group"
+            >
+              <div className="w-10 h-10 rounded-xl bg-vault-900 group-hover:bg-emerald/10 border border-vault-750 group-hover:border-emerald/40 flex items-center justify-center text-vault-300 group-hover:text-emerald transition-colors">
+                <ImagePlus className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-bold text-white block group-hover:text-emerald transition-colors">
+                  {isProcessing ? 'Processing image…' : 'Choose Wallpaper from Gallery'}
+                </span>
+                <span className="text-xs text-vault-400 block truncate">
+                  Set any photo or aesthetic image as chat background
+                </span>
+              </div>
+            </button>
+          )}
+        </div>
+
+        {/* 2. Color & Gradient Themes */}
+        <div className="mt-5">
+          <div className="text-xs font-bold text-vault-300 mb-2.5 uppercase tracking-wider flex items-center gap-1.5">
+            <Palette className="w-3.5 h-3.5 text-purple-400" />
+            <span>Color & Bubble Style</span>
+          </div>
+
+          <div className="grid grid-cols-4 gap-3">
+            {CHAT_THEMES.map(t => (
+              <button
+                key={t.id}
+                type="button"
+                role="radio"
+                aria-checked={current === t.id}
+                onClick={() => {
+                  selectionChange();
+                  onPick(t.id);
+                }}
+                className="flex flex-col items-center gap-1.5 group"
+              >
+                <span className={`relative w-14 h-14 rounded-2xl ${t.wallpaper} border ${current === t.id ? 'border-white ring-2 ring-purple-500/50' : 'border-vault-750 group-hover:border-vault-600'} flex items-end justify-end p-1.5 shadow-md transition-all active:scale-95`}>
+                  <span className={`w-7 h-4 rounded-full ${t.swatch} shadow`} />
+                  {current === t.id && <Check className="absolute top-1 left-1 w-4 h-4 text-white" aria-hidden />}
+                </span>
+                <span className={`text-[11px] font-medium ${current === t.id ? 'text-white' : 'text-vault-300'}`}>{t.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
+

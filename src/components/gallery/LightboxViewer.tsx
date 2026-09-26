@@ -1,9 +1,27 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { X, Trash, Send, Download, Info, ZoomIn, ZoomOut, Check, HardDrive, Calendar, Image as ImageIcon, EyeOff, Heart, Undo2 } from 'lucide-react';
-import { GalleryItem } from '../../types';
+import {
+  X,
+  Trash,
+  Send,
+  Download,
+  Info,
+  ZoomIn,
+  ZoomOut,
+  Check,
+  HardDrive,
+  Calendar,
+  Image as ImageIcon,
+  EyeOff,
+  Heart,
+  Undo2,
+  Reply,
+  Smile,
+} from 'lucide-react';
+import { GalleryItem, ReactionEmoji, REACTION_EMOJIS } from '../../types';
 import type { MediaUrlState } from '../../lib/mediaUrls';
 import { MediaImage } from '../common/MediaImage';
 import { lightImpact, mediumImpact, selectionChange } from '../../lib/haptics';
+import { useToast } from '../../context/ToastContext';
 
 interface LightboxViewerProps {
   item: GalleryItem | null;
@@ -17,6 +35,12 @@ interface LightboxViewerProps {
   mediaState?: MediaUrlState;
   onRetry?: () => void;
   isViewOnce?: boolean;
+  /* Instagram Chat Photo Actions: */
+  onReply?: () => void;
+  onReact?: (emoji: ReactionEmoji) => void;
+  myReaction?: ReactionEmoji;
+  senderName?: string;
+  isMyMessage?: boolean;
 }
 
 export const LightboxViewer: React.FC<LightboxViewerProps> = ({
@@ -29,7 +53,13 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
   mediaState,
   onRetry,
   isViewOnce = false,
+  onReply,
+  onReact,
+  myReaction,
+  senderName,
+  isMyMessage = false,
 }) => {
+  const { showToast } = useToast();
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [dragY, setDragY] = useState(0);
@@ -37,6 +67,9 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
   const [isPanning, setIsPanning] = useState(false);
   const [showHud, setShowHud] = useState(true);
   const [showMetadata, setShowMetadata] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showHeartBurst, setShowHeartBurst] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const posStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -51,19 +84,21 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
     setDragY(0);
     setShowHud(true);
     setShowMetadata(false);
+    setShowEmojiPicker(false);
   }, [item?.id]);
 
   useEffect(() => {
     if (!item) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (showMetadata) setShowMetadata(false);
+        if (showEmojiPicker) setShowEmojiPicker(false);
+        else if (showMetadata) setShowMetadata(false);
         else onClose();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [item, showMetadata, onClose]);
+  }, [item, showMetadata, showEmojiPicker, onClose]);
 
   if (!item) return null;
 
@@ -73,7 +108,7 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
   const date = new Date(item.created_at || Date.now());
   const dateFormatted = date.toLocaleDateString(undefined, {
     day: 'numeric',
-    month: 'long',
+    month: 'short',
     year: 'numeric',
   });
   const timeFormatted = date.toLocaleTimeString(undefined, {
@@ -178,6 +213,46 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
   const toggleHud = () => {
     selectionChange();
     setShowHud(prev => !prev);
+    if (showEmojiPicker) setShowEmojiPicker(false);
+  };
+
+  const handleSaveToDevice = async () => {
+    if (!downloadUrl) return;
+    setIsSaving(true);
+    lightImpact();
+    try {
+      const res = await fetch(downloadUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `photo-${item.id || Date.now()}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+      showToast('Photo saved to device', 'success');
+    } catch {
+      // Fallback
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `photo-${item.id || Date.now()}.jpg`;
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('Photo download started', 'info');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleHeartReact = () => {
+    if (!onReact) return;
+    mediumImpact();
+    onReact('❤️');
+    setShowHeartBurst(true);
+    setTimeout(() => setShowHeartBurst(false), 650);
   };
 
   const bgOpacity = Math.max(0.2, 1 - dragY / 300);
@@ -193,7 +268,7 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
     >
       {/* Top Bar (HUD) */}
       <header
-        className={`p-4 flex items-center justify-between z-20 transition-all duration-200 ${
+        className={`p-4 pt-[calc(0.75rem+env(safe-area-inset-top))] flex items-center justify-between z-20 transition-all duration-200 ${
           showHud ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'
         }`}
       >
@@ -215,10 +290,10 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
           ) : (
             <>
               <h3 className="t-h3 font-bold text-white m-0 truncate text-sm sm:text-base">
-                {dateFormatted} · {timeFormatted}
+                {senderName ? `${senderName}` : `${dateFormatted} · ${timeFormatted}`}
               </h3>
-              <p className="t-cap c3 m-0 truncate max-w-[200px] sm:max-w-xs">
-                {item.caption || 'Personal Photo'}
+              <p className="t-cap c3 m-0 truncate max-w-[200px] sm:max-w-xs text-vault-400">
+                {senderName ? `${dateFormatted} at ${timeFormatted}` : (item.caption || 'Photo')}
               </p>
             </>
           )}
@@ -276,6 +351,13 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
         onTouchCancel={handleTouchEnd}
         onClick={toggleHud}
       >
+        {/* Double-tap heart burst animation */}
+        {showHeartBurst && (
+          <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
+            <Heart className="w-24 h-24 text-rose-500 fill-rose-500 drop-shadow-2xl anim-spring-pop" aria-hidden />
+          </div>
+        )}
+
         <div
           style={{
             transform: `translate(${position.x}px, ${position.y + dragY}px) scale(${scale * dragScale})`,
@@ -285,7 +367,7 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
         >
           <MediaImage
             state={state}
-            alt={item.caption || 'Personal gallery photo'}
+            alt={item.caption || 'Photo'}
             imgClassName="max-w-full max-h-full object-contain rounded-xl shadow-2xl"
             onRetry={onRetry}
             loading="eager"
@@ -293,89 +375,176 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
         </div>
       </main>
 
-      {/* Bottom Actions Bar (HUD) */}
+      {/* Bottom Actions Bar (Instagram Style) */}
       {!isViewOnce ? (
-        <footer
-          className={`p-3 sm:p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] glass-panel border-t border-white/[0.08] flex items-center justify-around max-w-md w-full mx-auto rounded-t-2xl z-20 transition-all duration-200 ${
-            showHud ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
-          }`}
-        >
-          {onSend && (
-            <button
-              type="button"
-              onClick={() => {
-                lightImpact();
-                onSend(item);
-              }}
-              className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[64px] hover:text-emerald"
-              aria-label="Send photo in chat"
-            >
-              <Send className="i" aria-hidden />
-              <span className="t-cap">Send</span>
-            </button>
+        <div className="relative z-20 max-w-md w-full mx-auto">
+          {/* Quick-Emoji Picker Sheet */}
+          {showEmojiPicker && onReact && (
+            <div className="absolute bottom-full mb-3 inset-x-4 p-2 bg-vault-900/95 backdrop-blur-md border border-vault-750 rounded-2xl flex justify-around shadow-2xl anim-sheet">
+              {REACTION_EMOJIS.map(e => (
+                <button
+                  key={e}
+                  type="button"
+                  onClick={() => {
+                    mediumImpact();
+                    onReact(e);
+                    setShowEmojiPicker(false);
+                    if (e === '❤️') {
+                      setShowHeartBurst(true);
+                      setTimeout(() => setShowHeartBurst(false), 650);
+                    }
+                  }}
+                  className={`w-11 h-11 rounded-full text-2xl flex items-center justify-center transition-transform active:scale-90 hover:scale-110 ${
+                    myReaction === e ? 'bg-purple-500/25 ring-2 ring-purple-500 scale-105' : 'hover:bg-vault-800'
+                  }`}
+                  aria-label={`React with ${e}`}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
           )}
 
-          <a
-            href={downloadUrl ?? undefined}
-            aria-disabled={!downloadUrl}
-            onClick={e => {
-              if (!downloadUrl) e.preventDefault();
-              else lightImpact();
-            }}
-            download={`photo-${item.id}.jpg`}
-            target="_blank"
-            rel="noreferrer"
-            className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[64px] text-vault-50 hover:text-white"
-            aria-label="Save photo"
+          <footer
+            className={`p-3 sm:p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] glass-panel border-t border-white/[0.08] flex items-center justify-around w-full rounded-t-2xl transition-all duration-200 ${
+              showHud ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
+            }`}
           >
-            <Download className="i" aria-hidden />
-            <span className="t-cap">Save</span>
-          </a>
+            {/* 1. Reply Button (Instagram Chat Mode) */}
+            {onReply && (
+              <button
+                type="button"
+                onClick={() => {
+                  lightImpact();
+                  onReply();
+                }}
+                className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[56px] text-purple-400 hover:text-purple-300 active:scale-95 transition-transform"
+                aria-label="Reply to photo"
+              >
+                <Reply className="i" aria-hidden />
+                <span className="t-cap">Reply</span>
+              </button>
+            )}
 
-          <button
-            type="button"
-            onClick={() => {
-              selectionChange();
-              setShowMetadata(true);
-            }}
-            className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[64px]"
-            aria-label="View photo details"
-          >
-            <Info className="i" aria-hidden />
-            <span className="t-cap">Details</span>
-          </button>
+            {/* 2. React / Heart Button */}
+            {onReact && (
+              <button
+                type="button"
+                onClick={handleHeartReact}
+                onContextMenu={e => {
+                  e.preventDefault();
+                  selectionChange();
+                  setShowEmojiPicker(prev => !prev);
+                }}
+                className={`btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[56px] ${
+                  myReaction ? 'text-rose-400' : 'text-vault-100 hover:text-white'
+                } active:scale-90 transition-transform`}
+                aria-label={myReaction ? `Reacted ${myReaction}` : 'React with Heart'}
+                title="Tap to Heart, long-press for more emojis"
+              >
+                {myReaction && myReaction !== '❤️' ? (
+                  <span className="text-xl leading-none">{myReaction}</span>
+                ) : (
+                  <Heart className={`i ${myReaction === '❤️' ? 'fill-current text-rose-500' : ''}`} aria-hidden />
+                )}
+                <span className="t-cap">{myReaction ? 'Reacted' : 'React'}</span>
+              </button>
+            )}
 
-          {onRestore && (
+            {/* 3. Send to another chat (Gallery mode) */}
+            {onSend && !onReply && (
+              <button
+                type="button"
+                onClick={() => {
+                  lightImpact();
+                  onSend(item);
+                }}
+                className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[56px] hover:text-purple-300"
+                aria-label="Send photo in chat"
+              >
+                <Send className="i" aria-hidden />
+                <span className="t-cap">Send</span>
+              </button>
+            )}
+
+            {/* 4. Save / Download to device */}
+            <button
+              type="button"
+              disabled={!downloadUrl || isSaving}
+              onClick={handleSaveToDevice}
+              className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[56px] text-vault-50 hover:text-white active:scale-95 transition-transform"
+              aria-label="Save photo to device"
+            >
+              <Download className="i" aria-hidden />
+              <span className="t-cap">{isSaving ? 'Saving…' : 'Save'}</span>
+            </button>
+
+            {/* 5. More Emojis button if in chat */}
+            {onReact && (
+              <button
+                type="button"
+                onClick={() => {
+                  selectionChange();
+                  setShowEmojiPicker(prev => !prev);
+                }}
+                className={`btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[56px] ${
+                  showEmojiPicker ? 'text-purple-400' : 'text-vault-300 hover:text-white'
+                }`}
+                aria-label="Pick reaction emoji"
+              >
+                <Smile className="i" aria-hidden />
+                <span className="t-cap">Emoji</span>
+              </button>
+            )}
+
+            {/* 6. Details */}
             <button
               type="button"
               onClick={() => {
-                lightImpact();
-                onRestore(item);
-                onClose();
+                selectionChange();
+                setShowMetadata(true);
               }}
-              className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[64px] !text-emerald hover:!text-emerald"
-              aria-label="Restore photo"
+              className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[56px] text-vault-300 hover:text-white"
+              aria-label="View photo details"
             >
-              <Undo2 className="i" aria-hidden />
-              <span className="t-cap">Restore</span>
+              <Info className="i" aria-hidden />
+              <span className="t-cap">Info</span>
             </button>
-          )}
 
-          {onDelete && (
-            <button
-              type="button"
-              onClick={() => {
-                mediumImpact();
-                onDelete(item);
-              }}
-              className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[64px] !text-[#FF8A93] hover:!text-red-300"
-              aria-label={onRestore ? 'Delete forever' : 'Delete photo'}
-            >
-              <Trash className="i" aria-hidden />
-              <span className="t-cap">{onRestore ? 'Delete Forever' : 'Delete'}</span>
-            </button>
-          )}
-        </footer>
+            {/* 7. Restore button (if in Trash) */}
+            {onRestore && (
+              <button
+                type="button"
+                onClick={() => {
+                  lightImpact();
+                  onRestore(item);
+                  onClose();
+                }}
+                className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[56px] !text-emerald hover:!text-emerald"
+                aria-label="Restore photo"
+              >
+                <Undo2 className="i" aria-hidden />
+                <span className="t-cap">Restore</span>
+              </button>
+            )}
+
+            {/* 8. Delete button */}
+            {(onDelete && (isMyMessage || onRestore)) && (
+              <button
+                type="button"
+                onClick={() => {
+                  mediumImpact();
+                  onDelete(item);
+                }}
+                className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[56px] !text-[#FF8A93] hover:!text-red-300"
+                aria-label={onRestore ? 'Delete forever' : 'Delete photo'}
+              >
+                <Trash className="i" aria-hidden />
+                <span className="t-cap">{onRestore ? 'Delete Forever' : 'Delete'}</span>
+              </button>
+            )}
+          </footer>
+        </div>
       ) : (
         <footer
           className={`p-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] flex items-center justify-center z-20 transition-all duration-200 ${
@@ -402,7 +571,7 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
           >
             <div className="flex items-center justify-between pb-3 border-b border-vault-800">
               <h3 className="t-h3 font-bold text-white flex items-center gap-2">
-                <ImageIcon className="w-4 h-4 text-emerald" /> Photo Metadata
+                <ImageIcon className="w-4 h-4 text-purple-400" /> Photo Info
               </h3>
               <button
                 type="button"
@@ -415,9 +584,16 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
             </div>
 
             <div className="py-4 space-y-3 text-xs">
+              {senderName && (
+                <div className="flex items-center justify-between text-vault-300">
+                  <span>Sent By</span>
+                  <span className="font-semibold text-white">{senderName}</span>
+                </div>
+              )}
+
               <div className="flex items-center justify-between text-vault-300">
                 <span className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-vault-400" /> Capture Date
+                  <Calendar className="w-4 h-4 text-vault-400" /> Timestamp
                 </span>
                 <span className="font-semibold text-white">{dateFormatted} at {timeFormatted}</span>
               </div>
@@ -431,7 +607,7 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
 
               <div className="flex items-center justify-between text-vault-300">
                 <span className="flex items-center gap-2">
-                  <HardDrive className="w-4 h-4 text-vault-400" /> Vault Storage
+                  <HardDrive className="w-4 h-4 text-vault-400" /> Security
                 </span>
                 <span className="flex items-center gap-1 text-emerald font-semibold">
                   <Check className="w-3.5 h-3.5" /> End-to-End Encrypted
@@ -451,3 +627,4 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
     </div>
   );
 };
+
