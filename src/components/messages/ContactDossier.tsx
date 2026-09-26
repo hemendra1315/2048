@@ -1,33 +1,13 @@
 import { resolveChatMediaUrl } from '../../lib/mediaUrls';
 import { ChatImage } from '../common/ChatMedia';
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  ShieldCheck,
-  Bell,
-  Copy,
-  Lock,
-  Image as ImageIcon,
-  Sparkles,
-  Send,
-  Check,
-  Volume2,
-} from 'lucide-react';
-import { UserProfile, NotificationMode } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { ShieldCheck, Copy, Image as ImageIcon } from 'lucide-react';
+import { UserProfile } from '../../types';
 import { Avatar } from '../common/Avatar';
-import { useAuth } from '../../context/AuthContext';
-import { useVault } from '../../context/VaultContext';
 import { describePresence, usePresence } from '../../lib/presence';
 import { useToast } from '../../context/ToastContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { mockBackend } from '../../lib/mockBackend';
-import {
-  getContactNotificationPreference,
-  saveContactNotificationPreference,
-  sendTestNotification,
-  DEFAULT_DISGUISED_TITLE,
-  disguisedBody,
-  NOTIFICATION_SOUND_OPTIONS,
-} from '../../lib/notifications';
 
 interface ContactDossierProps {
   partner: UserProfile;
@@ -36,126 +16,17 @@ interface ContactDossierProps {
   className?: string;
 }
 
-const PRESET_PHRASES = [
-  '🏆 New high score unlocked!',
-  '⚡ Bonus round available',
-  '🎁 Reward waiting',
-  '⭐ Level 40 cleared!',
-];
-
 export const ContactDossier: React.FC<ContactDossierProps> = ({
   partner,
   conversationId,
   onOpenMedia,
   className = '',
 }) => {
-  const { user } = useAuth();
-  const { preferences } = useVault();
   const { showToast } = useToast();
   const partnerPresence = usePresence([partner.id])[partner.id];
   const presenceLabel = describePresence(partnerPresence);
-  const [activeTab, setActiveTab] = useState<'media' | 'security'>('media');
   const [sharedMedia, setSharedMedia] = useState<string[]>([]);
   const [loadingMedia, setLoadingMedia] = useState(false);
-
-  // Notification Preferences State
-  const [notificationMode, setNotificationMode] = useState<NotificationMode>('default');
-  const [customPhrase, setCustomPhrase] = useState('');
-  const [customSound, setCustomSound] = useState('default');
-  const [isSavingPref, setIsSavingPref] = useState(false);
-  const [isTestingNotification, setIsTestingNotification] = useState(false);
-  const [phraseError, setPhraseError] = useState<string | null>(null);
-
-  // Load contact notification preference
-  useEffect(() => {
-    if (!user || !partner.id) return;
-
-    let isMounted = true;
-    const loadPref = async () => {
-      const pref = await getContactNotificationPreference(user.id, partner.id);
-      if (!isMounted) return;
-      setNotificationMode(pref.notification_mode);
-      setCustomPhrase(pref.custom_phrase || '');
-      setCustomSound(pref.custom_sound || 'default');
-    };
-
-    void loadPref();
-    return () => {
-      isMounted = false;
-    };
-  }, [user, partner.id]);
-
-  const handleSavePreferences = useCallback(
-    async (mode: NotificationMode, phrase: string, sound: string) => {
-      if (!user) return;
-
-      const trimmed = phrase.trim();
-      if (mode === 'custom') {
-        if (!trimmed) {
-          setPhraseError('Custom phrase cannot be empty');
-          return;
-        }
-        if (trimmed.length > 60) {
-          setPhraseError('Phrase must be 60 characters or less');
-          return;
-        }
-      }
-      setPhraseError(null);
-
-      setIsSavingPref(true);
-      try {
-        await saveContactNotificationPreference(user.id, partner.id, {
-          notification_mode: mode,
-          custom_phrase: mode === 'custom' ? trimmed : null,
-          custom_sound: sound,
-        });
-        showToast('Notification settings saved', 'success');
-      } catch (err) {
-        console.error('Failed to save notification preference:', err);
-        showToast('Failed to save notification settings', 'error');
-      } finally {
-        setIsSavingPref(false);
-      }
-    },
-    [user, partner.id, showToast]
-  );
-
-  const handleModeChange = (newMode: NotificationMode) => {
-    setNotificationMode(newMode);
-    if (newMode === 'custom' && !customPhrase) {
-      setCustomPhrase('🏆 New high score unlocked!');
-      void handleSavePreferences('custom', '🏆 New high score unlocked!', customSound);
-    } else {
-      void handleSavePreferences(newMode, customPhrase, customSound);
-    }
-  };
-
-  const handleTestNotification = async () => {
-    if (notificationMode === 'silent') {
-      showToast('Notifications are set to Silent for this contact', 'info');
-      return;
-    }
-
-    const titleToUse =
-      notificationMode === 'custom'
-        ? customPhrase.trim() || DEFAULT_DISGUISED_TITLE
-        : DEFAULT_DISGUISED_TITLE;
-
-    setIsTestingNotification(true);
-    try {
-      await sendTestNotification({
-        title: titleToUse,
-        body: disguisedBody(preferences.custom_app_name),
-        sound: customSound,
-      });
-      showToast('Disguised test notification sent to device', 'success');
-    } catch (err) {
-      console.error('Test notification error:', err);
-      showToast('Test notification triggered (check system banner)', 'info');
-    } finally {
-      setIsTestingNotification(false);
-    }
-  };
 
   useEffect(() => {
     const loadSharedMedia = async () => {
@@ -170,8 +41,8 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
             .order('created_at', { ascending: false })
             .limit(9);
 
-          // Only photos actually sent in this chat. (It used to fall back to your own private
-          // gallery, which showed unrelated personal photos here.)
+          // Only photos actually sent in this chat, by either of you. (It used to fall back to
+          // your own private gallery, which showed unrelated personal photos here.)
           setSharedMedia((data ?? []).map(m => m.content.replace('[IMAGE]', '')));
         } else {
           const msgs = conversationId ? mockBackend.getMessages(conversationId) : [];
@@ -197,13 +68,6 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
       showToast(`Contact UID ${partner.uid} copied`, 'success');
     }
   };
-
-  const previewTitle =
-    notificationMode === 'silent'
-      ? '(No notification sent)'
-      : notificationMode === 'custom'
-      ? customPhrase.trim() || '🏆 New high score unlocked!'
-      : DEFAULT_DISGUISED_TITLE;
 
   return (
     <aside
@@ -253,271 +117,42 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
         )}
       </div>
 
-      {/* 2. DISGUISED NOTIFICATION STYLE SETTINGS */}
-      <section className="card p-3.5 bg-vault-850 border border-vault-750 my-4 flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Bell className="w-4 h-4 text-emerald" aria-hidden />
-            <span className="t-sm text-vault-100 font-semibold block leading-tight">
-              Notification Style
-            </span>
+      {/* 2. SHARED MEDIA — only what the two of you have actually sent in this chat. Tap to open. */}
+      <div className="flex flex-col gap-2 flex-1 mt-4">
+        <div className="flex items-center justify-between px-1">
+          <span className="t-over text-[10px]">Shared Photos</span>
+          <span className="t-cap mono c2">{sharedMedia.length} items</span>
+        </div>
+
+        {loadingMedia ? (
+          <div className="grid grid-cols-3 gap-1.5">
+            {[1, 2, 3, 4, 5, 6].map(n => (
+              <div key={n} className="sk aspect-square rounded-lg" />
+            ))}
           </div>
-          <span className="tag tag-em mono !text-[9px] !h-4 !px-1.5">Disguised</span>
-        </div>
-
-        {/* Style Selector Buttons */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 bg-vault-950 border border-vault-800 rounded-xl" role="radiogroup" aria-label="Notification Style Options">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={notificationMode === 'default'}
-            onClick={() => handleModeChange('default')}
-            className={`py-1.5 rounded-lg text-xs font-semibold text-center transition-all cursor-pointer ${
-              notificationMode === 'default'
-                ? 'bg-emerald text-[#04120C] shadow-sm font-bold'
-                : 'text-vault-400 hover:text-white'
-            }`}
-          >
-            Default
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={notificationMode === 'custom'}
-            onClick={() => handleModeChange('custom')}
-            className={`py-1.5 rounded-lg text-xs font-semibold text-center transition-all cursor-pointer ${
-              notificationMode === 'custom'
-                ? 'bg-emerald text-[#04120C] shadow-sm font-bold'
-                : 'text-vault-400 hover:text-white'
-            }`}
-          >
-            Custom
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={notificationMode === 'silent'}
-            onClick={() => handleModeChange('silent')}
-            className={`py-1.5 rounded-lg text-xs font-semibold text-center transition-all cursor-pointer ${
-              notificationMode === 'silent'
-                ? 'bg-vault-700 text-white shadow-sm font-bold'
-                : 'text-vault-400 hover:text-white'
-            }`}
-          >
-            Silent
-          </button>
-        </div>
-
-        {/* Custom Mode Controls */}
-        {notificationMode === 'custom' && (
-          <div className="flex flex-col gap-2.5 pt-1 anim-fade">
-            <div className="field">
-              <div className="flex items-center justify-between mb-1">
-                <label htmlFor="custom-phrase-input" className="lab text-xs font-medium text-vault-200">
-                  Custom Notification Text
-                </label>
-                <span className={`text-[10px] font-mono ${customPhrase.length > 55 ? 'text-amber-400' : 'text-vault-500'}`}>
-                  {customPhrase.length}/60
-                </span>
-              </div>
-              <input
-                id="custom-phrase-input"
-                type="text"
-                maxLength={60}
-                value={customPhrase}
-                onChange={e => {
-                  setCustomPhrase(e.target.value);
-                  setPhraseError(null);
-                }}
-                onBlur={() => handleSavePreferences('custom', customPhrase, customSound)}
-                placeholder="e.g. 🏆 New high score unlocked!"
-                className={`inp text-xs py-2 ${phraseError ? 'inp-err' : ''}`}
-              />
-              {phraseError && <p className="t-err text-[11px] mt-1">{phraseError}</p>}
-            </div>
-
-            {/* Quick Suggestions Chips */}
-            <div className="flex flex-wrap gap-1">
-              {PRESET_PHRASES.map(phrase => (
-                <button
-                  key={phrase}
-                  type="button"
-                  onClick={() => {
-                    setCustomPhrase(phrase);
-                    void handleSavePreferences('custom', phrase, customSound);
-                  }}
-                  className="chip !text-[10px] !py-0.5 !px-2 hover:!border-emerald hover:!text-white transition-colors"
-                >
-                  <Sparkles className="w-2.5 h-2.5 text-emerald mr-1 shrink-0" />
-                  <span className="truncate max-w-[130px]">{phrase}</span>
-                </button>
-              ))}
-            </div>
-
-            {/* Sound Selector */}
-            <div className="field">
-              <label htmlFor="sound-select" className="lab text-xs font-medium text-vault-200 mb-1 flex items-center gap-1.5">
-                <Volume2 className="w-3.5 h-3.5 text-vault-400" />
-                <span>Notification Sound</span>
-              </label>
-              <select
-                id="sound-select"
-                value={customSound}
-                onChange={e => {
-                  setCustomSound(e.target.value);
-                  void handleSavePreferences('custom', customPhrase, e.target.value);
-                }}
-                className="bg-vault-950 text-xs font-medium text-vault-100 px-3 py-2 rounded-xl border border-vault-750 focus:outline-none focus:border-emerald w-full"
+        ) : sharedMedia.length === 0 ? (
+          <div className="p-6 bg-vault-950/60 border border-vault-800 rounded-xl text-center space-y-1">
+            <ImageIcon className="w-6 h-6 text-vault-500 mx-auto" />
+            <p className="t-cap text-vault-400 m-0">No photos shared yet</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-1.5">
+            {sharedMedia.map((url, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => void resolveChatMediaUrl(url).then(src => { if (src) onOpenMedia?.(src); })}
+                className="aspect-square rounded-lg overflow-hidden bg-vault-950 border border-vault-800 cursor-pointer hover:border-emerald transition-colors p-0"
+                aria-label="Open shared photo"
               >
-                {NOTIFICATION_SOUND_OPTIONS.map(opt => (
-                  <option key={opt.id} value={opt.id}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* Lock Screen Live Preview Card */}
-        <div className="mt-1 p-2.5 rounded-xl bg-vault-950/90 border border-vault-800 space-y-1">
-          <div className="flex items-center justify-between text-[10px] text-vault-500 font-mono">
-            <span className="flex items-center gap-1">
-              <span>🎮</span>
-              <span>{preferences.custom_app_name || 'Games'} • lock screen preview</span>
-            </span>
-            <span>now</span>
-          </div>
-          <p className="text-xs font-bold text-white m-0 leading-tight truncate">
-            {previewTitle}
-          </p>
-          {notificationMode !== 'silent' && (
-            <p className="text-[11px] text-vault-400 m-0 leading-tight">
-              {disguisedBody(preferences.custom_app_name)}
-            </p>
-          )}
-        </div>
-
-        {/* Action Controls */}
-        <div className="flex gap-2 pt-1">
-          <button
-            type="button"
-            onClick={handleTestNotification}
-            disabled={isTestingNotification}
-            className="btn btn-s btn-sm flex-1 text-xs justify-center"
-            title="Trigger a local notification to verify lock screen appearance"
-          >
-            <Send className="w-3.5 h-3.5 text-emerald" />
-            <span>{isTestingNotification ? 'Sending...' : 'Test Notification'}</span>
-          </button>
-
-          {notificationMode === 'custom' && (
-            <button
-              type="button"
-              onClick={() => handleSavePreferences('custom', customPhrase, customSound)}
-              disabled={isSavingPref}
-              className="btn btn-p btn-sm px-3 text-xs"
-              title="Save custom disguise"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>{isSavingPref ? 'Saving' : 'Save'}</span>
-            </button>
-          )}
-        </div>
-      </section>
-
-      {/* 3. SHARED MEDIA & INTELLIGENCE TABS */}
-      <div className="flex flex-col gap-3 flex-1">
-        <div className="flex items-center gap-1 p-1 bg-vault-950 border border-vault-800 rounded-xl" role="tablist" aria-label="Shared content categories">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'media'}
-            onClick={() => setActiveTab('media')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold text-center transition-all ${
-              activeTab === 'media'
-                ? 'bg-vault-800 text-white shadow-sm'
-                : 'text-vault-400 hover:text-white'
-            }`}
-          >
-            Media
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'security'}
-            onClick={() => setActiveTab('security')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold text-center transition-all ${
-              activeTab === 'security'
-                ? 'bg-vault-800 text-white shadow-sm'
-                : 'text-vault-400 hover:text-white'
-            }`}
-          >
-            Privacy
-          </button>
-        </div>
-
-        {/* Tab 1: Shared Media Grid */}
-        {activeTab === 'media' && (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between px-1">
-              <span className="t-over text-[10px]">Shared Photos</span>
-              <span className="t-cap mono c2">{sharedMedia.length} items</span>
-            </div>
-
-            {loadingMedia ? (
-              <div className="grid grid-cols-3 gap-1.5">
-                {[1, 2, 3, 4, 5, 6].map(n => (
-                  <div key={n} className="sk aspect-square rounded-lg" />
-                ))}
-              </div>
-            ) : sharedMedia.length === 0 ? (
-              <div className="p-6 bg-vault-950/60 border border-vault-800 rounded-xl text-center space-y-1">
-                <ImageIcon className="w-6 h-6 text-vault-500 mx-auto" />
-                <p className="t-cap text-vault-400 m-0">No photos shared yet</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-1.5">
-                {sharedMedia.map((url, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => void resolveChatMediaUrl(url).then(src => { if (src) onOpenMedia?.(src); })}
-                    className="aspect-square rounded-lg overflow-hidden bg-vault-950 border border-vault-800 cursor-pointer hover:border-emerald transition-colors"
-                  >
-                    <ChatImage
-                      url={url}
-                      alt="Shared media"
-                      className="w-full h-full object-cover hover:scale-105 transition-transform duration-150"
-                      loading="lazy"
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tab 2: what actually protects this chat. No "Files" tab: nothing in this app sends a
-            generic file, and the old one listed three made-up filenames on every contact — never
-            anything either person had actually sent. No fingerprint either: it looked like a
-            per-conversation safety code but was just letters sliced from both UIDs, not backed by
-            any real key exchange. */}
-        {activeTab === 'security' && (
-          <div className="flex flex-col gap-3">
-            <div className="card p-3.5 bg-vault-950 border border-vault-800 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Lock className="w-4 h-4 text-emerald" />
-                  <span className="t-sm font-bold text-white">Private chat</span>
-                </div>
-                <span className="tag tag-em mono text-[10px]">ACTIVE</span>
-              </div>
-              <p className="text-[11px] text-vault-400 leading-relaxed m-0">
-                Messages and media in this chat travel over HTTPS and are only readable by the two
-                of you, enforced by the database's own access rules. A super admin can still review
-                chats for safety and moderation.
-              </p>
-            </div>
+                <ChatImage
+                  url={url}
+                  alt="Shared media"
+                  className="w-full h-full object-cover hover:scale-105 transition-transform duration-150"
+                  loading="lazy"
+                />
+              </button>
+            ))}
           </div>
         )}
       </div>

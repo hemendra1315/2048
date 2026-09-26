@@ -22,7 +22,7 @@ export interface ChatTheme {
 }
 
 export const CHAT_THEMES: ChatTheme[] = [
-  { id: 'default', label: 'Emerald', wallpaper: 'bg-vault-950', mine: 'bg-[#10B981] text-[#04120C]', swatch: 'bg-[#10B981]' },
+  { id: 'default', label: 'Violet', wallpaper: 'bg-vault-950', mine: 'bg-gradient-to-br from-[#9333EA] to-[#C026D3] text-white', swatch: 'bg-gradient-to-br from-[#9333EA] to-[#C026D3]' },
   { id: 'midnight', label: 'Midnight', wallpaper: 'bg-gradient-to-b from-[#0B1026] to-[#050505]', mine: 'bg-[#6366F1] text-white', swatch: 'bg-[#6366F1]' },
   { id: 'ocean', label: 'Ocean', wallpaper: 'bg-gradient-to-b from-[#03202B] to-[#050505]', mine: 'bg-[#0EA5E9] text-[#03131C]', swatch: 'bg-[#0EA5E9]' },
   { id: 'sunset', label: 'Sunset', wallpaper: 'bg-gradient-to-b from-[#2A1208] to-[#050505]', mine: 'bg-[#F97316] text-[#1F0B02]', swatch: 'bg-[#F97316]' },

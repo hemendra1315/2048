@@ -14,6 +14,7 @@ import {
   BellOff,
   Trash2,
   MailOpen,
+  RotateCcw,
 } from 'lucide-react';
 import { ConversationItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -28,6 +29,7 @@ import { useMediaQuery, DESKTOP_QUERY } from '../../lib/useMediaQuery';
 import { usePresence } from '../../lib/presence';
 import { readableMessagePreview } from '../../lib/chatExtras';
 import { useToast } from '../../context/ToastContext';
+import { mediumImpact } from '../../lib/haptics';
 import { useBackHandler } from '../../lib/backButton';
 
 interface MessagesViewProps {
@@ -402,6 +404,35 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     void loadConversations();
   };
 
+  // Pull to refresh (only engages when the list is already scrolled to the top)
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const pullStartRef = useRef<number | null>(null);
+  const PULL_TRIGGER = 64;
+
+  const handleListTouchStart = (e: React.TouchEvent) => {
+    if (isRefreshing || (listScrollRef.current?.scrollTop ?? 0) > 0) return;
+    pullStartRef.current = e.touches[0].clientY;
+  };
+  const handleListTouchMove = (e: React.TouchEvent) => {
+    if (pullStartRef.current === null) return;
+    const dy = e.touches[0].clientY - pullStartRef.current;
+    if (dy > 0 && (listScrollRef.current?.scrollTop ?? 0) <= 0) {
+      setPullDistance(Math.min(96, dy * 0.5));
+    }
+  };
+  const handleListTouchEnd = async () => {
+    if (pullDistance >= PULL_TRIGGER && !isRefreshing) {
+      setIsRefreshing(true);
+      mediumImpact();
+      await loadConversations();
+      setIsRefreshing(false);
+    }
+    setPullDistance(0);
+    pullStartRef.current = null;
+  };
+
   const filteredConversations = conversations.filter(c => {
     const q = searchQuery.toLowerCase();
     return (
@@ -441,7 +472,26 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto -mx-1">
+      <div
+        ref={listScrollRef}
+        onTouchStart={handleListTouchStart}
+        onTouchMove={handleListTouchMove}
+        onTouchEnd={() => void handleListTouchEnd()}
+        onTouchCancel={() => { setPullDistance(0); pullStartRef.current = null; }}
+        className="flex-1 overflow-y-auto -mx-1 relative"
+        style={{ transform: pullDistance ? `translateY(${pullDistance}px)` : undefined, transition: pullDistance ? 'none' : 'transform 200ms ease-out' }}
+      >
+        {(pullDistance > 0 || isRefreshing) && (
+          <div
+            className="absolute left-1/2 -translate-x-1/2 flex items-center justify-center w-8 h-8 rounded-full bg-vault-900 border border-vault-750 shadow-md"
+            style={{ top: -40 }}
+          >
+            <RotateCcw
+              className={`w-4 h-4 text-emerald ${isRefreshing ? 'animate-spin' : ''}`}
+              style={isRefreshing ? undefined : { transform: `rotate(${Math.min(1, pullDistance / PULL_TRIGGER) * 360}deg)` }}
+            />
+          </div>
+        )}
         {loading ? (
           <div role="status" aria-label="Loading chats">
             {[52, 40, 58, 36, 48].map((w, i) => (
@@ -525,7 +575,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                       name={c.partner.display_name}
                       seed={c.partner.uid}
                       src={c.partner.avatar_url}
-                      size={48}
+                      size={56}
                       online={presence[c.partner.id]?.isOnline ?? false}
                     />
                     <span className="flex-1 min-w-0 flex flex-col gap-0.5 ml-1">

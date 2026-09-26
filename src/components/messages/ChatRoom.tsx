@@ -31,6 +31,9 @@ import {
   Eye,
   EyeOff,
   Repeat,
+  Heart,
+  Bell,
+  BellOff,
 } from 'lucide-react';
 import { CoverGameType, MessageItem, MessageReaction, ReactionEmoji, REACTION_EMOJIS, UserProfile } from '../../types';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -69,6 +72,7 @@ import {
 } from '../../lib/chatExtras';
 import { ChatGameCard } from './ChatGameCard';
 import { ChatExtrasSheet, ChatThemeSheet } from './ChatExtrasSheet';
+import { NotificationPreferenceSheet } from './NotificationPreferenceSheet';
 import { COVER_GAMES, useGame } from '../../context/GameContext';
 import { resolveChatMediaUrl } from '../../lib/mediaUrls';
 import { BlockStatus, blockUser, getBlockStatus, unblockUser } from '../../lib/blocks';
@@ -93,7 +97,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   conversationId,
   partner,
   onBack,
-  onOpenMedia,
+  onOpenMedia: onOpenMediaProp,
   initialAttachment,
   onClearInitialAttachment,
 }) => {
@@ -105,11 +109,13 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [sendAsSpoiler, setSendAsSpoiler] = useState(false);
   type EphemeralSendMode = 'view_once' | 'allow_replay' | 'keep_in_chat';
-  const [ephemeralMode, setEphemeralMode] = useState<EphemeralSendMode>('keep_in_chat');
-  const [showEphemeralPicker, setShowEphemeralPicker] = useState(false);
-  const sendAsViewOnce = ephemeralMode !== 'keep_in_chat';
   const [claimingViewOnceId, setClaimingViewOnceId] = useState<string | null>(null);
   const [activeViewOnceItem, setActiveViewOnceItem] = useState<{ id: string; url: string; created_at: string; sender_id: string } | null>(null);
+  const [activeMediaUrl, setActiveMediaUrl] = useState<string | null>(null);
+  const onOpenMedia = useCallback((url: string) => {
+    onOpenMediaProp?.(url);
+    setActiveMediaUrl(url);
+  }, [onOpenMediaProp]);
   const [viewOnceConsumedIds, setViewOnceConsumedIds] = useState<Set<string>>(() => new Set());
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioSpeed, setAudioSpeed] = useState<number>(1);
@@ -130,7 +136,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [showTimerSheet, setShowTimerSheet] = useState(false);
   const [showExtras, setShowExtras] = useState(false);
   const [showThemeSheet, setShowThemeSheet] = useState(false);
+  const [showNotificationSheet, setShowNotificationSheet] = useState(false);
   const [themeId, setThemeId] = useState<ChatThemeId>('default');
+  const [isMuted, setIsMuted] = useState(false);
   const [audioProgress, setAudioProgress] = useState(0);
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [confirmBlock, setConfirmBlock] = useState(false);
@@ -268,13 +276,15 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     let cancelled = false;
     void supabase
       .from('conversation_members')
-      .select('chat_theme')
+      .select('chat_theme, muted_at')
       .eq('conversation_id', conversationId)
       .eq('user_id', userId)
       .maybeSingle()
       .then(({ data }) => {
-        const t = (data as { chat_theme?: ChatThemeId } | null)?.chat_theme;
-        if (!cancelled && t) setThemeId(t);
+        if (cancelled) return;
+        const row = data as { chat_theme?: ChatThemeId; muted_at?: string | null } | null;
+        if (row?.chat_theme) setThemeId(row.chat_theme);
+        setIsMuted(Boolean(row?.muted_at));
       });
     return () => { cancelled = true; };
   }, [conversationId, userId]);
@@ -289,6 +299,20 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       .update({ chat_theme: id })
       .eq('conversation_id', conversationId)
       .eq('user_id', userId);
+  };
+
+  const toggleMute = async () => {
+    const next = !isMuted;
+    setIsMuted(next);
+    selectionChange();
+    if (!isSupabaseConfigured()) return;
+    const { error } = await supabase.rpc('set_chat_muted', { p_conversation_id: conversationId, p_muted: next });
+    if (error) {
+      setIsMuted(!next);
+      showToast(error.message || 'Could not update mute', 'error');
+      return;
+    }
+    showToast(next ? `Muted ${partner.display_name}` : 'Chat unmuted', 'success');
   };
 
   const loadBlock = useCallback(async () => {
@@ -641,27 +665,45 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     }
   }, [initialAttachment]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
+  // Picking a photo opens a send-preview first (like Instagram) instead of uploading
+  // immediately — the view-once/allow-replay/keep-in-chat choice is made there, per photo.
+  const [pendingPhoto, setPendingPhoto] = useState<{ file: File; previewUrl: string } | null>(null);
+  const [pendingPhotoMode, setPendingPhotoMode] = useState<EphemeralSendMode>('keep_in_chat');
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     e.target.value = '';
+    if (!file || !user) return;
+    setPendingPhoto({ file, previewUrl: URL.createObjectURL(file) });
+    setPendingPhotoMode('keep_in_chat');
+  };
+
+  const cancelPendingPhoto = () => {
+    if (pendingPhoto) URL.revokeObjectURL(pendingPhoto.previewUrl);
+    setPendingPhoto(null);
+  };
+
+  const confirmSendPendingPhoto = async () => {
+    if (!pendingPhoto || !user) return;
+    const { file, previewUrl } = pendingPhoto;
+    const mode = pendingPhotoMode;
+    setPendingPhoto(null);
     setIsUploadingMedia(true);
     try {
       const mediaUrl = await uploadChatMedia(file, conversationId);
       const tag =
-        ephemeralMode === 'view_once'
+        mode === 'view_once'
           ? '[IMAGE:VIEW_ONCE]'
-          : ephemeralMode === 'allow_replay'
+          : mode === 'allow_replay'
             ? '[IMAGE:ALLOW_REPLAY]'
             : sendAsSpoiler
               ? '[IMAGE:spoiler]'
               : '[IMAGE]';
       await handleSend(`${tag}${mediaUrl}`);
       showToast(
-        ephemeralMode === 'view_once'
+        mode === 'view_once'
           ? 'View once photo sent'
-          : ephemeralMode === 'allow_replay'
+          : mode === 'allow_replay'
             ? 'Allow-replay photo sent (2 views)'
             : sendAsSpoiler
               ? 'Sensitive photo sent with spoiler blur'
@@ -676,7 +718,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     } finally {
       setIsUploadingMedia(false);
       setSendAsSpoiler(false);
-      setEphemeralMode('keep_in_chat');
+      URL.revokeObjectURL(previewUrl);
     }
   };
 
@@ -729,22 +771,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               uploadChatMedia(audioFile, conversationId),
               computeWaveform(audioBlob),
             ]);
-            const voiceTagPrefix =
-              ephemeralMode === 'view_once'
-                ? 'VIEW_ONCE:'
-                : ephemeralMode === 'allow_replay'
-                  ? 'ALLOW_REPLAY:'
-                  : '';
-            const tag = `[VOICE_NOTE:${voiceTagPrefix}${dur}${levels ? `|w=${levels}` : ''}]`;
+            const tag = `[VOICE_NOTE:${dur}${levels ? `|w=${levels}` : ''}]`;
             await handleSend(`${tag}${mediaUrl}`);
-            showToast(
-              ephemeralMode === 'view_once'
-                ? 'View once voice note sent'
-                : ephemeralMode === 'allow_replay'
-                  ? 'Allow-replay voice note sent (2 plays)'
-                  : 'Voice note shared',
-              'success'
-            );
+            showToast('Voice note shared', 'success');
             notificationSuccess();
           } catch (err) {
             console.error('Voice note upload error:', err);
@@ -752,7 +781,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             errorWarning();
           } finally {
             setIsUploadingMedia(false);
-            setEphemeralMode('keep_in_chat');
           }
         }
       };
@@ -1014,12 +1042,15 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
   useBackHandler(true, onBack);
   useBackHandler(Boolean(activeViewOnceItem), () => setActiveViewOnceItem(null));
+  useBackHandler(Boolean(activeMediaUrl), () => setActiveMediaUrl(null));
   useBackHandler(Boolean(replyTo || editing), cancelComposerMode);
   useBackHandler(isRecordingAudio, () => handleStopVoiceRecord(false));
   useBackHandler(showContactModal, () => setShowContactModal(false));
+  useBackHandler(Boolean(pendingPhoto), cancelPendingPhoto);
   useBackHandler(showChatMenu, () => { setShowChatMenu(false); setConfirmBlock(false); });
   useBackHandler(showTimerSheet, () => setShowTimerSheet(false));
   useBackHandler(showThemeSheet, () => setShowThemeSheet(false));
+  useBackHandler(showNotificationSheet, () => setShowNotificationSheet(false));
   useBackHandler(showExtras, () => setShowExtras(false));
   useBackHandler(showReportModal, () => setShowReportModal(false));
   useBackHandler(Boolean(actionMsg), () => setActionMsg(null));
@@ -1028,7 +1059,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   return (
     <div className="relative flex flex-col h-full bg-vault-950 lg:border lg:border-vault-800 lg:rounded-2xl overflow-hidden select-none animate-fade-in">
       {/* 1. CHAT WORKSPACE HEADER */}
-      <header className="h-16 px-4 sm:px-5 glass-header flex items-center justify-between shrink-0 z-20">
+      <header className="min-h-16 px-4 sm:px-5 pt-[env(safe-area-inset-top)] glass-header flex items-center justify-between shrink-0 z-20">
         <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
@@ -1232,11 +1263,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           >
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-              <span className="text-xs font-mono font-bold">
-                REC {audioSeconds}s
-                {ephemeralMode === 'view_once' && ' · VIEW ONCE'}
-                {ephemeralMode === 'allow_replay' && ' · ALLOW REPLAY'}
-              </span>
+              <span className="text-xs font-mono font-bold">REC {audioSeconds}s</span>
             </div>
             <span
               className="flex items-center gap-1 text-xs text-vault-400"
@@ -1260,82 +1287,23 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 type="button"
                 onClick={() => { expectExternalActivity(); fileInputRef.current?.click(); }}
                 disabled={isUploadingMedia}
-                className="ib ib-s rounded-xl shrink-0"
+                className="flex items-center justify-center !w-9 !h-9 rounded-full shrink-0 bg-gradient-to-br from-[#9333EA] to-[#C026D3] text-white shadow-md active:scale-95 transition-transform"
                 aria-label="Attach photo"
                 title="Attach photo"
               >
                 {isUploadingMedia ? (
-                  <RotateCcw className="w-5 h-5 text-emerald animate-spin" />
+                  <RotateCcw className="w-4 h-4 animate-spin" />
                 ) : (
-                  <ImageIcon className="w-5 h-5 text-vault-300" />
+                  <ImageIcon className="w-4 h-4" />
                 )}
               </button>
-
-              {/* Ephemeral Media Mode Selector: View Once | Allow Replay | Keep in Chat */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => {
-                    selectionChange();
-                    setShowEphemeralPicker(v => !v);
-                  }}
-                  className={`ib ib-s rounded-xl shrink-0 !w-8 !h-8 relative ${
-                    sendAsViewOnce ? '!bg-emerald/20 !border-emerald !text-emerald shadow-sm' : 'text-vault-400'
-                  }`}
-                  aria-label="Choose media retention: View Once, Allow Replay, or Keep in Chat"
-                  aria-expanded={showEphemeralPicker}
-                  title="Media retention mode"
-                >
-                  {ephemeralMode === 'allow_replay' ? <Repeat className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                  {sendAsViewOnce && (
-                    <span className="absolute -top-1 -right-1 text-[9px] font-black leading-none rounded-full w-3.5 h-3.5 flex items-center justify-center bg-emerald text-vault-950 font-bold">
-                      {ephemeralMode === 'allow_replay' ? 2 : 1}
-                    </span>
-                  )}
-                </button>
-                {showEphemeralPicker && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setShowEphemeralPicker(false)} />
-                    <div className="card absolute bottom-full mb-2 left-0 z-20 p-1.5 w-44 flex flex-col gap-0.5 shadow-2xl anim-sheet">
-                      {(
-                        [
-                          { mode: 'view_once' as const, label: 'View Once', hint: '1 view', icon: EyeOff },
-                          { mode: 'allow_replay' as const, label: 'Allow Replay', hint: '2 views', icon: Repeat },
-                          { mode: 'keep_in_chat' as const, label: 'Keep in Chat', hint: 'Unlimited', icon: ImageIcon },
-                        ]
-                      ).map(opt => (
-                        <button
-                          key={opt.mode}
-                          type="button"
-                          onClick={() => {
-                            selectionChange();
-                            setEphemeralMode(opt.mode);
-                            if (opt.mode !== 'keep_in_chat') setSendAsSpoiler(false);
-                            setShowEphemeralPicker(false);
-                          }}
-                          className={`flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-left ${
-                            ephemeralMode === opt.mode ? 'bg-emerald/15 text-emerald font-semibold' : 'text-vault-200 hover:bg-vault-800'
-                          }`}
-                        >
-                          <opt.icon className="w-3.5 h-3.5 shrink-0" aria-hidden />
-                          <span className="flex-1">{opt.label}</span>
-                          <span className="t-cap">{opt.hint}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
 
               {/* Spoiler Mode Toggle */}
               <button
                 type="button"
                 onClick={() => {
                   selectionChange();
-                  setSendAsSpoiler(prev => {
-                    if (!prev) setEphemeralMode('keep_in_chat');
-                    return !prev;
-                  });
+                  setSendAsSpoiler(prev => !prev);
                 }}
                 className={`ib ib-s rounded-xl shrink-0 !w-8 !h-8 ${
                   sendAsSpoiler ? '!bg-emerald/20 !border-emerald !text-emerald' : 'text-vault-400'
@@ -1386,7 +1354,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               {inputContent.trim() ? (
                 <button
                   type="submit"
-                  className="btn btn-p btn-sm !w-11 !h-11 !p-0 rounded-xl shrink-0"
+                  className="flex items-center justify-center !w-11 !h-11 !p-0 rounded-full shrink-0 bg-gradient-to-br from-[#9333EA] to-[#C026D3] text-white shadow-md active:scale-90 transition-transform anim-spring-pop"
                   aria-label="Send message"
                 >
                   <Send className="w-4 h-4 fill-current" />
@@ -1398,17 +1366,92 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                   onPointerMove={handleRecordPointerMove}
                   onPointerUp={handleRecordPointerUp}
                   onPointerCancel={() => handleStopVoiceRecord(false)}
-                  className="ib ib-s !w-11 !h-11 rounded-xl shrink-0 touch-none select-none"
+                  className="flex items-center justify-center !w-11 !h-11 rounded-full shrink-0 touch-none select-none text-vault-200 active:scale-95 transition-transform"
                   aria-label="Hold to record a voice message, slide left to cancel"
                   title="Hold to record"
                 >
-                  <Mic className="w-5 h-5 text-emerald" />
+                  <Mic className="w-5 h-5" />
                 </button>
               )}
             </form>
           </div>
         )}
       </footer>
+
+      {pendingPhoto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Send photo"
+          className="fixed inset-0 z-50 bg-black flex flex-col anim-fade"
+        >
+          <div className="flex items-center justify-between p-4 pt-[env(safe-area-inset-top)] shrink-0">
+            <button type="button" onClick={cancelPendingPhoto} className="ib ib-s rounded-full glass-panel !text-white" aria-label="Cancel">
+              <X className="i" aria-hidden />
+            </button>
+          </div>
+
+          <div className="flex-1 flex items-center justify-center p-4 min-h-0">
+            <img
+              src={pendingPhoto.previewUrl}
+              alt="Photo to send"
+              className="max-w-full max-h-full object-contain rounded-xl"
+            />
+          </div>
+
+          {/* Media retention — a big, unmissable 3-way choice, like Instagram's send screen. */}
+          <div className="px-4 pt-3 shrink-0">
+            <div
+              className="grid grid-cols-3 gap-2 p-1.5 rounded-2xl bg-vault-900 border border-vault-750"
+              role="radiogroup"
+              aria-label="Media retention"
+            >
+              {(
+                [
+                  { mode: 'keep_in_chat' as const, label: 'Keep in Chat', icon: ImageIcon },
+                  { mode: 'view_once' as const, label: 'View Once', icon: EyeOff },
+                  { mode: 'allow_replay' as const, label: 'View Twice', icon: Repeat },
+                ]
+              ).map(opt => (
+                <button
+                  key={opt.mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={pendingPhotoMode === opt.mode}
+                  onClick={() => { selectionChange(); setPendingPhotoMode(opt.mode); }}
+                  className={`flex flex-col items-center justify-center gap-1 py-2.5 rounded-xl text-[11px] font-bold transition-all ${
+                    pendingPhotoMode === opt.mode
+                      ? 'bg-gradient-to-br from-[#9333EA] to-[#C026D3] text-white shadow-md scale-[1.03]'
+                      : 'text-vault-300 hover:text-white'
+                  }`}
+                >
+                  <opt.icon className="w-5 h-5" aria-hidden />
+                  <span>{opt.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] flex items-center justify-center gap-4 shrink-0">
+            <p className="t-sm text-vault-300 m-0 flex-1 text-center">
+              {pendingPhotoMode === 'view_once'
+                ? 'Disappears after they open it once'
+                : pendingPhotoMode === 'allow_replay'
+                  ? 'Disappears after they open it twice'
+                  : 'Stays in the chat'}
+            </p>
+            <button
+              type="button"
+              onClick={() => void confirmSendPendingPhoto()}
+              disabled={isUploadingMedia}
+              className="flex items-center justify-center !w-14 !h-14 rounded-full shrink-0 bg-gradient-to-br from-[#9333EA] to-[#C026D3] text-white shadow-lg active:scale-90 transition-transform"
+              aria-label="Send photo"
+            >
+              {isUploadingMedia ? <RotateCcw className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 fill-current" />}
+            </button>
+          </div>
+        </div>
+      )}
 
       {showChatMenu && (
         <div
@@ -1420,13 +1463,51 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           onKeyDown={e => { if (e.key === 'Escape') { setShowChatMenu(false); setConfirmBlock(false); } }}
         >
           <div className="w-full sm:max-w-sm bg-vault-900 border border-vault-800 rounded-t-2xl sm:rounded-2xl p-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl anim-sheet" onClick={e => e.stopPropagation()}>
-            <p className="px-4 pt-2 pb-2 text-xs text-vault-400 truncate">{partner.display_name}</p>
+            <div className="w-9 h-1 rounded-full bg-vault-700 mx-auto my-2 sm:hidden" aria-hidden />
+            <div className="flex flex-col items-center gap-2 pt-2 pb-4">
+              <Avatar name={partner.display_name} seed={partner.uid} src={partner.avatar_url} size={72} />
+              <p className="t-h3 font-bold text-white m-0 truncate max-w-full px-4">{partner.display_name}</p>
+              <div className="flex items-center gap-6 mt-1">
+                <button
+                  type="button"
+                  onClick={() => { setShowChatMenu(false); setShowContactModal(true); }}
+                  className="flex flex-col items-center gap-1 text-vault-300 hover:text-white"
+                >
+                  <span className="ib ib-s rounded-full !w-11 !h-11"><ShieldCheck className="w-4 h-4" aria-hidden /></span>
+                  <span className="t-cap">Profile</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowChatMenu(false); void toggleMute(); }}
+                  className="flex flex-col items-center gap-1 text-vault-300 hover:text-white"
+                >
+                  <span className="ib ib-s rounded-full !w-11 !h-11">{isMuted ? <BellOff className="w-4 h-4" aria-hidden /> : <Bell className="w-4 h-4" aria-hidden />}</span>
+                  <span className="t-cap">{isMuted ? 'Unmute' : 'Mute'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowChatMenu(false); setShowThemeSheet(true); }}
+                  className="flex flex-col items-center gap-1 text-vault-300 hover:text-white"
+                >
+                  <span className="ib ib-s rounded-full !w-11 !h-11"><Palette className="w-4 h-4" aria-hidden /></span>
+                  <span className="t-cap">Theme</span>
+                </button>
+              </div>
+            </div>
+            <div className="divider mb-1" />
             <button
               type="button"
               className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
               onClick={() => { setShowChatMenu(false); setShowThemeSheet(true); }}
             >
               <Palette className="w-4 h-4 text-emerald" /> Chat theme ({theme.label})
+            </button>
+            <button
+              type="button"
+              className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+              onClick={() => { setShowChatMenu(false); setShowNotificationSheet(true); }}
+            >
+              <Bell className="w-4 h-4 text-emerald" /> Notification style
             </button>
             <button
               type="button"
@@ -1510,6 +1591,13 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           current={themeId}
           onPick={changeTheme}
           onClose={() => setShowThemeSheet(false)}
+        />
+      )}
+
+      {showNotificationSheet && (
+        <NotificationPreferenceSheet
+          partner={partner}
+          onClose={() => setShowNotificationSheet(false)}
         />
       )}
 
@@ -1615,7 +1703,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end anim-fade"
         >
           <div className="w-full max-w-sm bg-vault-900 h-full border-l border-vault-800 shadow-2xl relative flex flex-col">
-            <div className="p-3 border-b border-vault-800 flex items-center justify-between bg-vault-950">
+            <div className="p-3 pt-[calc(0.75rem+env(safe-area-inset-top))] border-b border-vault-800 flex items-center justify-between bg-vault-950">
               <span className="t-body font-bold text-white">Contact info</span>
               <button
                 type="button"
@@ -1653,6 +1741,25 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           onClose={() => {
             lightImpact();
             setActiveViewOnceItem(null);
+          }}
+        />
+      )}
+
+      {/* Full-screen viewer for ordinary (non-ephemeral) chat photos — tap any photo to open it,
+          like a normal Instagram DM photo. */}
+      {activeMediaUrl && (
+        <LightboxViewer
+          item={{
+            id: 'chat-media',
+            user_id: userId ?? '',
+            image_url: activeMediaUrl,
+            storage_path: '',
+            caption: null,
+            created_at: new Date().toISOString(),
+          }}
+          onClose={() => {
+            lightImpact();
+            setActiveMediaUrl(null);
           }}
         />
       )}
@@ -1804,10 +1911,13 @@ function MessageBubble({
 
   const [dragOffset, setDragOffset] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
+  const [showHeartBurst, setShowHeartBurst] = useState(false);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const touchDirectionRef = useRef<'horizontal' | 'vertical' | null>(null);
   const thresholdTriggeredRef = useRef(false);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+  const lastTapRef = useRef(0);
 
   const cancelPress = () => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
@@ -1820,8 +1930,10 @@ function MessageBubble({
     touchStartRef.current = { x: touch.clientX, y: touch.clientY };
     touchDirectionRef.current = null;
     thresholdTriggeredRef.current = false;
+    longPressFiredRef.current = false;
 
     pressTimer.current = setTimeout(() => {
+      longPressFiredRef.current = true;
       lightImpact();
       onOpenActions(msg);
     }, 450);
@@ -1866,6 +1978,18 @@ function MessageBubble({
       if (dragOffset >= 45) {
         onReply(msg);
       }
+    } else if (!touchDirectionRef.current && !longPressFiredRef.current && !bare && !deleted) {
+      // Plain tap with no swipe/hold: check for a double-tap-to-heart-react.
+      const now = Date.now();
+      if (now - lastTapRef.current < 300) {
+        lastTapRef.current = 0;
+        mediumImpact();
+        onToggleReaction(msg, '❤️');
+        setShowHeartBurst(true);
+        setTimeout(() => setShowHeartBurst(false), 650);
+      } else {
+        lastTapRef.current = now;
+      }
     }
     setDragOffset(0);
     setIsSwiping(false);
@@ -1891,17 +2015,17 @@ function MessageBubble({
   const bubbleRadiusClass = useMemo(() => {
     if (bare) return '';
     if (isMe) {
-      if (isFirstInGroup && isLastInGroup) return 'rounded-2xl';
-      if (isFirstInGroup) return 'rounded-2xl rounded-br-md';
-      if (isMiddleInGroup) return 'rounded-2xl rounded-r-md';
-      if (isLastInGroup) return 'rounded-2xl rounded-br-xs';
-      return 'rounded-2xl';
+      if (isFirstInGroup && isLastInGroup) return 'rounded-3xl';
+      if (isFirstInGroup) return 'rounded-3xl rounded-br-md';
+      if (isMiddleInGroup) return 'rounded-3xl rounded-r-md';
+      if (isLastInGroup) return 'rounded-3xl rounded-br-md';
+      return 'rounded-3xl';
     } else {
-      if (isFirstInGroup && isLastInGroup) return 'rounded-2xl';
-      if (isFirstInGroup) return 'rounded-2xl rounded-bl-md';
-      if (isMiddleInGroup) return 'rounded-2xl rounded-l-md';
-      if (isLastInGroup) return 'rounded-2xl rounded-bl-xs';
-      return 'rounded-2xl';
+      if (isFirstInGroup && isLastInGroup) return 'rounded-3xl';
+      if (isFirstInGroup) return 'rounded-3xl rounded-bl-md';
+      if (isMiddleInGroup) return 'rounded-3xl rounded-l-md';
+      if (isLastInGroup) return 'rounded-3xl rounded-bl-md';
+      return 'rounded-3xl';
     }
   }, [bare, isMe, isFirstInGroup, isLastInGroup, isMiddleInGroup]);
 
@@ -1946,6 +2070,13 @@ function MessageBubble({
           }}
         >
           <Reply className="w-4 h-4 fill-current stroke-[2.5]" />
+        </div>
+      )}
+
+      {/* Double-tap-to-heart burst */}
+      {showHeartBurst && (
+        <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+          <Heart className="w-16 h-16 text-rose-500 fill-rose-500 drop-shadow-lg anim-spring-pop" aria-hidden />
         </div>
       )}
 

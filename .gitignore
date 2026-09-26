@@ -46,5 +46,6 @@ supabase/.temp/
 
 # AI tool scratch output (screenshots, tarballs, node_modules archives)
 Claude outputs/
+.claude/
 /screen.png
 /pixel9_screen.png
