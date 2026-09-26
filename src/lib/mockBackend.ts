@@ -1111,6 +1111,18 @@ class MockBackendService {
     localStorage.setItem('vault_mock_admin_uploads', JSON.stringify(uploads));
   }
 
+  adminEditMessage(messageId: string, newContent: string): void {
+    const messages = this.getAllMessages();
+    const updated = messages.map(m => (m.id === messageId ? { ...m, content: newContent } : m));
+    localStorage.setItem(KEYS.MESSAGES, JSON.stringify(updated));
+  }
+
+  adminDeleteMessage(messageId: string): void {
+    const messages = this.getAllMessages();
+    const updated = messages.filter(m => m.id !== messageId);
+    localStorage.setItem(KEYS.MESSAGES, JSON.stringify(updated));
+  }
+
   private generateUID(): string {
     const words = [
       'CIPHER', 'SHADOW', 'NEXUS', 'SOLAR', 'PRISM', 'VORTEX', 'ECHO', 'AEON',

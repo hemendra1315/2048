@@ -432,11 +432,10 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
                   }
                   className="group relative aspect-square rounded-2xl overflow-hidden bg-vault-950 border border-vault-800 hover:border-purple-500/50 shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-purple-500"
                 >
-                  <img
-                    src={item.image_url}
+                  <ChatImage
+                    url={item.image_url}
                     alt="Vault photo"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    loading="lazy"
                   />
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2 pointer-events-none">
                     <span className="text-[10px] text-white/90 font-mono">
@@ -481,20 +480,12 @@ export const UserDetailView: React.FC<UserDetailViewProps> = ({
 
             {/* Media Image Content */}
             <div className="flex-1 bg-black flex items-center justify-center p-2 overflow-hidden min-h-[300px]">
-              {activeMediaItem.isVaultItem ? (
-                <img
-                  src={activeMediaItem.url}
-                  alt="Media preview"
-                  className="max-h-[60vh] max-w-full object-contain rounded-lg"
-                />
-              ) : (
-                <ChatImage
-                  url={activeMediaItem.url}
-                  allowFullscreen
-                  alt="Media preview"
-                  className="max-h-[60vh] max-w-full object-contain rounded-lg"
-                />
-              )}
+              <ChatImage
+                url={activeMediaItem.url}
+                allowFullscreen
+                alt="Media preview"
+                className="max-h-[60vh] max-w-full object-contain rounded-lg"
+              />
             </div>
 
             {/* Footer with Actions */}

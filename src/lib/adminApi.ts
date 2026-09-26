@@ -360,14 +360,22 @@ export async function getUserGalleryForAdmin(
 
   const galleryItems = items as unknown as GalleryItem[];
   try {
-    const { data: signed } = await supabase.storage
-      .from('gallery')
-      .createSignedUrls(galleryItems.map(i => i.storage_path), 3600);
+    const paths = galleryItems.map(i => i.storage_path).filter(Boolean);
+    if (paths.length > 0) {
+      const { data: signed } = await supabase.storage
+        .from('gallery')
+        .createSignedUrls(paths, 3600);
 
-    if (signed && signed.length > 0) {
-      return galleryItems.map((item, idx) => ({
+      const signedMap = new Map<string, string>();
+      for (const entry of signed ?? []) {
+        if (entry.path && entry.signedUrl && !entry.error) {
+          signedMap.set(entry.path, entry.signedUrl);
+        }
+      }
+
+      return galleryItems.map(item => ({
         ...item,
-        image_url: signed[idx]?.signedUrl || item.image_url,
+        image_url: signedMap.get(item.storage_path) || item.image_url,
       }));
     }
   } catch (err) {
@@ -508,9 +516,33 @@ export async function deleteMessageAsAdmin(
   if (backendIsSupabase()) {
     const { error } = await supabase.from('messages').delete().eq('id', messageId);
     fail(error);
+  } else {
+    mockBackend.adminDeleteMessage(messageId);
   }
   await logAdminAction(adminId, 'DELETE_MESSAGE', null, messageId, {
     conversationId,
+  });
+}
+
+/** Admin: Edit message content in transcript */
+export async function editMessageAsAdmin(
+  adminId: string,
+  messageId: string,
+  newContent: string,
+  conversationId?: string
+): Promise<void> {
+  if (backendIsSupabase()) {
+    const { error } = await supabase
+      .from('messages')
+      .update({ content: newContent })
+      .eq('id', messageId);
+    fail(error);
+  } else {
+    mockBackend.adminEditMessage(messageId, newContent);
+  }
+  await logAdminAction(adminId, 'EDIT_MESSAGE', null, messageId, {
+    conversationId,
+    newContent,
   });
 }
 
@@ -552,14 +584,21 @@ export interface UserMediaGridItem {
   message_id?: string;
 }
 
-/** Gallery Section: Show all media sent or received by that user in chats */
+/** Gallery Section: Show all media sent or received by that user in chats (strictly excluding voice notes) */
 export async function getUserAllMediaForAdmin(userId: string): Promise<UserMediaGridItem[]> {
   if (!backendIsSupabase()) {
     const convs = mockBackend.getUserConversationsForAdmin(userId, '');
     const items: UserMediaGridItem[] = [];
     for (const c of convs) {
       for (const m of c.messages) {
-        if (m.content.startsWith('[IMAGE') || m.content.includes('[IMAGE') || m.content.startsWith('data:image/') || m.content.startsWith('http')) {
+        // Strictly exclude voice notes
+        if (m.content.startsWith('[VOICE_NOTE')) continue;
+        if (
+          m.content.startsWith('[IMAGE') ||
+          m.content.includes('[IMAGE') ||
+          m.content.startsWith('data:image/') ||
+          m.content.startsWith('http')
+        ) {
           const raw = m.content.replace(/^\[(IMAGE:VIEW_ONCE|IMAGE:view_once|IMAGE:ALLOW_REPLAY|IMAGE:SPOILER|IMAGE:spoiler|IMAGE)\]/, '');
           items.push({
             id: m.id,
@@ -594,11 +633,13 @@ export async function getUserAllMediaForAdmin(userId: string): Promise<UserMedia
     fail(msgError);
 
     for (const m of msgs ?? []) {
+      // Strictly exclude voice notes
+      if (m.content.startsWith('[VOICE_NOTE')) continue;
+
       if (
         m.content.startsWith('[IMAGE') ||
         m.content.includes('[IMAGE') ||
-        m.content.startsWith('data:image/') ||
-        m.content.includes('chat-media')
+        m.content.startsWith('data:image/')
       ) {
         const raw = m.content.replace(/^\[(IMAGE:VIEW_ONCE|IMAGE:view_once|IMAGE:ALLOW_REPLAY|IMAGE:SPOILER|IMAGE:spoiler|IMAGE)\]/, '');
         mediaItems.push({
