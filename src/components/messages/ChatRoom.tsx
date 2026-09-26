@@ -616,13 +616,18 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     void handleSend(`[GAME:${gameId}]`);
   };
 
+  const initialAttachmentHandlersRef = useRef({ handleSend, onClearInitialAttachment, user });
   useEffect(() => {
-    if (initialAttachment && user) {
+    initialAttachmentHandlersRef.current = { handleSend, onClearInitialAttachment, user };
+  });
+
+  useEffect(() => {
+    if (initialAttachment && initialAttachmentHandlersRef.current.user) {
       const sendInitialMedia = async () => {
         setIsUploadingMedia(true);
         try {
-          await handleSend(`[IMAGE]${initialAttachment}`);
-          onClearInitialAttachment?.();
+          await initialAttachmentHandlersRef.current.handleSend(`[IMAGE]${initialAttachment}`);
+          initialAttachmentHandlersRef.current.onClearInitialAttachment?.();
         } finally {
           setIsUploadingMedia(false);
         }

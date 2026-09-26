@@ -39,7 +39,7 @@ export const MobileNavbar: React.FC<MobileNavbarProps> = ({
             className={isActive ? 'tab tab-on' : 'tab'}
           >
             <span className="tab-pill relative">
-              <Icon className="i" aria-hidden />
+              <Icon className="i" aria-hidden fill={isActive ? 'currentColor' : 'none'} fillOpacity={isActive ? 0.18 : 0} />
               {hasBadge && (
                 <span className="badge absolute -top-1.5 right-0.5 !h-[18px] !min-w-[18px] !text-[11px] !px-[5px] border-2 border-vault-950">
                   {t.badge}
