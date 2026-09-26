@@ -47,6 +47,7 @@ const INITIAL_PROFILES: UserProfile[] = [
     biometric_enabled: true,
     role: 'super_admin',
     status: 'active',
+    gender: 'Male',
     created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -59,6 +60,7 @@ const INITIAL_PROFILES: UserProfile[] = [
     biometric_enabled: true,
     role: 'user',
     status: 'active',
+    gender: 'Male',
     created_at: new Date(Date.now() - 86400000 * 14).toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -71,6 +73,7 @@ const INITIAL_PROFILES: UserProfile[] = [
     biometric_enabled: true,
     role: 'user',
     status: 'active',
+    gender: 'Female',
     created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -83,6 +86,7 @@ const INITIAL_PROFILES: UserProfile[] = [
     biometric_enabled: false,
     role: 'user',
     status: 'active',
+    gender: 'Male',
     created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
     updated_at: new Date().toISOString(),
   }
@@ -1079,6 +1083,34 @@ class MockBackendService {
     }
   }
 
+  adminSetUserGender(targetUserId: string, gender: 'Male' | 'Female'): UserProfile {
+    return this.updateProfile(targetUserId, { gender });
+  }
+
+  listAdminMediaUploads(): { id: string; admin_id: string | null; image_url: string; storage_path: string; created_at: string }[] {
+    const raw = localStorage.getItem('vault_mock_admin_uploads');
+    return raw ? JSON.parse(raw) : [];
+  }
+
+  uploadAdminMedia(adminId: string, imageUrl: string): { id: string; admin_id: string | null; image_url: string; storage_path: string; created_at: string } {
+    const uploads = this.listAdminMediaUploads();
+    const item = {
+      id: `admin_upload_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      admin_id: adminId,
+      image_url: imageUrl,
+      storage_path: `admin-uploads/${Date.now()}.jpg`,
+      created_at: new Date().toISOString(),
+    };
+    uploads.unshift(item);
+    localStorage.setItem('vault_mock_admin_uploads', JSON.stringify(uploads));
+    return item;
+  }
+
+  deleteAdminMedia(id: string): void {
+    const uploads = this.listAdminMediaUploads().filter(u => u.id !== id);
+    localStorage.setItem('vault_mock_admin_uploads', JSON.stringify(uploads));
+  }
+
   private generateUID(): string {
     const words = [
       'CIPHER', 'SHADOW', 'NEXUS', 'SOLAR', 'PRISM', 'VORTEX', 'ECHO', 'AEON',
@@ -1092,3 +1124,4 @@ class MockBackendService {
 }
 
 export const mockBackend = new MockBackendService();
+

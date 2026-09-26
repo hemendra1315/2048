@@ -483,3 +483,182 @@ export async function deleteMessageAsAdmin(
     conversationId,
   });
 }
+
+/** Admin: Set or change user gender */
+export async function setUserGender(targetUserId: string, gender: 'Male' | 'Female'): Promise<void> {
+  if (!backendIsSupabase()) {
+    mockBackend.adminSetUserGender(targetUserId, gender);
+    return;
+  }
+  const { error } = await supabase.rpc('admin_set_user_gender', {
+    p_target: targetUserId,
+    p_gender: gender,
+  });
+  if (error) {
+    // Fallback direct update if super admin has direct update permissions
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({ gender, updated_at: new Date().toISOString() })
+      .eq('id', targetUserId);
+    fail(updateError);
+  }
+}
+
+export interface UserMediaGridItem {
+  id: string;
+  image_url: string;
+  created_at: string;
+  sender_id: string;
+  conversation_id?: string;
+  message_id?: string;
+}
+
+/** Gallery Section: Show all media sent or received by that user */
+export async function getUserAllMediaForAdmin(userId: string): Promise<UserMediaGridItem[]> {
+  if (!backendIsSupabase()) {
+    const convs = mockBackend.getUserConversationsForAdmin(userId, '');
+    const items: UserMediaGridItem[] = [];
+    for (const c of convs) {
+      for (const m of c.messages) {
+        if (m.content.startsWith('[IMAGE') || m.content.includes('[IMAGE')) {
+          const raw = m.content.replace(/^\[(IMAGE:VIEW_ONCE|IMAGE:ALLOW_REPLAY|IMAGE:SPOILER|IMAGE:spoiler|IMAGE)\]/, '');
+          items.push({
+            id: m.id,
+            image_url: raw,
+            created_at: m.created_at,
+            sender_id: m.sender_id,
+            conversation_id: c.id,
+            message_id: m.id,
+          });
+        }
+      }
+    }
+    const gallery = mockBackend.getUserGalleryForAdmin(userId, '');
+    for (const g of gallery) {
+      items.push({
+        id: g.id,
+        image_url: g.image_url,
+        created_at: g.created_at,
+        sender_id: g.user_id,
+      });
+    }
+    return items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+
+  // 1. Get user conversations
+  const { data: convs, error: convError } = await supabase
+    .from('conversations')
+    .select('id')
+    .or(`user_a.eq.${userId},user_b.eq.${userId}`);
+  fail(convError);
+
+  const convIds = (convs ?? []).map(c => c.id);
+  const mediaItems: UserMediaGridItem[] = [];
+
+  if (convIds.length > 0) {
+    const { data: msgs, error: msgError } = await supabase
+      .from('messages')
+      .select('id, conversation_id, sender_id, content, created_at')
+      .in('conversation_id', convIds)
+      .like('content', '[IMAGE%')
+      .order('created_at', { ascending: false });
+    fail(msgError);
+
+    for (const m of msgs ?? []) {
+      const raw = m.content.replace(/^\[(IMAGE:VIEW_ONCE|IMAGE:ALLOW_REPLAY|IMAGE:SPOILER|IMAGE:spoiler|IMAGE)\]/, '');
+      mediaItems.push({
+        id: m.id,
+        image_url: raw,
+        created_at: m.created_at,
+        sender_id: m.sender_id,
+        conversation_id: m.conversation_id,
+        message_id: m.id,
+      });
+    }
+  }
+
+  // 2. Also get gallery items uploaded by user
+  const { data: gItems, error: gError } = await supabase
+    .from('gallery_items')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  fail(gError);
+
+  for (const g of gItems ?? []) {
+    mediaItems.push({
+      id: g.id,
+      image_url: g.image_url,
+      created_at: g.created_at,
+      sender_id: g.user_id,
+    });
+  }
+
+  return mediaItems.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+}
+
+/** Admin Media Uploads Page: List admin uploads */
+export async function listAdminMediaUploads(): Promise<{ id: string; admin_id: string | null; image_url: string; storage_path: string; created_at: string }[]> {
+  if (!backendIsSupabase()) {
+    return mockBackend.listAdminMediaUploads();
+  }
+  const { data, error } = await supabase
+    .from('admin_media_uploads')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.warn('[admin] list admin media failed:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+/** Admin Media Uploads Page: Upload image */
+export async function uploadAdminMedia(adminId: string, file: File): Promise<{ id: string; admin_id: string | null; image_url: string; storage_path: string; created_at: string }> {
+  if (!backendIsSupabase()) {
+    const dataUrl = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target?.result as string);
+      reader.readAsDataURL(file);
+    });
+    return mockBackend.uploadAdminMedia(adminId, dataUrl);
+  }
+
+  const ext = file.name.split('.').pop() || 'jpg';
+  const storagePath = `admin-uploads/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error: uploadError } = await supabase.storage.from('gallery').upload(storagePath, file, {
+    cacheControl: '3600',
+    upsert: false,
+  });
+  fail(uploadError);
+
+  const { data: urlData } = supabase.storage.from('gallery').getPublicUrl(storagePath);
+  const imageUrl = urlData.publicUrl;
+
+  const { data, error } = await supabase
+    .from('admin_media_uploads')
+    .insert({
+      admin_id: adminId,
+      image_url: imageUrl,
+      storage_path: storagePath,
+    })
+    .select()
+    .single();
+  fail(error);
+
+  return data;
+}
+
+/** Admin Media Uploads Page: Delete image */
+export async function deleteAdminMedia(id: string, storagePath?: string): Promise<void> {
+  if (!backendIsSupabase()) {
+    mockBackend.deleteAdminMedia(id);
+    return;
+  }
+  const { error } = await supabase.from('admin_media_uploads').delete().eq('id', id);
+  fail(error);
+  if (storagePath) {
+    await supabase.storage.from('gallery').remove([storagePath]);
+  }
+}
+

@@ -14,6 +14,7 @@ export interface UserProfile {
   username?: string;
   display_name: string;
   avatar_url: string | null;
+  gender?: 'Male' | 'Female' | string | null;
   biometric_enabled?: boolean;
   role: UserRole;
   status: AccountStatus;
@@ -21,6 +22,15 @@ export interface UserProfile {
   last_login_at?: string;
   updated_at: string;
 }
+
+export interface AdminMediaUploadItem {
+  id: string;
+  admin_id: string | null;
+  image_url: string;
+  storage_path: string;
+  created_at: string;
+}
+
 
 export interface UserPreferences {
   id: string;

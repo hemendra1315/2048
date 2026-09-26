@@ -1,339 +1,227 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Ban, ShieldAlert, Shield, RefreshCw, Eye, AlertTriangle } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-import { useToast } from '../../context/ToastContext';
-import { listProfiles, getConnectionCounts, setUserStatus } from '../../lib/adminApi';
-import { getSafetyReports } from '../../lib/safetyApi';
 import { UserProfile } from '../../types';
-import { formatDetailedDate } from '../../lib/utils';
+import { listProfiles, setUserGender } from '../../lib/adminApi';
 import { Avatar } from '../common/Avatar';
+import { useToast } from '../../context/ToastContext';
+import { Loader2, Users } from 'lucide-react';
+import { lightImpact } from '../../lib/haptics';
 
 interface UserManagementProps {
-  onSelectUser?: (userId: string, tab?: 'overview' | 'chats' | 'media' | 'reports' | 'activity' | 'notes') => void;
+  onSelectUser: (user: UserProfile) => void;
 }
 
+type GenderFilter = 'ALL' | 'Male' | 'Female';
+
 export const UserManagement: React.FC<UserManagementProps> = ({ onSelectUser }) => {
-  const { user } = useAuth();
   const { showToast } = useToast();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED' | 'BANNED'>('ALL');
-  const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
-  const [actionReason, setActionReason] = useState('');
-  const [modalMode, setModalMode] = useState<'suspend' | 'ban' | 'unban' | null>(null);
-  const [connectionCounts, setConnectionCounts] = useState<Record<string, number>>({});
-  const [reportCounts, setReportCounts] = useState<Record<string, number>>({});
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [genderFilter, setGenderFilter] = useState<GenderFilter>('ALL');
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
   const loadUsers = useCallback(async () => {
-    if (!user) return;
     setLoading(true);
     try {
-      const [profiles, counts, reports] = await Promise.all([
-        listProfiles(),
-        getConnectionCounts(),
-        getSafetyReports(),
-      ]);
+      const profiles = await listProfiles();
       setUsers(profiles);
-      setConnectionCounts(counts);
-
-      const rCounts: Record<string, number> = {};
-      reports.forEach(r => {
-        const uid = r.reportedUserId;
-        if (uid) {
-          rCounts[uid] = (rCounts[uid] || 0) + 1;
-        }
-      });
-      setReportCounts(rCounts);
-
-      setLoadError(null);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Could not load users');
+      console.error('Failed to load users:', err);
+      showToast('Failed to load user list', 'error');
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [showToast]);
 
   useEffect(() => {
-    loadUsers();
+    void loadUsers();
   }, [loadUsers]);
 
-  const handleApplyStatus = async (status: 'active' | 'suspended' | 'banned') => {
-    if (!user || !selectedUser) return;
+  const handleGenderChange = async (e: React.MouseEvent, user: UserProfile, newGender: 'Male' | 'Female') => {
+    e.stopPropagation();
+    if (user.gender === newGender || updatingUserId === user.id) return;
+
+    setUpdatingUserId(user.id);
+    lightImpact();
     try {
-      await setUserStatus(user.id, selectedUser.id, status, actionReason.trim());
-      showToast(`User ${selectedUser.display_name} updated to ${status.toUpperCase()}`, 'success');
-      setModalMode(null);
-      setSelectedUser(null);
-      setActionReason('');
-      await loadUsers();
+      await setUserGender(user.id, newGender);
+      setUsers(prev =>
+        prev.map(u => (u.id === user.id ? { ...u, gender: newGender } : u))
+      );
+      showToast(`Updated gender to ${newGender} for @${user.username || user.uid}`, 'success');
     } catch (err) {
-      console.error('Moderation error:', err);
-      showToast(err instanceof Error ? err.message : 'Action failed', 'error');
+      console.error('Failed to update gender:', err);
+      showToast('Failed to update user gender', 'error');
+    } finally {
+      setUpdatingUserId(null);
     }
   };
 
   const filteredUsers = users.filter(u => {
-    const matchesSearch =
-      u.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      Boolean(u.username?.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      u.uid.toLowerCase().includes(searchQuery.toLowerCase());
-
-    const matchesStatus =
-      statusFilter === 'ALL' || u.status.toUpperCase() === statusFilter;
-
-    return matchesSearch && matchesStatus;
+    const gender = u.gender || 'Male';
+    if (genderFilter === 'Male') return gender === 'Male';
+    if (genderFilter === 'Female') return gender === 'Female';
+    return true;
   });
 
   return (
-    <div className="space-y-4 pb-20 animate-fade-in text-vault-100">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-vault-800 pb-3">
+    <div className="space-y-4 animate-fade-in pb-12">
+      {/* Top Filter Bar with 3 Filters: All Users, Male Users, Female Users */}
+      <div className="p-4 bg-vault-900 border border-vault-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
         <div>
-          <h2 className="text-base font-bold text-white tracking-wide">
-            User Matrix & Identity Directory
-          </h2>
-          <p className="text-xs text-vault-400 mt-0.5">
-            Real-time identity registry, risk profiles, connections, and disciplinary controls
-          </p>
+          <h2 className="text-base font-bold text-white m-0">Users Directory</h2>
+          <p className="text-xs text-vault-400 mt-0.5 m-0">Manage registered user accounts, view conversations and media.</p>
         </div>
 
-        <button
-          onClick={loadUsers}
-          className="self-start sm:self-auto px-3 py-1.5 bg-vault-900 hover:bg-vault-800 border border-vault-700 rounded-xl text-xs font-bold text-arcade-gold flex items-center gap-1.5 transition-colors"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Refresh Directory</span>
-        </button>
+        {/* 3 Filter buttons */}
+        <div className="flex items-center bg-vault-950 border border-vault-800 p-1 rounded-xl shrink-0">
+          <button
+            type="button"
+            onClick={() => setGenderFilter('ALL')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              genderFilter === 'ALL'
+                ? 'bg-vault-800 text-white shadow'
+                : 'text-vault-400 hover:text-vault-200'
+            }`}
+          >
+            All Users ({users.length})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setGenderFilter('Male')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              genderFilter === 'Male'
+                ? 'bg-cyan-950 text-cyan-300 border border-cyan-700/50 shadow'
+                : 'text-vault-400 hover:text-vault-200'
+            }`}
+          >
+            Male ({users.filter(u => (u.gender || 'Male') === 'Male').length})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setGenderFilter('Female')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              genderFilter === 'Female'
+                ? 'bg-pink-950 text-pink-300 border border-pink-700/50 shadow'
+                : 'text-vault-400 hover:text-vault-200'
+            }`}
+          >
+            Female ({users.filter(u => u.gender === 'Female').length})
+          </button>
+        </div>
       </div>
 
-      {/* Search & Status Filters */}
-      <div className="space-y-2">
-        <div className="relative">
-          <Search className="w-4 h-4 text-vault-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search by Username, Unique UID, or Display Name..."
-            className="w-full bg-vault-900 border border-vault-800 focus:border-amber-500 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-vault-600 outline-none transition-colors"
-          />
-        </div>
-
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-          {(['ALL', 'ACTIVE', 'SUSPENDED', 'BANNED'] as const).map(filter => (
-            <button
-              key={filter}
-              onClick={() => setStatusFilter(filter)}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
-                statusFilter === filter
-                  ? 'bg-arcade-gold text-vault-950 shadow-sm'
-                  : 'bg-vault-900 text-vault-400 border border-vault-800 hover:text-white'
-              }`}
-            >
-              {filter}
-            </button>
+      {/* Users List / Cards */}
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} className="h-28 rounded-2xl bg-vault-900 animate-pulse border border-vault-800" />
           ))}
         </div>
-      </div>
-
-      {loadError && (
-        <div className="bg-rose-950/40 border border-rose-800/60 rounded-2xl p-3 text-xs text-rose-200">
-          {loadError}
+      ) : filteredUsers.length === 0 ? (
+        <div className="p-12 text-center bg-vault-900 border border-vault-800 rounded-2xl flex flex-col items-center justify-center gap-2 text-vault-400 text-xs">
+          <Users className="w-8 h-8 text-vault-600 mb-1" />
+          <p className="text-sm font-bold text-white m-0">No Users Found</p>
+          <p className="m-0">No users match the selected gender filter.</p>
         </div>
-      )}
-
-      {/* User Table / Cards */}
-      <div className="space-y-2.5">
-        {loading ? (
-          <div className="bg-vault-900 border border-vault-800 rounded-2xl p-8 text-center text-xs text-vault-400">
-            Loading user directory...
-          </div>
-        ) : filteredUsers.length === 0 ? (
-          <div className="bg-vault-900 border border-vault-800 rounded-2xl p-8 text-center text-xs text-vault-500">
-            No users match the search and filter criteria.
-          </div>
-        ) : (
-          filteredUsers.map(u => {
-            const isSelf = u.id === user?.id;
-            const connectionCount = connectionCounts[u.id] ?? 0;
-            const reportsCount = reportCounts[u.id] ?? 0;
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filteredUsers.map(userItem => {
+            const currentGender = userItem.gender || 'Male';
+            const isUpdating = updatingUserId === userItem.id;
 
             return (
               <div
-                key={u.id}
-                className="bg-vault-900 border border-vault-800 hover:border-vault-700/80 rounded-2xl p-4 flex flex-col gap-3 shadow-sm transition-all cursor-pointer"
-                onClick={() => onSelectUser?.(u.id, 'overview')}
+                key={userItem.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => onSelectUser(userItem)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelectUser(userItem);
+                  }
+                }}
+                className="group p-4 bg-vault-900 hover:bg-vault-850 border border-vault-800 hover:border-purple-500/50 rounded-2xl shadow-md transition-all text-left flex flex-col justify-between gap-3 cursor-pointer"
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <Avatar name={u.display_name ?? ''} seed={u.uid} src={u.avatar_url} size={48} />
-                    <div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <h4 className="text-sm font-bold text-white leading-tight">{u.display_name}</h4>
-                        {u.role === 'super_admin' && (
-                          <span className="px-1.5 py-0.2 bg-amber-950 border border-amber-600/50 text-amber-300 rounded text-[9px] font-bold">
-                            SUPER ADMIN
-                          </span>
-                        )}
-                        {reportsCount > 0 && (
-                          <span className="px-1.5 py-0.2 bg-rose-950 border border-rose-600/50 text-rose-300 rounded text-[9px] font-bold flex items-center gap-0.5">
-                            <AlertTriangle className="w-2.5 h-2.5" />
-                            {reportsCount} {reportsCount === 1 ? 'Report' : 'Reports'}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[11px] font-mono mt-0.5">
-                        <span className="text-vault-400">@{u.username || 'none'}</span>
-                        <span className="text-vault-600">•</span>
-                        <div className="flex items-center gap-1 text-arcade-gold font-bold">
-                          <Shield className="w-3 h-3" />
-                          <span>{u.uid}</span>
-                        </div>
-                      </div>
-                      <div className="text-[10px] text-vault-500 mt-0.5 flex items-center gap-2">
-                        <span>Created: {formatDetailedDate(u.created_at)}</span>
-                        <span>•</span>
-                        <span>
-                          Last Active:{' '}
-                          {u.last_login_at
-                            ? formatDetailedDate(u.last_login_at)
-                            : formatDetailedDate(u.updated_at)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+                {/* Top info: Avatar + Username + Status */}
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <Avatar
+                    name={userItem.display_name}
+                    seed={userItem.uid}
+                    src={userItem.avatar_url}
+                    size={48}
+                  />
 
-                  {/* Status Badge */}
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase ${
-                      u.status === 'active'
-                        ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/50'
-                        : u.status === 'suspended'
-                        ? 'bg-amber-950/80 text-amber-300 border-amber-700/50'
-                        : 'bg-rose-950/80 text-rose-300 border-rose-700/50'
-                    }`}
-                  >
-                    {u.status}
-                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-bold text-white group-hover:text-purple-300 transition-colors truncate m-0">
+                        {userItem.display_name}
+                      </h3>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border shrink-0 ${
+                        userItem.status === 'banned'
+                          ? 'bg-rose-950/50 text-rose-300 border-rose-700/50'
+                          : userItem.status === 'suspended'
+                          ? 'bg-amber-950/50 text-amber-300 border-amber-700/50'
+                          : 'bg-emerald-950/50 text-emerald-300 border-emerald-700/50'
+                      }`}>
+                        {userItem.status.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-vault-400 font-mono truncate m-0 mt-0.5">
+                      @{userItem.username || userItem.uid}
+                    </p>
+                  </div>
                 </div>
 
-                {/* Stats & Actions Bar */}
+                {/* Bottom row: Gender management selector */}
                 <div
-                  className="flex items-center justify-between pt-2 border-t border-vault-800/80 text-xs"
+                  className="pt-2 border-t border-vault-800/80 flex items-center justify-between"
                   onClick={e => e.stopPropagation()}
                 >
-                  <div className="flex items-center gap-3 text-[11px] text-vault-400">
-                    <span>
-                      Connections: <strong className="text-vault-200">{connectionCount}</strong>
-                    </span>
-                  </div>
+                  <span className="text-[11px] text-vault-400 font-medium">Gender:</span>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center bg-vault-950 border border-vault-800 rounded-lg p-0.5">
                     <button
-                      onClick={() => onSelectUser?.(u.id, 'overview')}
-                      className="px-2.5 py-1 bg-vault-800 hover:bg-vault-700 text-arcade-gold rounded-lg text-[11px] font-bold transition-all flex items-center gap-1"
+                      type="button"
+                      disabled={isUpdating}
+                      onClick={e => handleGenderChange(e, userItem, 'Male')}
+                      className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${
+                        currentGender === 'Male'
+                          ? 'bg-cyan-600 text-white shadow-sm'
+                          : 'text-vault-400 hover:text-white'
+                      }`}
                     >
-                      <Eye className="w-3 h-3" /> Open User 360
+                      {isUpdating && currentGender !== 'Male' ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        'Male'
+                      )}
                     </button>
 
-                    {!isSelf && u.role !== 'super_admin' && (
-                      <div className="flex items-center gap-1.5">
-                        {u.status !== 'active' ? (
-                          <button
-                            onClick={() => {
-                              setSelectedUser(u);
-                              setModalMode('unban');
-                            }}
-                            className="px-2.5 py-1 bg-emerald-950 hover:bg-emerald-900 border border-emerald-600/50 text-emerald-300 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1"
-                          >
-                            <RefreshCw className="w-3 h-3" /> Restore
-                          </button>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => {
-                                setSelectedUser(u);
-                                setModalMode('suspend');
-                              }}
-                              className="px-2.5 py-1 bg-amber-950 hover:bg-amber-900 border border-amber-600/50 text-amber-300 rounded-lg text-[11px] font-bold transition-all"
-                            >
-                              Suspend
-                            </button>
-                            <button
-                              onClick={() => {
-                                setSelectedUser(u);
-                                setModalMode('ban');
-                              }}
-                              className="px-2.5 py-1 bg-rose-950 hover:bg-rose-900 border border-rose-600/50 text-rose-300 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1"
-                            >
-                              <Ban className="w-3 h-3" /> Ban
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      disabled={isUpdating}
+                      onClick={e => handleGenderChange(e, userItem, 'Female')}
+                      className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${
+                        currentGender === 'Female'
+                          ? 'bg-pink-600 text-white shadow-sm'
+                          : 'text-vault-400 hover:text-white'
+                      }`}
+                    >
+                      {isUpdating && currentGender !== 'Female' ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        'Female'
+                      )}
+                    </button>
                   </div>
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
-
-      {/* Moderation Confirmation Modal */}
-      {modalMode && selectedUser && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-vault-900 border border-vault-700/80 rounded-3xl w-full max-w-sm p-6 flex flex-col shadow-2xl">
-            <div className="flex items-center gap-2 text-rose-400 font-bold mb-1">
-              <ShieldAlert className="w-5 h-5" />
-              <span>Confirm Disciplinary Action</span>
-            </div>
-            <p className="text-xs text-vault-300 mb-4">
-              Apply <strong>{modalMode.toUpperCase()}</strong> to{' '}
-              <strong>{selectedUser.display_name}</strong> ({selectedUser.uid})
-            </p>
-
-            <label className="block text-[10px] font-bold text-vault-400 uppercase tracking-wider mb-1">
-              Reason / Moderator Notes (Audited)
-            </label>
-            <input
-              type="text"
-              value={actionReason}
-              onChange={e => setActionReason(e.target.value)}
-              placeholder="e.g. Terms of Service violation"
-              className="w-full bg-vault-950 border border-vault-700 focus:border-amber-500 rounded-xl px-3.5 py-2 text-xs text-white placeholder-vault-600 outline-none mb-4"
-            />
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setModalMode(null);
-                  setSelectedUser(null);
-                }}
-                className="flex-1 py-2 bg-vault-800 hover:bg-vault-700 text-vault-300 rounded-xl text-xs font-bold"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  handleApplyStatus(
-                    modalMode === 'ban' ? 'banned' : modalMode === 'suspend' ? 'suspended' : 'active'
-                  )
-                }
-                className={`flex-1 py-2 rounded-xl text-xs font-bold shadow-md ${
-                  modalMode === 'unban'
-                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                    : 'bg-rose-600 hover:bg-rose-500 text-white'
-                }`}
-              >
-                Confirm {modalMode.toUpperCase()}
-              </button>
-            </div>
-          </div>
+          })}
         </div>
       )}
     </div>
