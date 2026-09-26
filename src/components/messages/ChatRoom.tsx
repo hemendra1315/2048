@@ -26,9 +26,11 @@ import {
   MoreVertical,
   Ban,
   ChevronDown,
+  ChevronLeft,
   Info,
   Eye,
   EyeOff,
+  Repeat,
 } from 'lucide-react';
 import { CoverGameType, MessageItem, MessageReaction, ReactionEmoji, REACTION_EMOJIS, UserProfile } from '../../types';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -72,7 +74,7 @@ import { resolveChatMediaUrl } from '../../lib/mediaUrls';
 import { BlockStatus, blockUser, getBlockStatus, unblockUser } from '../../lib/blocks';
 import { ChatImage, ViewOnceImageBubble, ViewOnceAudioBubble } from '../common/ChatMedia';
 import { LightboxViewer } from '../gallery/LightboxViewer';
-import { claimViewOnceMedia } from '../../lib/viewOnceApi';
+import { claimEphemeralMedia } from '../../lib/viewOnceApi';
 import { useBackHandler } from '../../lib/backButton';
 import { expectExternalActivity } from '../../lib/externalActivity';
 import { getDraft, setDraft } from '../../lib/chatDrafts';
@@ -102,7 +104,10 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [isTyping, setIsTyping] = useState(false);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [sendAsSpoiler, setSendAsSpoiler] = useState(false);
-  const [sendAsViewOnce, setSendAsViewOnce] = useState(false);
+  type EphemeralSendMode = 'view_once' | 'allow_replay' | 'keep_in_chat';
+  const [ephemeralMode, setEphemeralMode] = useState<EphemeralSendMode>('keep_in_chat');
+  const [showEphemeralPicker, setShowEphemeralPicker] = useState(false);
+  const sendAsViewOnce = ephemeralMode !== 'keep_in_chat';
   const [claimingViewOnceId, setClaimingViewOnceId] = useState<string | null>(null);
   const [activeViewOnceItem, setActiveViewOnceItem] = useState<{ id: string; url: string; created_at: string; sender_id: string } | null>(null);
   const [viewOnceConsumedIds, setViewOnceConsumedIds] = useState<Set<string>>(() => new Set());
@@ -644,9 +649,25 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     setIsUploadingMedia(true);
     try {
       const mediaUrl = await uploadChatMedia(file, conversationId);
-      const tag = sendAsViewOnce ? '[IMAGE:VIEW_ONCE]' : sendAsSpoiler ? '[IMAGE:spoiler]' : '[IMAGE]';
+      const tag =
+        ephemeralMode === 'view_once'
+          ? '[IMAGE:VIEW_ONCE]'
+          : ephemeralMode === 'allow_replay'
+            ? '[IMAGE:ALLOW_REPLAY]'
+            : sendAsSpoiler
+              ? '[IMAGE:spoiler]'
+              : '[IMAGE]';
       await handleSend(`${tag}${mediaUrl}`);
-      showToast(sendAsViewOnce ? 'View once photo sent' : sendAsSpoiler ? 'Sensitive photo sent with spoiler blur' : 'Photo sent', 'success');
+      showToast(
+        ephemeralMode === 'view_once'
+          ? 'View once photo sent'
+          : ephemeralMode === 'allow_replay'
+            ? 'Allow-replay photo sent (2 views)'
+            : sendAsSpoiler
+              ? 'Sensitive photo sent with spoiler blur'
+              : 'Photo sent',
+        'success'
+      );
       notificationSuccess();
     } catch (err) {
       console.error('File upload error:', err);
@@ -655,12 +676,15 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     } finally {
       setIsUploadingMedia(false);
       setSendAsSpoiler(false);
-      setSendAsViewOnce(false);
+      setEphemeralMode('keep_in_chat');
     }
   };
 
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [audioSeconds, setAudioSeconds] = useState(0);
+  const [recordDragX, setRecordDragX] = useState(0);
+  const recordPointerRef = useRef<{ startX: number; cancelled: boolean } | null>(null);
+  const RECORD_CANCEL_THRESHOLD = -72;
   const recordedSecondsRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -705,9 +729,22 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               uploadChatMedia(audioFile, conversationId),
               computeWaveform(audioBlob),
             ]);
-            const tag = sendAsViewOnce ? `[VOICE_NOTE:VIEW_ONCE:${dur}${levels ? `|w=${levels}` : ''}]` : `[VOICE_NOTE:${dur}${levels ? `|w=${levels}` : ''}]`;
+            const voiceTagPrefix =
+              ephemeralMode === 'view_once'
+                ? 'VIEW_ONCE:'
+                : ephemeralMode === 'allow_replay'
+                  ? 'ALLOW_REPLAY:'
+                  : '';
+            const tag = `[VOICE_NOTE:${voiceTagPrefix}${dur}${levels ? `|w=${levels}` : ''}]`;
             await handleSend(`${tag}${mediaUrl}`);
-            showToast(sendAsViewOnce ? 'View once voice note sent' : 'Voice note shared', 'success');
+            showToast(
+              ephemeralMode === 'view_once'
+                ? 'View once voice note sent'
+                : ephemeralMode === 'allow_replay'
+                  ? 'Allow-replay voice note sent (2 plays)'
+                  : 'Voice note shared',
+              'success'
+            );
             notificationSuccess();
           } catch (err) {
             console.error('Voice note upload error:', err);
@@ -715,7 +752,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             errorWarning();
           } finally {
             setIsUploadingMedia(false);
-            setSendAsViewOnce(false);
+            setEphemeralMode('keep_in_chat');
           }
         }
       };
@@ -723,6 +760,15 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       recorder.start();
       setIsRecordingAudio(true);
       lightImpact();
+      // The user may have already released (or slid to cancel) before mic
+      // permission resolved — this state only reaches setIsRecordingAudio(true)
+      // just above, so re-check the pointer here and stop immediately if so.
+      if (!recordPointerRef.current) {
+        recordedSecondsRef.current = 0;
+        recorder.stop();
+        setIsRecordingAudio(false);
+        setRecordDragX(0);
+      }
     } catch (err) {
       console.error('Voice record error:', err);
       showToast('Microphone access denied', 'error');
@@ -742,6 +788,32 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       }
       setIsRecordingAudio(false);
     }
+    setRecordDragX(0);
+  };
+
+  // Hold-to-record with slide-to-cancel: press-and-hold the mic starts recording,
+  // dragging left past the threshold cancels it, releasing short of that sends it.
+  const handleRecordPointerDown = (e: React.PointerEvent) => {
+    if (isRecordingAudio) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    recordPointerRef.current = { startX: e.clientX, cancelled: false };
+    void handleStartVoiceRecord();
+  };
+  const handleRecordPointerMove = (e: React.PointerEvent) => {
+    const s = recordPointerRef.current;
+    if (!s || !isRecordingAudio) return;
+    const dx = Math.min(0, e.clientX - s.startX);
+    setRecordDragX(dx);
+    if (dx <= RECORD_CANCEL_THRESHOLD && !s.cancelled) {
+      s.cancelled = true;
+      handleStopVoiceRecord(false);
+    }
+  };
+  const handleRecordPointerUp = () => {
+    const s = recordPointerRef.current;
+    recordPointerRef.current = null;
+    if (s?.cancelled) return;
+    handleStopVoiceRecord(true);
   };
 
   const playingAudioIdRef = useRef<string | null>(null);
@@ -781,28 +853,37 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     });
   }, [audioSpeed]);
 
+  const isEphemeralExhausted = useCallback((msg: MessageItem) => {
+    const maxViews = msg.view_mode === 'allow_replay' ? 2 : 1;
+    const viewsUsed = msg.view_count ?? (msg.view_once_opened_at ? 1 : 0);
+    return viewsUsed >= maxViews || viewOnceConsumedIds.has(msg.id);
+  }, [viewOnceConsumedIds]);
+
   const handleOpenViewOncePhoto = useCallback(async (msg: MessageItem, rawUrl: string) => {
-    if (msg.view_once_opened_at || viewOnceConsumedIds.has(msg.id)) {
-      showToast('This photo has already been viewed', 'info');
+    if (isEphemeralExhausted(msg)) {
+      showToast(msg.view_mode === 'allow_replay' ? 'No replays left for this photo' : 'This photo has already been viewed', 'info');
       return;
     }
     setClaimingViewOnceId(msg.id);
     lightImpact();
     try {
-      const claimRes = await claimViewOnceMedia(msg.id, userId);
+      const claimRes = await claimEphemeralMedia(msg.id, userId);
       if (!claimRes.success) {
-        setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
-        if (claimRes.reason === 'already_viewed') {
-          showToast('This photo has already been viewed', 'info');
+        if (claimRes.reason === 'already_viewed' || claimRes.reason === 'max_replays_reached') {
+          setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
+          showToast(claimRes.reason === 'max_replays_reached' ? 'No replays left for this photo' : 'This photo has already been viewed', 'info');
         } else {
-          showToast('Could not open view once photo', 'error');
+          showToast('Could not open photo', 'error');
         }
         errorWarning();
         return;
       }
 
-      setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
-      setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, view_once_opened_at: claimRes.opened_at || new Date().toISOString() } : m)));
+      const exhausted = (claimRes.view_count ?? 0) >= (claimRes.max_views ?? 1);
+      if (exhausted) setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
+      setMessages(prev => prev.map(m => (m.id === msg.id
+        ? { ...m, view_once_opened_at: claimRes.opened_at || new Date().toISOString(), view_count: claimRes.view_count, view_mode: claimRes.view_mode ?? m.view_mode }
+        : m)));
 
       const resolved = await resolveChatMediaUrl(rawUrl);
       if (!resolved) {
@@ -819,27 +900,26 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         sender_id: msg.sender_id,
       });
     } catch (err) {
-      console.error('Error opening view once photo:', err);
+      console.error('Error opening ephemeral photo:', err);
       showToast('Error opening photo', 'error');
       errorWarning();
     } finally {
       setClaimingViewOnceId(null);
     }
-  }, [userId, viewOnceConsumedIds, showToast]);
+  }, [userId, isEphemeralExhausted, showToast]);
 
   const handleToggleViewOnceAudio = useCallback(async (msg: MessageItem, rawUrl: string) => {
-    if (msg.view_once_opened_at || viewOnceConsumedIds.has(msg.id)) {
-      showToast('This voice note has already been played', 'info');
-      return;
-    }
-
     if (playingAudioIdRef.current === msg.id) {
+      // Already claimed when playback started below — this just stops it.
       audioElementRef.current?.pause();
       setPlayingAudioId(null);
       setAudioProgress(0);
-      setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
-      setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, view_once_opened_at: new Date().toISOString() } : m)));
       lightImpact();
+      return;
+    }
+
+    if (isEphemeralExhausted(msg)) {
+      showToast(msg.view_mode === 'allow_replay' ? 'No replays left for this voice note' : 'This voice note has already been played', 'info');
       return;
     }
 
@@ -847,20 +927,23 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     lightImpact();
 
     try {
-      const claimRes = await claimViewOnceMedia(msg.id, userId);
+      const claimRes = await claimEphemeralMedia(msg.id, userId);
       if (!claimRes.success) {
-        setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
-        if (claimRes.reason === 'already_viewed') {
-          showToast('This voice note has already been played', 'info');
+        if (claimRes.reason === 'already_viewed' || claimRes.reason === 'max_replays_reached') {
+          setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
+          showToast(claimRes.reason === 'max_replays_reached' ? 'No replays left for this voice note' : 'This voice note has already been played', 'info');
         } else {
-          showToast('Could not play view once voice note', 'error');
+          showToast('Could not play voice note', 'error');
         }
         errorWarning();
         return;
       }
 
-      setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
-      setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, view_once_opened_at: claimRes.opened_at || new Date().toISOString() } : m)));
+      const exhausted = (claimRes.view_count ?? 0) >= (claimRes.max_views ?? 1);
+      if (exhausted) setViewOnceConsumedIds(prev => new Set(prev).add(msg.id));
+      setMessages(prev => prev.map(m => (m.id === msg.id
+        ? { ...m, view_once_opened_at: claimRes.opened_at || new Date().toISOString(), view_count: claimRes.view_count, view_mode: claimRes.view_mode ?? m.view_mode }
+        : m)));
 
       const resolved = await resolveChatMediaUrl(rawUrl);
       if (!resolved) {
@@ -898,7 +981,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     } finally {
       setClaimingViewOnceId(null);
     }
-  }, [userId, viewOnceConsumedIds, audioSpeed, showToast]);
+  }, [userId, isEphemeralExhausted, audioSpeed, showToast]);
 
   const handleScrubAudio = useCallback((progress: number) => {
     const audio = audioElementRef.current;
@@ -1143,29 +1226,32 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             )}
           </div>
         ) : isRecordingAudio ? (
-          <div className="flex items-center justify-between bg-red-950/80 border border-red-600/50 rounded-xl px-4 py-2.5 text-red-300 animate-pulse">
+          <div
+            className="relative flex items-center justify-between bg-red-950/80 border border-red-600/50 rounded-xl px-4 py-2.5 text-red-300 overflow-hidden"
+            style={{ opacity: recordDragX <= RECORD_CANCEL_THRESHOLD * 0.6 ? 0.6 : 1 }}
+          >
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
               <span className="text-xs font-mono font-bold">
-                RECORDING {audioSeconds}s {sendAsViewOnce && '· 1 VIEW ONCE'}
+                REC {audioSeconds}s
+                {ephemeralMode === 'view_once' && ' · VIEW ONCE'}
+                {ephemeralMode === 'allow_replay' && ' · ALLOW REPLAY'}
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleStopVoiceRecord(false)}
-                className="btn btn-g btn-sm text-vault-300"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => handleStopVoiceRecord(true)}
-                className="btn btn-p btn-sm"
-              >
-                Send
-              </button>
-            </div>
+            <span
+              className="flex items-center gap-1 text-xs text-vault-400"
+              style={{ transform: `translateX(${recordDragX}px)` }}
+            >
+              <ChevronLeft className="w-3.5 h-3.5" aria-hidden />
+              Slide to cancel
+            </span>
+            <button
+              type="button"
+              onClick={() => handleStopVoiceRecord(true)}
+              className="btn btn-p btn-sm"
+            >
+              Send
+            </button>
           </div>
         ) : (
           <div className="flex items-end gap-2">
@@ -1185,29 +1271,61 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 )}
               </button>
 
-              {/* View Once Mode Toggle */}
-              <button
-                type="button"
-                onClick={() => {
-                  selectionChange();
-                  setSendAsViewOnce(prev => {
-                    if (!prev) setSendAsSpoiler(false);
-                    return !prev;
-                  });
-                }}
-                className={`ib ib-s rounded-xl shrink-0 !w-8 !h-8 relative ${
-                  sendAsViewOnce ? '!bg-emerald/20 !border-emerald !text-emerald shadow-sm' : 'text-vault-400'
-                }`}
-                aria-label={sendAsViewOnce ? 'View once active for media' : 'Toggle view once for media'}
-                title={sendAsViewOnce ? 'View Once enabled (1 view only)' : 'Send as View Once (1 view)'}
-              >
-                <EyeOff className="w-4 h-4" />
-                <span className={`absolute -top-1 -right-1 text-[9px] font-black leading-none rounded-full w-3.5 h-3.5 flex items-center justify-center ${
-                  sendAsViewOnce ? 'bg-emerald text-vault-950 font-bold' : 'bg-vault-800 text-vault-400'
-                }`}>
-                  1
-                </span>
-              </button>
+              {/* Ephemeral Media Mode Selector: View Once | Allow Replay | Keep in Chat */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    selectionChange();
+                    setShowEphemeralPicker(v => !v);
+                  }}
+                  className={`ib ib-s rounded-xl shrink-0 !w-8 !h-8 relative ${
+                    sendAsViewOnce ? '!bg-emerald/20 !border-emerald !text-emerald shadow-sm' : 'text-vault-400'
+                  }`}
+                  aria-label="Choose media retention: View Once, Allow Replay, or Keep in Chat"
+                  aria-expanded={showEphemeralPicker}
+                  title="Media retention mode"
+                >
+                  {ephemeralMode === 'allow_replay' ? <Repeat className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  {sendAsViewOnce && (
+                    <span className="absolute -top-1 -right-1 text-[9px] font-black leading-none rounded-full w-3.5 h-3.5 flex items-center justify-center bg-emerald text-vault-950 font-bold">
+                      {ephemeralMode === 'allow_replay' ? 2 : 1}
+                    </span>
+                  )}
+                </button>
+                {showEphemeralPicker && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowEphemeralPicker(false)} />
+                    <div className="card absolute bottom-full mb-2 left-0 z-20 p-1.5 w-44 flex flex-col gap-0.5 shadow-2xl anim-sheet">
+                      {(
+                        [
+                          { mode: 'view_once' as const, label: 'View Once', hint: '1 view', icon: EyeOff },
+                          { mode: 'allow_replay' as const, label: 'Allow Replay', hint: '2 views', icon: Repeat },
+                          { mode: 'keep_in_chat' as const, label: 'Keep in Chat', hint: 'Unlimited', icon: ImageIcon },
+                        ]
+                      ).map(opt => (
+                        <button
+                          key={opt.mode}
+                          type="button"
+                          onClick={() => {
+                            selectionChange();
+                            setEphemeralMode(opt.mode);
+                            if (opt.mode !== 'keep_in_chat') setSendAsSpoiler(false);
+                            setShowEphemeralPicker(false);
+                          }}
+                          className={`flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-left ${
+                            ephemeralMode === opt.mode ? 'bg-emerald/15 text-emerald font-semibold' : 'text-vault-200 hover:bg-vault-800'
+                          }`}
+                        >
+                          <opt.icon className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                          <span className="flex-1">{opt.label}</span>
+                          <span className="t-cap">{opt.hint}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
 
               {/* Spoiler Mode Toggle */}
               <button
@@ -1215,7 +1333,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 onClick={() => {
                   selectionChange();
                   setSendAsSpoiler(prev => {
-                    if (!prev) setSendAsViewOnce(false);
+                    if (!prev) setEphemeralMode('keep_in_chat');
                     return !prev;
                   });
                 }}
@@ -1276,10 +1394,13 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               ) : (
                 <button
                   type="button"
-                  onClick={handleStartVoiceRecord}
-                  className="ib ib-s !w-11 !h-11 rounded-xl shrink-0"
-                  aria-label="Record voice message"
-                  title="Record voice note"
+                  onPointerDown={handleRecordPointerDown}
+                  onPointerMove={handleRecordPointerMove}
+                  onPointerUp={handleRecordPointerUp}
+                  onPointerCancel={() => handleStopVoiceRecord(false)}
+                  className="ib ib-s !w-11 !h-11 rounded-xl shrink-0 touch-none select-none"
+                  aria-label="Hold to record a voice message, slide left to cancel"
+                  title="Hold to record"
                 >
                   <Mic className="w-5 h-5 text-emerald" />
                 </button>
@@ -1653,15 +1774,22 @@ function MessageBubble({
     msg.content.startsWith('[IMAGE:VIEW_ONCE]') ||
     msg.content.startsWith('[IMAGE:view_once]')
   );
-  const isSpoiler = !deleted && !isViewOnceImage && (msg.content.startsWith('[IMAGE:SPOILER]') || msg.content.startsWith('[IMAGE:spoiler]'));
-  const isImage = !deleted && (msg.content.startsWith('[IMAGE]') || isSpoiler || isViewOnceImage);
+  const isAllowReplayImage = !deleted && !isViewOnceImage && msg.content.startsWith('[IMAGE:ALLOW_REPLAY]');
+  const isEphemeralImage = isViewOnceImage || isAllowReplayImage;
+  const isSpoiler = !deleted && !isEphemeralImage && (msg.content.startsWith('[IMAGE:SPOILER]') || msg.content.startsWith('[IMAGE:spoiler]'));
+  const isImage = !deleted && (msg.content.startsWith('[IMAGE]') || isSpoiler || isEphemeralImage);
   const voice = deleted ? undefined : parseVoiceNote(msg.content);
   const isVoice = Boolean(voice);
   const isViewOnceVoice = !deleted && Boolean(voice?.isViewOnce || (msg.is_view_once && isVoice));
-  const isViewOnceOpened = Boolean(msg.view_once_opened_at) || viewOnceConsumedIds.has(msg.id);
+  const isAllowReplayVoice = !deleted && !isViewOnceVoice && Boolean(voice?.isAllowReplay);
+  const isEphemeralVoice = isViewOnceVoice || isAllowReplayVoice;
+  const ephemeralViewMode: 'view_once' | 'allow_replay' = (isAllowReplayImage || isAllowReplayVoice) ? 'allow_replay' : 'view_once';
+  const ephemeralMaxViews = ephemeralViewMode === 'allow_replay' ? 2 : 1;
+  const ephemeralViewsUsed = msg.view_count ?? (msg.view_once_opened_at ? 1 : 0);
+  const isViewOnceOpened = ephemeralViewsUsed >= ephemeralMaxViews || viewOnceConsumedIds.has(msg.id);
 
-  const imageUrl = isViewOnceImage
-    ? msg.content.replace(/^\[IMAGE:VIEW_ONCE\]|^\[IMAGE:view_once\]|^\[IMAGE\]/, '')
+  const imageUrl = isEphemeralImage
+    ? msg.content.replace(/^\[IMAGE:VIEW_ONCE\]|^\[IMAGE:view_once\]|^\[IMAGE:ALLOW_REPLAY\]|^\[IMAGE\]/, '')
     : isSpoiler
     ? msg.content.replace(/^\[IMAGE:spoiler\]|^\[IMAGE:SPOILER\]/, '')
     : isImage
@@ -1672,7 +1800,7 @@ function MessageBubble({
   const sticker = deleted ? undefined : parseSticker(msg.content);
   const score = deleted ? undefined : parseScore(msg.content);
   const gameRef = deleted ? undefined : parseGame(msg.content);
-  const bare = Boolean(sticker || score || gameRef || (isImage && !isViewOnceImage));
+  const bare = Boolean(sticker || score || gameRef || (isImage && !isEphemeralImage));
 
   const [dragOffset, setDragOffset] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
@@ -1839,10 +1967,10 @@ function MessageBubble({
         }}
       >
         <div
-          className={`relative min-w-0 ${bare ? 'p-0' : isImage && !isViewOnceImage ? 'p-1' : isViewOnceImage || isViewOnceVoice ? 'p-0 bg-transparent shadow-none' : 'px-3.5 py-2.5'} text-[15px] leading-[22px] break-words select-text ${
+          className={`relative min-w-0 ${bare ? 'p-0' : isImage && !isEphemeralImage ? 'p-1' : isEphemeralImage || isEphemeralVoice ? 'p-0 bg-transparent shadow-none' : 'px-3.5 py-2.5'} text-[15px] leading-[22px] break-words select-text ${
             msg.status ? 'opacity-70' : ''
           } ${
-            bare || isViewOnceImage || isViewOnceVoice
+            bare || isEphemeralImage || isEphemeralVoice
               ? 'bg-transparent'
               : deleted
               ? 'bg-transparent border border-vault-750 text-vault-400 italic rounded-2xl'
@@ -1894,14 +2022,16 @@ function MessageBubble({
             </div>
           ) : gameRef ? (
             <ChatGameCard gameId={gameRef.id} myUserId={myUserId} partnerName={partnerName} onRematch={() => onRematch(gameRef.id as CoverGameType)} />
-          ) : isViewOnceImage ? (
+          ) : isEphemeralImage ? (
             <ViewOnceImageBubble
               isMe={isMe}
               isOpened={isViewOnceOpened}
               onOpen={() => onOpenViewOncePhoto(msg, imageUrl)}
               isLoading={claimingViewOnceId === msg.id}
+              viewMode={ephemeralViewMode}
+              viewsUsed={ephemeralViewsUsed}
             />
-          ) : isViewOnceVoice ? (
+          ) : isEphemeralVoice ? (
             <ViewOnceAudioBubble
               isMe={isMe}
               isOpened={isViewOnceOpened}
@@ -1911,6 +2041,8 @@ function MessageBubble({
               onTogglePlay={() => onToggleViewOnceAudio(msg, voiceUrl)}
               isLoading={claimingViewOnceId === msg.id}
               playProgress={playProgress}
+              viewMode={ephemeralViewMode}
+              viewsUsed={ephemeralViewsUsed}
             />
           ) : isImage ? (
             onOpenMedia && !imageFailed ? (

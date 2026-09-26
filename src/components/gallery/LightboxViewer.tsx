@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { X, Trash, Send, Download, Info, ZoomIn, ZoomOut, Check, HardDrive, Calendar, Image as ImageIcon, EyeOff } from 'lucide-react';
+import { X, Trash, Send, Download, Info, ZoomIn, ZoomOut, Check, HardDrive, Calendar, Image as ImageIcon, EyeOff, Heart, Undo2 } from 'lucide-react';
 import { GalleryItem } from '../../types';
 import type { MediaUrlState } from '../../lib/mediaUrls';
 import { MediaImage } from '../common/MediaImage';
@@ -10,6 +10,9 @@ interface LightboxViewerProps {
   onClose: () => void;
   onDelete?: (item: GalleryItem) => void;
   onSend?: (item: GalleryItem) => void;
+  onToggleFavorite?: (item: GalleryItem) => void;
+  /** Present only when viewing an item from Trash — shows Restore instead of Delete. */
+  onRestore?: (item: GalleryItem) => void;
   /** Resolved URL for the item (private-bucket objects need a signed URL). */
   mediaState?: MediaUrlState;
   onRetry?: () => void;
@@ -21,6 +24,8 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
   onClose,
   onDelete,
   onSend,
+  onToggleFavorite,
+  onRestore,
   mediaState,
   onRetry,
   isViewOnce = false,
@@ -236,6 +241,16 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
           >
             {scale > 1 ? <ZoomOut className="i" /> : <ZoomIn className="i" />}
           </button>
+          {!isViewOnce && onToggleFavorite && (
+            <button
+              type="button"
+              onClick={() => onToggleFavorite(item)}
+              className={`ib ib-s rounded-full glass-panel ${item.is_favorite ? '!text-rose-400' : '!text-white'}`}
+              aria-label={item.is_favorite ? 'Remove from Favorites' : 'Add to Favorites'}
+            >
+              <Heart className={`i ${item.is_favorite ? 'fill-current' : ''}`} aria-hidden />
+            </button>
+          )}
           {!isViewOnce && (
             <button
               type="button"
@@ -330,6 +345,22 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
             <span className="t-cap">Details</span>
           </button>
 
+          {onRestore && (
+            <button
+              type="button"
+              onClick={() => {
+                lightImpact();
+                onRestore(item);
+                onClose();
+              }}
+              className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[64px] !text-emerald hover:!text-emerald"
+              aria-label="Restore photo"
+            >
+              <Undo2 className="i" aria-hidden />
+              <span className="t-cap">Restore</span>
+            </button>
+          )}
+
           {onDelete && (
             <button
               type="button"
@@ -338,10 +369,10 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
                 onDelete(item);
               }}
               className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[64px] !text-[#FF8A93] hover:!text-red-300"
-              aria-label="Delete photo"
+              aria-label={onRestore ? 'Delete forever' : 'Delete photo'}
             >
               <Trash className="i" aria-hidden />
-              <span className="t-cap">Delete</span>
+              <span className="t-cap">{onRestore ? 'Delete Forever' : 'Delete'}</span>
             </button>
           )}
         </footer>

@@ -770,17 +770,31 @@ class MockBackendService {
     }
   }
 
-  claimViewOnceMedia(messageId: string, _userId?: string): { success: boolean; content?: string; reason?: string; opened_at?: string } {
+  claimViewOnceMedia(
+    messageId: string,
+    _userId?: string
+  ): { success: boolean; content?: string; reason?: string; opened_at?: string | null; view_mode?: string; view_count?: number; max_views?: number } {
     const allMsgs = this.getAllMessages();
     const msg = allMsgs.find(m => m.id === messageId);
     if (!msg) return { success: false, reason: 'not_found' };
 
-    if (msg.view_once_opened_at) {
-      return { success: false, reason: 'already_viewed', opened_at: msg.view_once_opened_at };
+    const viewMode = msg.view_mode ?? (msg.view_once_opened_at !== undefined ? 'view_once' : 'keep_in_chat');
+    if (viewMode === 'keep_in_chat') {
+      return { success: false, reason: 'not_view_once' };
+    }
+    const maxViews = viewMode === 'allow_replay' ? 2 : 1;
+    const viewCount = msg.view_count ?? 0;
+    if (viewCount >= maxViews) {
+      return {
+        success: false,
+        reason: viewMode === 'allow_replay' ? 'max_replays_reached' : 'already_viewed',
+        opened_at: msg.view_once_opened_at,
+      };
     }
 
     const now = new Date().toISOString();
-    msg.view_once_opened_at = now;
+    msg.view_once_opened_at = msg.view_once_opened_at || now;
+    msg.view_count = viewCount + 1;
     msg.is_read = true;
     localStorage.setItem(KEYS.MESSAGES, JSON.stringify(allMsgs));
 
@@ -790,7 +804,10 @@ class MockBackendService {
     return {
       success: true,
       content: msg.content,
-      opened_at: now,
+      opened_at: msg.view_once_opened_at,
+      view_mode: viewMode,
+      view_count: msg.view_count,
+      max_views: maxViews,
     };
   }
 

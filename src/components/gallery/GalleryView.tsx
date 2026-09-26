@@ -12,6 +12,11 @@ import {
   Trash2,
   Share2,
   Download,
+  Heart,
+  Search,
+  Layers,
+  Undo2,
+  X,
 } from 'lucide-react';
 import { GalleryItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -24,12 +29,17 @@ import { MediaImage } from '../common/MediaImage';
 import { UploadModal } from './UploadModal';
 import { LightboxViewer } from './LightboxViewer';
 import { useBackHandler } from '../../lib/backButton';
+import { formatDayHeading } from '../../lib/utils';
 import { lightImpact, mediumImpact, selectionChange, notificationSuccess } from '../../lib/haptics';
 
-type GalleryFilter = 'all' | 'photos' | 'videos';
 type GridDensity = '3' | '2' | '1';
+type Collection = 'photos' | 'favorites' | 'videos' | 'screenshots' | 'recent' | 'trash';
 
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'm4v', '3gp'];
+/** Photos taken within this many ms of each other are grouped into a "Burst" stack.
+ *  Purely timestamp-based — not similarity/perceptual-hash detection. */
+const BURST_WINDOW_MS = 5000;
+const RECENT_WINDOW_DAYS = 7;
 
 function isVideo(item: GalleryItem): boolean {
   const source = (item.storage_path || item.image_url || '').split('?')[0].toLowerCase();
@@ -38,11 +48,57 @@ function isVideo(item: GalleryItem): boolean {
   return VIDEO_EXTENSIONS.includes(ext);
 }
 
+function isScreenshot(item: GalleryItem): boolean {
+  const source = (item.storage_path || item.image_url || item.caption || '').toLowerCase();
+  return source.includes('screenshot') || source.includes('screen-shot') || source.includes('screen_shot');
+}
+
+interface BurstStack {
+  isStack: true;
+  id: string;
+  items: GalleryItem[];
+}
+type GridEntry = GalleryItem | BurstStack;
+
+/** Groups consecutive photos (already sorted newest-first) taken within BURST_WINDOW_MS
+ *  of each other. Videos are never stacked. Min 2 items to form a stack. */
+function groupBursts(items: GalleryItem[]): GridEntry[] {
+  const out: GridEntry[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const current = items[i];
+    if (isVideo(current)) {
+      out.push(current);
+      i += 1;
+      continue;
+    }
+    const cluster: GalleryItem[] = [current];
+    let j = i + 1;
+    while (
+      j < items.length &&
+      !isVideo(items[j]) &&
+      Math.abs(new Date(items[j - 1].created_at).getTime() - new Date(items[j].created_at).getTime()) <= BURST_WINDOW_MS
+    ) {
+      cluster.push(items[j]);
+      j += 1;
+    }
+    if (cluster.length >= 2) {
+      out.push({ isStack: true, id: `stack-${current.id}`, items: cluster });
+    } else {
+      out.push(current);
+    }
+    i = j;
+  }
+  return out;
+}
+
 export const GalleryView: React.FC = () => {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const [filter, setFilter] = useState<GalleryFilter>('all');
+  const [collection, setCollection] = useState<Collection>('photos');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [density, setDensity] = useState<GridDensity>(() => {
     return (localStorage.getItem('gallery_density') as GridDensity) || '3';
   });
@@ -50,6 +106,7 @@ export const GalleryView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
+  const [openStack, setOpenStack] = useState<BurstStack | null>(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   // Multi-select state
@@ -121,12 +178,39 @@ export const GalleryView: React.FC = () => {
     localStorage.setItem('gallery_density', newDensity);
   };
 
-  const handleFilterChange = (newFilter: GalleryFilter) => {
-    selectionChange();
-    setFilter(newFilter);
+  const updateItem = async (id: string, patch: Partial<Pick<GalleryItem, 'is_favorite' | 'deleted_at'>>) => {
+    if (!user) return;
+    setItems(prev => prev.map(i => (i.id === id ? { ...i, ...patch } : i)));
+    if (isSupabaseConfigured()) {
+      const { error } = await supabase.from('gallery_items').update(patch).eq('id', id);
+      if (error) {
+        console.error('Gallery update error:', error);
+        showToast('Could not update photo', 'error');
+        loadGallery();
+      }
+    }
   };
 
-  const handleDelete = async (item: GalleryItem) => {
+  const toggleFavorite = (item: GalleryItem) => {
+    lightImpact();
+    void updateItem(item.id, { is_favorite: !item.is_favorite });
+  };
+
+  const softDelete = async (item: GalleryItem) => {
+    if (!user) return;
+    mediumImpact();
+    await updateItem(item.id, { deleted_at: new Date().toISOString() });
+    setSelectedItem(null);
+    showToast('Moved to Trash', 'info');
+  };
+
+  const restoreFromTrash = (item: GalleryItem) => {
+    lightImpact();
+    void updateItem(item.id, { deleted_at: null });
+    showToast('Restored', 'success');
+  };
+
+  const permanentlyDelete = async (item: GalleryItem) => {
     if (!user) return;
     try {
       if (isSupabaseConfigured()) {
@@ -140,7 +224,7 @@ export const GalleryView: React.FC = () => {
         mockBackend.deleteGalleryItem(item.id, user.id);
       }
       setSelectedItem(null);
-      showToast('Photo removed from Gallery', 'info');
+      showToast('Deleted forever', 'info');
       loadGallery();
     } catch (err) {
       console.error('Delete error:', err);
@@ -148,37 +232,74 @@ export const GalleryView: React.FC = () => {
     }
   };
 
-  const filteredItems = useMemo(() => {
-    return items.filter(item => {
-      if (filter === 'photos') return !isVideo(item);
-      if (filter === 'videos') return isVideo(item);
-      return true;
-    });
-  }, [items, filter]);
+  // In Trash, "delete" from the lightbox means permanent delete; everywhere else it's a soft delete.
+  const handleLightboxDelete = (item: GalleryItem) => {
+    if (collection === 'trash') void permanentlyDelete(item);
+    else void softDelete(item);
+  };
 
-  const videoCount = items.filter(isVideo).length;
-  const photoCount = items.length - videoCount;
+  const liveItems = useMemo(() => items.filter(i => !i.deleted_at), [items]);
+  const trashedItems = useMemo(() => items.filter(i => i.deleted_at), [items]);
+
+  const collectionItems = useMemo(() => {
+    switch (collection) {
+      case 'favorites':
+        return liveItems.filter(i => i.is_favorite);
+      case 'videos':
+        return liveItems.filter(isVideo);
+      case 'screenshots':
+        return liveItems.filter(isScreenshot);
+      case 'recent':
+        return liveItems.filter(i => (Date.now() - new Date(i.created_at).getTime()) / 86400000 <= RECENT_WINDOW_DAYS);
+      case 'trash':
+        return trashedItems;
+      default:
+        return liveItems;
+    }
+  }, [collection, liveItems, trashedItems]);
+
+  const searchedItems = useMemo(() => {
+    if (!searchOpen || !searchQuery.trim()) return collectionItems;
+    const q = searchQuery.trim().toLowerCase();
+    return collectionItems.filter(i => {
+      if (i.caption?.toLowerCase().includes(q)) return true;
+      if (q === 'favorite' || q === 'favorites') return Boolean(i.is_favorite);
+      if (q === 'video' || q === 'videos') return isVideo(i);
+      if (q === 'photo' || q === 'photos') return !isVideo(i);
+      if (q === 'screenshot' || q === 'screenshots') return isScreenshot(i);
+      const dateLabel = new Date(i.created_at).toLocaleDateString(undefined, { month: 'long', year: 'numeric', day: 'numeric' }).toLowerCase();
+      return dateLabel.includes(q);
+    });
+  }, [collectionItems, searchOpen, searchQuery]);
+
+  const videoCount = liveItems.filter(isVideo).length;
+  const photoCount = liveItems.length - videoCount;
+  const favoriteCount = liveItems.filter(i => i.is_favorite).length;
 
   const { urls, retry } = useGalleryUrls(items);
 
-  // Group items by relative period (This Week, This Month, or Month Year)
-  const groupedItems = useMemo(() => {
-    return filteredItems.reduce((acc, item) => {
+  // Two-level grouping: month header, day sub-header, with Burst stacks derived per day.
+  const groupedByMonth = useMemo(() => {
+    const months = new Map<string, Map<string, GalleryItem[]>>();
+    for (const item of searchedItems) {
       const d = new Date(item.created_at || Date.now());
-      const now = new Date();
-      const diffDays = (now.getTime() - d.getTime()) / (1000 * 3600 * 24);
+      const monthKey = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }).toUpperCase();
+      const dayKey = formatDayHeading(item.created_at);
+      if (!months.has(monthKey)) months.set(monthKey, new Map());
+      const days = months.get(monthKey)!;
+      if (!days.has(dayKey)) days.set(dayKey, []);
+      days.get(dayKey)!.push(item);
+    }
+    return Array.from(months.entries()).map(([monthLabel, days]) => ({
+      monthLabel,
+      days: Array.from(days.entries()).map(([dayLabel, dayItems]) => ({
+        dayLabel,
+        entries: collection === 'trash' ? dayItems : groupBursts(dayItems),
+      })),
+    }));
+  }, [searchedItems, collection]);
 
-      let key = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }).toUpperCase();
-      if (diffDays <= 7) key = 'THIS WEEK';
-      else if (diffDays <= 30) key = 'THIS MONTH';
-
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(item);
-      return acc;
-    }, {} as Record<string, GalleryItem[]>);
-  }, [filteredItems]);
-
-  const periodKeys = useMemo(() => Object.keys(groupedItems), [groupedItems]);
+  const periodKeys = useMemo(() => groupedByMonth.map(m => m.monthLabel), [groupedByMonth]);
 
   // Scrubber calculation & gesture handling
   const updateScrubberPosition = useCallback(
@@ -198,7 +319,6 @@ export const GalleryView: React.FC = () => {
         window.scrollTo({ top: targetScroll, behavior: 'auto' });
       }
 
-      // Find period based on progress
       if (periodKeys.length > 0) {
         const index = Math.min(periodKeys.length - 1, Math.floor(progress * periodKeys.length));
         const activePeriod = periodKeys[index];
@@ -247,10 +367,10 @@ export const GalleryView: React.FC = () => {
 
   const selectAll = () => {
     selectionChange();
-    if (selectedIds.size === filteredItems.length) {
+    if (selectedIds.size === searchedItems.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filteredItems.map(i => i.id)));
+      setSelectedIds(new Set(searchedItems.map(i => i.id)));
     }
   };
 
@@ -258,21 +378,29 @@ export const GalleryView: React.FC = () => {
     if (!user || selectedIds.size === 0) return;
     mediumImpact();
     const idsToDelete = Array.from(selectedIds);
-    const itemsToDelete = items.filter(i => selectedIds.has(i.id));
 
     try {
-      if (isSupabaseConfigured()) {
-        const { error } = await supabase.from('gallery_items').delete().in('id', idsToDelete);
-        if (error) throw error;
-        const paths = itemsToDelete.map(i => i.storage_path).filter((p): p is string => Boolean(p));
-        if (paths.length > 0) {
-          await supabase.storage.from('gallery').remove(paths);
+      if (collection === 'trash') {
+        const itemsToDelete = items.filter(i => selectedIds.has(i.id));
+        if (isSupabaseConfigured()) {
+          const { error } = await supabase.from('gallery_items').delete().in('id', idsToDelete);
+          if (error) throw error;
+          const paths = itemsToDelete.map(i => i.storage_path).filter((p): p is string => Boolean(p));
+          if (paths.length > 0) await supabase.storage.from('gallery').remove(paths);
+        } else {
+          idsToDelete.forEach(id => mockBackend.deleteGalleryItem(id, user.id));
         }
+        showToast(`Permanently deleted ${idsToDelete.length} items`, 'info');
       } else {
-        idsToDelete.forEach(id => mockBackend.deleteGalleryItem(id, user.id));
+        if (isSupabaseConfigured()) {
+          const { error } = await supabase.from('gallery_items').update({ deleted_at: new Date().toISOString() }).in('id', idsToDelete);
+          if (error) throw error;
+        } else {
+          setItems(prev => prev.map(i => (idsToDelete.includes(i.id) ? { ...i, deleted_at: new Date().toISOString() } : i)));
+        }
+        showToast(`Moved ${idsToDelete.length} items to Trash`, 'info');
       }
 
-      showToast(`Removed ${idsToDelete.length} photos`, 'info');
       notificationSuccess();
       setSelectedIds(new Set());
       setIsSelectMode(false);
@@ -281,6 +409,17 @@ export const GalleryView: React.FC = () => {
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Delete failed', 'error');
     }
+  };
+
+  const handleBatchFavorite = async () => {
+    if (selectedIds.size === 0) return;
+    lightImpact();
+    const ids = Array.from(selectedIds);
+    setItems(prev => prev.map(i => (ids.includes(i.id) ? { ...i, is_favorite: true } : i)));
+    if (isSupabaseConfigured()) {
+      await supabase.from('gallery_items').update({ is_favorite: true }).in('id', ids);
+    }
+    showToast(`Added ${ids.length} to Favorites`, 'success');
   };
 
   const handleBatchShare = async () => {
@@ -345,7 +484,9 @@ export const GalleryView: React.FC = () => {
     setSelectedIds(new Set());
   });
   useBackHandler(Boolean(selectedItem), () => setSelectedItem(null));
+  useBackHandler(Boolean(openStack), () => setOpenStack(null));
   useBackHandler(uploadModalOpen, () => setUploadModalOpen(false));
+  useBackHandler(searchOpen, () => { setSearchOpen(false); setSearchQuery(''); });
 
   const gridClass =
     density === '1'
@@ -361,6 +502,132 @@ export const GalleryView: React.FC = () => {
       ? 'aspect-[4/5] rounded-xl'
       : 'aspect-square rounded-lg sm:rounded-xl';
 
+  const collections: { id: Collection; label: string; count?: number }[] = [
+    { id: 'photos', label: 'Photos', count: photoCount },
+    { id: 'favorites', label: 'Favorites', count: favoriteCount },
+    { id: 'videos', label: 'Videos', count: videoCount },
+    { id: 'screenshots', label: 'Screenshots' },
+    { id: 'recent', label: 'Recently Added' },
+    { id: 'trash', label: 'Trash', count: trashedItems.length },
+  ];
+
+  const renderTile = (entry: GridEntry) => {
+    if ('isStack' in entry) {
+      const cover = entry.items[0];
+      const isSelected = entry.items.every(i => selectedIds.has(i.id));
+      return (
+        <button
+          key={entry.id}
+          type="button"
+          onClick={() => {
+            if (isSelectMode) {
+              selectionChange();
+              setSelectedIds(prev => {
+                const next = new Set(prev);
+                entry.items.forEach(i => (isSelected ? next.delete(i.id) : next.add(i.id)));
+                return next;
+              });
+            } else {
+              lightImpact();
+              setOpenStack(entry);
+            }
+          }}
+          aria-label={`Burst of ${entry.items.length} photos taken close together`}
+          className={`group relative ${itemAspectClass} overflow-hidden bg-vault-900 border transition-all cursor-pointer p-0 shadow-sm ${
+            isSelected ? 'ring-2 ring-emerald ring-offset-2 ring-offset-vault-950 scale-[0.94] border-emerald' : 'border-vault-800 hover:border-vault-600'
+          }`}
+        >
+          <MediaImage
+            state={urls[cover.id] ?? { status: 'loading' }}
+            alt={cover.caption || 'Burst photo stack'}
+            imgClassName="w-full h-full object-cover"
+            onRetry={() => retry(cover.storage_path)}
+            compact
+          />
+          <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold">
+            <Layers className="w-3 h-3" aria-hidden />
+            {entry.items.length}
+          </div>
+          {isSelectMode && (
+            <div className="absolute top-1.5 left-1.5 z-10">
+              {isSelected ? (
+                <div className="w-6 h-6 rounded-full bg-emerald text-vault-950 flex items-center justify-center shadow-md">
+                  <Check className="w-4 h-4 stroke-[3]" />
+                </div>
+              ) : (
+                <div className="w-6 h-6 rounded-full border-2 border-white/60 bg-black/40 backdrop-blur-sm shadow-md" />
+              )}
+            </div>
+          )}
+        </button>
+      );
+    }
+
+    const item = entry;
+    const isSelected = selectedIds.has(item.id);
+    return (
+      <button
+        key={item.id}
+        data-gallery-id={item.id}
+        type="button"
+        onPointerDown={() => {
+          if (isSelectMode) {
+            isDraggingSelectionRef.current = true;
+            dragSelectionStartIdRef.current = item.id;
+            toggleItemSelection(item.id);
+          }
+        }}
+        onClick={() => {
+          if (!isSelectMode) {
+            lightImpact();
+            setSelectedItem(item);
+          }
+        }}
+        aria-label={item.caption || 'Open photo'}
+        aria-selected={isSelected}
+        className={`group relative ${itemAspectClass} overflow-hidden bg-vault-900 border transition-all cursor-pointer p-0 shadow-sm ${
+          isSelected
+            ? 'ring-2 ring-emerald ring-offset-2 ring-offset-vault-950 scale-[0.94] border-emerald'
+            : 'border-vault-800 hover:border-vault-600'
+        }`}
+      >
+        <MediaImage
+          state={urls[item.id] ?? { status: 'loading' }}
+          alt={item.caption || 'Gallery photo'}
+          imgClassName={`w-full h-full object-cover transition-transform duration-300 ${
+            isSelected ? 'brightness-90' : 'group-hover:scale-105'
+          }`}
+          onRetry={() => retry(item.storage_path)}
+          compact
+        />
+
+        {item.is_favorite && (
+          <div className="absolute top-1.5 right-1.5 z-10">
+            <Heart className="w-4 h-4 text-rose-400 fill-rose-400 drop-shadow" aria-label="Favorite" />
+          </div>
+        )}
+
+        {isSelectMode && (
+          <div className="absolute top-2 left-2 z-10">
+            {isSelected ? (
+              <div className="w-6 h-6 rounded-full bg-emerald text-vault-950 flex items-center justify-center shadow-md animate-spring-pop">
+                <Check className="w-4 h-4 stroke-[3]" />
+              </div>
+            ) : (
+              <div className="w-6 h-6 rounded-full border-2 border-white/60 bg-black/40 backdrop-blur-sm shadow-md" />
+            )}
+          </div>
+        )}
+
+        {density === '1' && item.caption && !isSelectMode && (
+          <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/80 to-transparent text-left">
+            <p className="text-sm font-semibold text-white truncate m-0">{item.caption}</p>
+          </div>
+        )}
+      </button>
+    );
+  };
+
   return (
     <div
       className="relative flex flex-col gap-4 pb-20 animate-fade-in select-none"
@@ -373,12 +640,23 @@ export const GalleryView: React.FC = () => {
           <p className="t-cap c3 mt-0.5">
             {isSelectMode
               ? `${selectedIds.size} selected`
-              : `${items.length} ${items.length === 1 ? 'media item' : 'media items'} in Vault`}
+              : `${liveItems.length} ${liveItems.length === 1 ? 'media item' : 'media items'} in Vault`}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Select Mode Toggle */}
+          {!isSelectMode && !searchOpen && (
+            <button
+              type="button"
+              onClick={() => { lightImpact(); setSearchOpen(true); }}
+              className="ib ib-s rounded-xl"
+              aria-label="Search gallery"
+              title="Search"
+            >
+              <Search className="i" aria-hidden />
+            </button>
+          )}
+
           {items.length > 0 && (
             <button
               type="button"
@@ -397,7 +675,6 @@ export const GalleryView: React.FC = () => {
             </button>
           )}
 
-          {/* Density Switcher */}
           {!isSelectMode && (
             <div className="flex items-center bg-vault-900 border border-vault-800 p-0.5 rounded-xl">
               <button
@@ -453,36 +730,52 @@ export const GalleryView: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter Chips Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1 no-scrollbar" role="tablist" aria-label="Gallery filters">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={filter === 'all'}
-          onClick={() => handleFilterChange('all')}
-          className={`chip ${filter === 'all' ? 'chip-on' : ''}`}
-        >
-          All {items.length > 0 && <span className="opacity-80 font-mono">({items.length})</span>}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={filter === 'photos'}
-          onClick={() => handleFilterChange('photos')}
-          className={`chip ${filter === 'photos' ? 'chip-on' : ''}`}
-        >
-          Photos {photoCount > 0 && <span className="opacity-80 font-mono">({photoCount})</span>}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={filter === 'videos'}
-          onClick={() => handleFilterChange('videos')}
-          className={`chip ${filter === 'videos' ? 'chip-on' : ''}`}
-        >
-          Videos {videoCount > 0 && <span className="opacity-80 font-mono">({videoCount})</span>}
-        </button>
+      {searchOpen && (
+        <div className="flex items-center gap-2 anim-sheet">
+          <label className="search flex-1">
+            <Search className="i i-sm" aria-hidden />
+            <input
+              type="text"
+              autoFocus
+              placeholder="Search captions, dates, favorites, videos…"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="flex-1 min-w-0 bg-transparent border-0 outline-none text-vault-50 text-[15px]"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => { setSearchOpen(false); setSearchQuery(''); }}
+            className="ib ib-s"
+            aria-label="Close search"
+          >
+            <X className="i" aria-hidden />
+          </button>
+        </div>
+      )}
+
+      {/* Collections Bar */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1 no-scrollbar" role="tablist" aria-label="Gallery collections">
+        {collections.map(c => (
+          <button
+            key={c.id}
+            type="button"
+            role="tab"
+            aria-selected={collection === c.id}
+            onClick={() => { selectionChange(); setCollection(c.id); }}
+            className={`chip ${collection === c.id ? 'chip-on' : ''} ${c.id === 'trash' ? '!text-rose-300' : ''}`}
+          >
+            {c.label} {typeof c.count === 'number' && c.count > 0 && <span className="opacity-80 font-mono">({c.count})</span>}
+          </button>
+        ))}
       </div>
+
+      {collection === 'trash' && trashedItems.length > 0 && (
+        <p className="t-cap c3 -mt-2 flex items-center gap-1.5">
+          <AlertCircle className="w-3 h-3" aria-hidden />
+          Items in Trash are permanently deleted after 30 days.
+        </p>
+      )}
 
       {/* Gallery Content with Sticky Timeline Headers */}
       {loading && items.length === 0 ? (
@@ -503,18 +796,22 @@ export const GalleryView: React.FC = () => {
             <span>Try again</span>
           </button>
         </div>
-      ) : filteredItems.length === 0 ? (
+      ) : searchedItems.length === 0 ? (
         <div className="card p-8 flex flex-col items-center justify-center text-center gap-3">
           <div className="w-16 h-16 rounded-2xl bg-vault-850 border border-vault-700 flex items-center justify-center text-vault-400">
-            <ImageIcon className="w-8 h-8" aria-hidden />
+            {collection === 'trash' ? <Trash2 className="w-8 h-8" aria-hidden /> : <ImageIcon className="w-8 h-8" aria-hidden />}
           </div>
-          <h2 className="t-h2 m-0">No media found</h2>
+          <h2 className="t-h2 m-0">
+            {searchOpen && searchQuery ? 'No matches' : collection === 'trash' ? 'Trash is empty' : 'No media found'}
+          </h2>
           <p className="t-sm c2 max-w-xs m-0">
-            {filter === 'all'
+            {searchOpen && searchQuery
+              ? 'Try a different search term.'
+              : collection === 'photos'
               ? 'Use the Camera tab or tap Add Media to build your personal photo library.'
-              : `No items found matching the "${filter}" filter.`}
+              : `No items in ${collections.find(c => c.id === collection)?.label}.`}
           </p>
-          {filter === 'all' && (
+          {collection === 'photos' && !searchQuery && (
             <button
               type="button"
               onClick={() => {
@@ -535,83 +832,24 @@ export const GalleryView: React.FC = () => {
           onPointerUp={() => { isDraggingSelectionRef.current = false; }}
           onPointerCancel={() => { isDraggingSelectionRef.current = false; }}
         >
-          {Object.entries(groupedItems).map(([periodLabel, periodItems]) => (
-            <section key={periodLabel} className="flex flex-col gap-2">
-              {/* Sticky Frosted Header */}
-              <div className="sticky top-0 z-10 glass-header px-3 py-2 rounded-xl flex items-center justify-between mb-1 shadow-sm">
-                <h2 className="t-over font-bold text-vault-200 tracking-wider m-0">{periodLabel}</h2>
-                <span className="text-[11px] font-mono text-vault-400">{periodItems.length} items</span>
+          {groupedByMonth.map(({ monthLabel, days }) => (
+            <section key={monthLabel} className="flex flex-col gap-4">
+              <div className="sticky top-0 z-10 glass-header px-3 py-2 rounded-xl flex items-center justify-between shadow-sm">
+                <h2 className="t-over font-bold text-vault-200 tracking-wider m-0">{monthLabel}</h2>
               </div>
-
-              <div className={gridClass}>
-                {periodItems.map(item => {
-                  const isSelected = selectedIds.has(item.id);
-
-                  return (
-                    <button
-                      key={item.id}
-                      data-gallery-id={item.id}
-                      type="button"
-                      onPointerDown={() => {
-                        if (isSelectMode) {
-                          isDraggingSelectionRef.current = true;
-                          dragSelectionStartIdRef.current = item.id;
-                          toggleItemSelection(item.id);
-                        }
-                      }}
-                      onClick={() => {
-                        if (!isSelectMode) {
-                          lightImpact();
-                          setSelectedItem(item);
-                        }
-                      }}
-                      aria-label={item.caption || 'Open photo'}
-                      aria-selected={isSelected}
-                      className={`group relative ${itemAspectClass} overflow-hidden bg-vault-900 border transition-all cursor-pointer p-0 shadow-sm ${
-                        isSelected
-                          ? 'ring-2 ring-emerald ring-offset-2 ring-offset-vault-950 scale-[0.94] border-emerald'
-                          : 'border-vault-800 hover:border-vault-600'
-                      }`}
-                    >
-                      <MediaImage
-                        state={urls[item.id] ?? { status: 'loading' }}
-                        alt={item.caption || 'Gallery photo'}
-                        imgClassName={`w-full h-full object-cover transition-transform duration-300 ${
-                          isSelected ? 'brightness-90' : 'group-hover:scale-105'
-                        }`}
-                        onRetry={() => retry(item.storage_path)}
-                        compact
-                      />
-
-                      {/* Select Mode Check Badge */}
-                      {isSelectMode && (
-                        <div className="absolute top-2 right-2 z-10">
-                          {isSelected ? (
-                            <div className="w-6 h-6 rounded-full bg-emerald text-vault-950 flex items-center justify-center shadow-md animate-spring-pop">
-                              <Check className="w-4 h-4 stroke-[3]" />
-                            </div>
-                          ) : (
-                            <div className="w-6 h-6 rounded-full border-2 border-white/60 bg-black/40 backdrop-blur-sm shadow-md" />
-                          )}
-                        </div>
-                      )}
-
-                      {density === '1' && item.caption && !isSelectMode && (
-                        <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/80 to-transparent text-left">
-                          <p className="text-sm font-semibold text-white truncate m-0">{item.caption}</p>
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+              {days.map(({ dayLabel, entries }) => (
+                <div key={dayLabel} className="flex flex-col gap-2">
+                  <h3 className="t-cap text-vault-400 font-semibold px-1 m-0">{dayLabel}</h3>
+                  <div className={gridClass}>{entries.map(renderTile)}</div>
+                </div>
+              ))}
             </section>
           ))}
         </div>
       )}
 
       {/* Fast-Scroll Timeline Scrubber (Right Edge) */}
-      {filteredItems.length > 6 && !isSelectMode && (
+      {searchedItems.length > 6 && !isSelectMode && (
         <div
           ref={scrubberTrackRef}
           onTouchStart={handleScrubberTouchStart}
@@ -632,7 +870,6 @@ export const GalleryView: React.FC = () => {
             />
           </div>
 
-          {/* Floating Frosted Date Pill */}
           {isScrubbing && scrubberPeriod && (
             <div className="absolute right-10 top-1/2 -translate-y-1/2 glass-pill px-4 py-2 rounded-2xl text-xs font-bold text-white shadow-2xl flex items-center gap-2 whitespace-nowrap anim-spring-pop">
               <span className="w-2 h-2 rounded-full bg-emerald animate-pulse" />
@@ -651,10 +888,21 @@ export const GalleryView: React.FC = () => {
             className="btn btn-g btn-sm text-xs gap-1.5 text-vault-200"
           >
             <CheckSquare className="w-4 h-4" />
-            <span>{selectedIds.size === filteredItems.length ? 'Deselect All' : 'Select All'}</span>
+            <span>{selectedIds.size === searchedItems.length ? 'Deselect All' : 'Select All'}</span>
           </button>
 
           <div className="flex items-center gap-1.5">
+            {collection !== 'trash' && (
+              <button
+                type="button"
+                onClick={() => void handleBatchFavorite()}
+                className="ib ib-s rounded-xl !w-10 !h-10 text-vault-200 hover:text-white"
+                title="Add to Favorites"
+                aria-label="Add to Favorites"
+              >
+                <Heart className="w-4 h-4" />
+              </button>
+            )}
             <button
               type="button"
               onClick={handleBatchDownload}
@@ -677,8 +925,8 @@ export const GalleryView: React.FC = () => {
               type="button"
               onClick={() => setConfirmBatchDelete(true)}
               className="ib ib-s rounded-xl !w-10 !h-10 !text-rose-400 hover:!bg-rose-950/40"
-              title="Delete selected"
-              aria-label="Delete selected"
+              title={collection === 'trash' ? 'Delete forever' : 'Move to Trash'}
+              aria-label={collection === 'trash' ? 'Delete forever' : 'Move to Trash'}
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -702,9 +950,13 @@ export const GalleryView: React.FC = () => {
               <Trash2 className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="t-h3 font-bold text-white m-0">Delete {selectedIds.size} items?</h3>
+              <h3 className="t-h3 font-bold text-white m-0">
+                {collection === 'trash' ? `Delete ${selectedIds.size} items forever?` : `Move ${selectedIds.size} items to Trash?`}
+              </h3>
               <p className="text-xs text-vault-400 mt-1.5 m-0">
-                These photos will be permanently removed from your personal vault.
+                {collection === 'trash'
+                  ? 'This cannot be undone.'
+                  : 'You can restore these from Trash within 30 days.'}
               </p>
             </div>
             <div className="flex gap-2">
@@ -720,8 +972,51 @@ export const GalleryView: React.FC = () => {
                 onClick={handleBatchDelete}
                 className="btn btn-d flex-1 btn-sm"
               >
-                Delete
+                {collection === 'trash' ? 'Delete Forever' : 'Move to Trash'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Burst Stack Viewer */}
+      {openStack && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Burst photo stack"
+          className="fixed inset-0 z-50 bg-vault-950 flex flex-col anim-fade"
+        >
+          <div className="flex items-center justify-between p-4 border-b border-vault-800 shrink-0">
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-emerald" aria-hidden />
+              <h2 className="t-h3 m-0">Burst · {openStack.items.length} photos</h2>
+            </div>
+            <button type="button" onClick={() => setOpenStack(null)} className="ib ib-s" aria-label="Close stack">
+              <X className="i" aria-hidden />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3">
+            <div className="grid grid-cols-3 gap-1.5">
+              {openStack.items.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => { setOpenStack(null); setSelectedItem(item); }}
+                  className="relative aspect-square overflow-hidden rounded-lg bg-vault-900 border border-vault-800"
+                >
+                  <MediaImage
+                    state={urls[item.id] ?? { status: 'loading' }}
+                    alt={item.caption || 'Burst photo'}
+                    imgClassName="w-full h-full object-cover"
+                    onRetry={() => retry(item.storage_path)}
+                    compact
+                  />
+                  {item.is_favorite && (
+                    <Heart className="absolute top-1 right-1 w-3.5 h-3.5 text-rose-400 fill-rose-400 drop-shadow" />
+                  )}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -733,7 +1028,9 @@ export const GalleryView: React.FC = () => {
         mediaState={selectedItem ? urls[selectedItem.id] ?? { status: 'loading' } : undefined}
         onRetry={selectedItem ? () => retry(selectedItem.storage_path) : undefined}
         onClose={() => setSelectedItem(null)}
-        onDelete={handleDelete}
+        onDelete={handleLightboxDelete}
+        onToggleFavorite={toggleFavorite}
+        onRestore={collection === 'trash' ? restoreFromTrash : undefined}
       />
 
       {/* Upload Bottom Sheet */}
@@ -742,6 +1039,26 @@ export const GalleryView: React.FC = () => {
         onClose={() => setUploadModalOpen(false)}
         onUploadSuccess={loadGallery}
       />
+
+      {/* Restore-from-trash quick action while browsing the grid in select mode */}
+      {collection === 'trash' && isSelectMode && selectedIds.size > 0 && (
+        <button
+          type="button"
+          onClick={() => {
+            const ids = Array.from(selectedIds);
+            ids.forEach(id => {
+              const item = items.find(i => i.id === id);
+              if (item) restoreFromTrash(item);
+            });
+            setSelectedIds(new Set());
+            setIsSelectMode(false);
+          }}
+          className="fixed inset-x-4 bottom-36 z-40 max-w-md mx-auto btn btn-p btn-block gap-2 shadow-2xl"
+        >
+          <Undo2 className="w-4 h-4" aria-hidden />
+          Restore {selectedIds.size} item{selectedIds.size === 1 ? '' : 's'}
+        </button>
+      )}
     </div>
   );
 };

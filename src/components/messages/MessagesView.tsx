@@ -10,6 +10,10 @@ import {
   Pin,
   PinOff,
   Timer,
+  Bell,
+  BellOff,
+  Trash2,
+  MailOpen,
 } from 'lucide-react';
 import { ConversationItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -65,7 +69,34 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const { showToast } = useToast();
   const [pinTarget, setPinTarget] = useState<ConversationItem | null>(null);
+  const [swipedId, setSwipedId] = useState<string | null>(null);
+  const swipeRef = useRef<{ id: string; startX: number; startY: number; dx: number; locked: 'x' | 'y' | null } | null>(null);
   const presence = usePresence(conversations.map(c => c.partner.id));
+
+  const handleRowTouchStart = (e: React.TouchEvent, id: string) => {
+    const t = e.touches[0];
+    swipeRef.current = { id, startX: t.clientX, startY: t.clientY, dx: 0, locked: null };
+  };
+  const handleRowTouchMove = (e: React.TouchEvent) => {
+    const s = swipeRef.current;
+    if (!s) return;
+    const t = e.touches[0];
+    const dx = t.clientX - s.startX;
+    const dy = t.clientY - s.startY;
+    if (!s.locked) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      s.locked = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    }
+    if (s.locked !== 'x') return;
+    s.dx = dx;
+  };
+  const handleRowTouchEnd = () => {
+    const s = swipeRef.current;
+    swipeRef.current = null;
+    if (!s || s.locked !== 'x') return;
+    if (s.dx < -40) setSwipedId(s.id);
+    else if (s.dx > 40 && swipedId === s.id) setSwipedId(null);
+  };
 
   // The parent passes an inline callback. Keeping it in a ref stops every parent re-render from
   // changing loadConversations, which would re-run the realtime effect (unsubscribe/resubscribe).
@@ -115,6 +146,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           last_message_is_read: boolean | null;
           unread_count: number;
           pinned_at: string | null;
+          muted_at: string | null;
           disappear_after_seconds: number | null;
         }[];
 
@@ -156,6 +188,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 : undefined,
               unreadCount: r.unread_count,
               pinnedAt: r.pinned_at,
+              mutedAt: r.muted_at,
               disappearAfterSeconds: r.disappear_after_seconds,
             };
           });
@@ -333,6 +366,42 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     void loadConversations();
   };
 
+  const toggleMute = async (c: ConversationItem) => {
+    setPinTarget(null);
+    setSwipedId(null);
+    const mute = !c.mutedAt;
+    const { error } = await supabase.rpc('set_chat_muted', { p_conversation_id: c.id, p_muted: mute });
+    if (error) {
+      showToast(error.message || 'Could not update mute', 'error');
+      return;
+    }
+    showToast(mute ? `Muted ${c.partner.display_name}` : 'Chat unmuted', 'success');
+    void loadConversations();
+  };
+
+  const hideConversation = async (c: ConversationItem) => {
+    setPinTarget(null);
+    setSwipedId(null);
+    if (activeConversation?.id === c.id) setActiveConversation(null);
+    const { error } = await supabase.rpc('set_chat_hidden', { p_conversation_id: c.id, p_hidden: true });
+    if (error) {
+      showToast(error.message || 'Could not delete chat', 'error');
+      return;
+    }
+    showToast('Chat deleted', 'success');
+    void loadConversations();
+  };
+
+  const markUnread = async (c: ConversationItem) => {
+    setPinTarget(null);
+    const { error } = await supabase.rpc('mark_conversation_unread', { p_conversation_id: c.id });
+    if (error) {
+      showToast(error.message || 'Could not mark as unread', 'error');
+      return;
+    }
+    void loadConversations();
+  };
+
   const filteredConversations = conversations.filter(c => {
     const q = searchQuery.toLowerCase();
     return (
@@ -407,20 +476,49 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               const unread = c.unreadCount > 0;
               const preview = previewText(c.lastMessage?.content);
               const time = c.lastMessage ? formatTimestamp(c.lastMessage.created_at) : '';
+              const isSwiped = swipedId === c.id;
               return (
-                <li key={c.id} className="relative group">
+                <li key={c.id} className="relative group overflow-hidden rounded-xl">
+                  {isSupabaseConfigured() && (
+                    <div className="absolute inset-y-0 right-0 flex items-stretch" aria-hidden={!isSwiped}>
+                      <button
+                        type="button"
+                        tabIndex={isSwiped ? 0 : -1}
+                        onClick={() => void toggleMute(c)}
+                        className="w-[52px] flex flex-col items-center justify-center gap-0.5 bg-amber-600/90 text-white text-[10px] font-medium"
+                        aria-label={c.mutedAt ? `Unmute ${c.partner.display_name}` : `Mute ${c.partner.display_name}`}
+                      >
+                        {c.mutedAt ? <Bell className="w-4 h-4" aria-hidden /> : <BellOff className="w-4 h-4" aria-hidden />}
+                        {c.mutedAt ? 'Unmute' : 'Mute'}
+                      </button>
+                      <button
+                        type="button"
+                        tabIndex={isSwiped ? 0 : -1}
+                        onClick={() => void hideConversation(c)}
+                        className="w-[52px] flex flex-col items-center justify-center gap-0.5 bg-rose-600/90 text-white text-[10px] font-medium"
+                        aria-label={`Delete ${c.partner.display_name}`}
+                      >
+                        <Trash2 className="w-4 h-4" aria-hidden />
+                        Delete
+                      </button>
+                    </div>
+                  )}
                   <button
                     type="button"
-                    onClick={() => handleStartDirectChat(c.partner, c.id)}
+                    onClick={() => (isSwiped ? setSwipedId(null) : handleStartDirectChat(c.partner, c.id))}
                     onContextMenu={e => {
                       if (!isSupabaseConfigured()) return;
                       e.preventDefault();
                       setPinTarget(c);
                     }}
+                    onTouchStart={e => handleRowTouchStart(e, c.id)}
+                    onTouchMove={handleRowTouchMove}
+                    onTouchEnd={handleRowTouchEnd}
                     aria-current={isSelected ? 'true' : undefined}
                     aria-label={`${c.partner.display_name}. ${preview}. ${time}${unread ? `. ${c.unreadCount} unread` : ''}`}
-                    className={`row w-full text-left p-2.5 rounded-xl transition-colors ${
-                      isSelected ? 'bg-vault-850 border border-vault-750' : 'hover:bg-vault-900 border border-transparent'
+                    style={{ transform: isSwiped ? 'translateX(-104px)' : 'translateX(0)' }}
+                    className={`row relative w-full text-left p-2.5 rounded-xl transition-transform duration-200 ease-out ${
+                      isSelected ? 'bg-vault-850 border border-vault-750' : 'bg-vault-950 hover:bg-vault-900 border border-transparent'
                     }`}
                   >
                     <Avatar
@@ -435,6 +533,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                         <span className="t-body font-bold text-white truncate flex items-center gap-1 min-w-0">
                           <span className="truncate">{c.partner.display_name}</span>
                           {c.pinnedAt && <Pin className="w-3 h-3 text-emerald shrink-0" aria-label="Pinned" />}
+                          {c.mutedAt && <BellOff className="w-3 h-3 text-vault-500 shrink-0" aria-label="Muted" />}
                           {c.disappearAfterSeconds ? <Timer className="w-3 h-3 text-vault-400 shrink-0" aria-label="Disappearing messages on" /> : null}
                         </span>
                         <span className={`t-cap mono whitespace-nowrap text-[11px] ${unread ? 'cem' : 'c3'}`}>{time}</span>
@@ -499,6 +598,30 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         >
           {pinTarget.pinnedAt ? <PinOff className="w-4 h-4" aria-hidden /> : <Pin className="w-4 h-4" aria-hidden />}
           {pinTarget.pinnedAt ? 'Unpin chat' : 'Pin to top'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void toggleMute(pinTarget)}
+          className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+        >
+          {pinTarget.mutedAt ? <Bell className="w-4 h-4" aria-hidden /> : <BellOff className="w-4 h-4" aria-hidden />}
+          {pinTarget.mutedAt ? 'Unmute chat' : 'Mute chat'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void markUnread(pinTarget)}
+          className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-white hover:bg-vault-800 rounded-xl"
+        >
+          <MailOpen className="w-4 h-4" aria-hidden />
+          Mark as unread
+        </button>
+        <button
+          type="button"
+          onClick={() => void hideConversation(pinTarget)}
+          className="w-full flex items-center gap-3 px-4 min-h-[48px] text-sm text-rose-400 hover:bg-vault-800 rounded-xl"
+        >
+          <Trash2 className="w-4 h-4" aria-hidden />
+          Delete chat
         </button>
       </div>
     </div>

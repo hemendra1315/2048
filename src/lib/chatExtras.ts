@@ -91,17 +91,23 @@ export interface VoiceNote {
   levels: number[] | null;
   url: string;
   isViewOnce?: boolean;
+  isAllowReplay?: boolean;
 }
 
 export const parseVoiceNote = (content: string): VoiceNote | undefined => {
   const isViewOnce = content.startsWith('[VOICE_NOTE:VIEW_ONCE:');
-  const normalized = isViewOnce ? content.replace('[VOICE_NOTE:VIEW_ONCE:', '[VOICE_NOTE:') : content;
+  const isAllowReplay = !isViewOnce && content.startsWith('[VOICE_NOTE:ALLOW_REPLAY:');
+  const normalized = isViewOnce
+    ? content.replace('[VOICE_NOTE:VIEW_ONCE:', '[VOICE_NOTE:')
+    : isAllowReplay
+      ? content.replace('[VOICE_NOTE:ALLOW_REPLAY:', '[VOICE_NOTE:')
+      : content;
   const m = normalized.match(/^\[VOICE_NOTE:([^|\]]*)(?:\|w=([0-9a-z]+))?\](.*)$/);
   if (!m) return undefined;
   const levels = m[2] ? [...m[2]].map(c => parseInt(c, 36) / 35) : null;
-  return isViewOnce
-    ? { duration: m[1] || '0:00', levels, url: m[3], isViewOnce: true }
-    : { duration: m[1] || '0:00', levels, url: m[3] };
+  if (isViewOnce) return { duration: m[1] || '0:00', levels, url: m[3], isViewOnce: true };
+  if (isAllowReplay) return { duration: m[1] || '0:00', levels, url: m[3], isAllowReplay: true };
+  return { duration: m[1] || '0:00', levels, url: m[3] };
 };
 
 export const WAVEFORM_BARS = 32;
@@ -170,9 +176,11 @@ export function readableMessagePreview(content: string): string {
   const extra = extraPreview(content);
   if (extra) return extra;
   if (content.startsWith('[IMAGE:VIEW_ONCE]') || content.startsWith('[IMAGE:view_once]')) return '1 View once photo';
+  if (content.startsWith('[IMAGE:ALLOW_REPLAY]')) return 'Photo · Allow Replay';
   if (content.startsWith('[IMAGE:SPOILER]') || content.startsWith('[IMAGE:spoiler]')) return '📷 Sensitive photo';
   if (content.startsWith('[IMAGE]')) return '📷 Photo';
   if (content.startsWith('[VOICE_NOTE:VIEW_ONCE')) return '1 View once voice message';
+  if (content.startsWith('[VOICE_NOTE:ALLOW_REPLAY')) return 'Voice message · Allow Replay';
   if (content.startsWith('[VOICE_NOTE')) return '🎤 Voice message';
   return content;
 }
@@ -183,6 +191,15 @@ export function isViewOnceContent(content: string): boolean {
     content.startsWith('[IMAGE:view_once]') ||
     content.startsWith('[VOICE_NOTE:VIEW_ONCE')
   );
+}
+
+export function isAllowReplayContent(content: string): boolean {
+  return content.startsWith('[IMAGE:ALLOW_REPLAY]') || content.startsWith('[VOICE_NOTE:ALLOW_REPLAY');
+}
+
+/** True for any ephemeral (view-once or allow-replay) media tag — i.e. not "keep in chat". */
+export function isEphemeralContent(content: string): boolean {
+  return isViewOnceContent(content) || isAllowReplayContent(content);
 }
 
 export function isSpoilerContent(content: string): boolean {

@@ -32,3 +32,34 @@ assert.equal(extras.readableMessagePreview('[IMAGE]https://...'), '📷 Photo');
 assert.equal(extras.readableMessagePreview('[VOICE_NOTE:0:10]https://...'), '🎤 Voice message');
 
 console.log('View Once unit tests passed');
+
+// -----------------------------------------------------------------------------
+// Allow Replay (three-mode ephemeral media): same tag-parsing contract as View
+// Once above, extended for the new ALLOW_REPLAY tag. None of the assertions
+// above were changed to get here.
+// -----------------------------------------------------------------------------
+
+// 4. Parsing Allow Replay photo tags
+assert.equal(extras.isAllowReplayContent('[IMAGE:ALLOW_REPLAY]https://storage/chat-media/conv1/photo.jpg'), true);
+assert.equal(extras.isAllowReplayContent('[IMAGE:VIEW_ONCE]https://storage/chat-media/conv1/photo.jpg'), false);
+assert.equal(extras.isAllowReplayContent('[IMAGE]https://storage/chat-media/conv1/photo.jpg'), false);
+
+// 5. isEphemeralContent covers both modes, and only both modes
+assert.equal(extras.isEphemeralContent('[IMAGE:VIEW_ONCE]https://...'), true);
+assert.equal(extras.isEphemeralContent('[IMAGE:ALLOW_REPLAY]https://...'), true);
+assert.equal(extras.isEphemeralContent('[IMAGE]https://...'), false);
+
+// 6. Parsing Allow Replay voice notes
+const ar = extras.parseVoiceNote('[VOICE_NOTE:ALLOW_REPLAY:0:12|w=0az9]https://storage/chat-media/conv1/voice.webm');
+assert.ok(ar);
+assert.equal(ar.duration, '0:12');
+assert.equal(ar.isAllowReplay, true);
+assert.equal(ar.isViewOnce, undefined);
+assert.equal(ar.url, 'https://storage/chat-media/conv1/voice.webm');
+assert.deepEqual(ar.levels.map(n => Math.round(n * 35)), [0, 10, 35, 9]);
+
+// 7. Readable message previews for Allow Replay
+assert.equal(extras.readableMessagePreview('[IMAGE:ALLOW_REPLAY]https://...'), 'Photo · Allow Replay');
+assert.equal(extras.readableMessagePreview('[VOICE_NOTE:ALLOW_REPLAY:0:10]https://...'), 'Voice message · Allow Replay');
+
+console.log('Allow Replay unit tests passed');

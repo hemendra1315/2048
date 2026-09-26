@@ -228,6 +228,8 @@ export interface ViewOnceImageBubbleProps {
   isOpened: boolean;
   onOpen?: () => void;
   isLoading?: boolean;
+  viewMode?: 'view_once' | 'allow_replay';
+  viewsUsed?: number;
 }
 
 export const ViewOnceImageBubble: React.FC<ViewOnceImageBubbleProps> = ({
@@ -235,7 +237,12 @@ export const ViewOnceImageBubble: React.FC<ViewOnceImageBubbleProps> = ({
   isOpened,
   onOpen,
   isLoading = false,
+  viewMode = 'view_once',
+  viewsUsed = 0,
 }) => {
+  const maxViews = viewMode === 'allow_replay' ? 2 : 1;
+  const label = viewMode === 'allow_replay' ? 'Allow Replay photo' : '1 View once photo';
+
   if (isOpened) {
     return (
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-vault-900/60 border border-white/5 text-vault-400 select-none min-w-[160px]">
@@ -245,7 +252,7 @@ export const ViewOnceImageBubble: React.FC<ViewOnceImageBubbleProps> = ({
         <div className="flex flex-col">
           <span className="text-xs font-semibold text-vault-300">Photo</span>
           <span className="text-[11px] text-vault-500 font-medium flex items-center gap-1">
-            <CheckCheck className="w-3 h-3 text-vault-500" /> Opened
+            <CheckCheck className="w-3 h-3 text-vault-500" /> {viewMode === 'allow_replay' ? 'Replays used' : 'Opened'}
           </span>
         </div>
       </div>
@@ -259,8 +266,8 @@ export const ViewOnceImageBubble: React.FC<ViewOnceImageBubbleProps> = ({
           <EyeOff className="w-4 h-4" />
         </div>
         <div className="flex flex-col">
-          <span className="text-xs font-semibold text-emerald">1 View once photo</span>
-          <span className="text-[11px] opacity-75 font-medium">Sent</span>
+          <span className="text-xs font-semibold text-emerald">{label}</span>
+          <span className="text-[11px] opacity-75 font-medium">{viewsUsed > 0 ? `${viewsUsed}/${maxViews} viewed` : 'Sent'}</span>
         </div>
       </div>
     );
@@ -272,17 +279,17 @@ export const ViewOnceImageBubble: React.FC<ViewOnceImageBubbleProps> = ({
       onClick={onOpen}
       disabled={isLoading}
       className="group flex items-center gap-3 px-3.5 py-2.5 rounded-2xl bg-vault-900/90 hover:bg-vault-850 border border-emerald/30 shadow-lg text-left transition-all active:scale-95 cursor-pointer select-none min-w-[180px]"
-      aria-label="Open view once photo"
+      aria-label={`Open ${viewMode === 'allow_replay' ? 'allow-replay' : 'view once'} photo`}
     >
       <div className="w-9 h-9 rounded-full bg-emerald/20 border border-emerald/50 flex items-center justify-center text-emerald group-hover:scale-105 transition-transform shadow-inner">
         {isLoading ? <Loader2 className="w-4 h-4 animate-spin text-emerald" /> : <EyeOff className="w-4 h-4" />}
       </div>
       <div className="flex flex-col">
         <span className="text-xs font-bold text-white flex items-center gap-1">
-          1 View once photo
+          {label}
         </span>
         <span className="text-[11px] text-emerald font-medium">
-          {isLoading ? 'Opening securely…' : 'Tap to view'}
+          {isLoading ? 'Opening securely…' : viewsUsed > 0 ? `${maxViews - viewsUsed} replay left · Tap to view` : 'Tap to view'}
         </span>
       </div>
     </button>
@@ -298,6 +305,8 @@ export interface ViewOnceAudioBubbleProps {
   onTogglePlay?: () => void;
   isLoading?: boolean;
   playProgress?: number;
+  viewMode?: 'view_once' | 'allow_replay';
+  viewsUsed?: number;
 }
 
 export const ViewOnceAudioBubble: React.FC<ViewOnceAudioBubbleProps> = ({
@@ -309,7 +318,12 @@ export const ViewOnceAudioBubble: React.FC<ViewOnceAudioBubbleProps> = ({
   onTogglePlay,
   isLoading = false,
   playProgress = 0,
+  viewMode = 'view_once',
+  viewsUsed = 0,
 }) => {
+  const maxViews = viewMode === 'allow_replay' ? 2 : 1;
+  const label = viewMode === 'allow_replay' ? 'Allow Replay voice note' : '1 View once voice note';
+
   if (isOpened) {
     return (
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-vault-900/60 border border-white/5 text-vault-400 select-none min-w-[190px]">
@@ -319,7 +333,7 @@ export const ViewOnceAudioBubble: React.FC<ViewOnceAudioBubbleProps> = ({
         <div className="flex flex-col">
           <span className="text-xs font-semibold text-vault-300">Voice message</span>
           <span className="text-[11px] text-vault-500 font-medium flex items-center gap-1">
-            <CheckCheck className="w-3 h-3 text-vault-500" /> Played
+            <CheckCheck className="w-3 h-3 text-vault-500" /> {viewMode === 'allow_replay' ? 'Replays used' : 'Played'}
           </span>
         </div>
       </div>
@@ -333,8 +347,8 @@ export const ViewOnceAudioBubble: React.FC<ViewOnceAudioBubbleProps> = ({
           <EyeOff className="w-4 h-4" />
         </div>
         <div className="flex flex-col">
-          <span className="text-xs font-semibold text-emerald">1 View once voice note</span>
-          <span className="text-[11px] opacity-75 font-medium">{duration} · Sent</span>
+          <span className="text-xs font-semibold text-emerald">{label}</span>
+          <span className="text-[11px] opacity-75 font-medium">{duration} · {viewsUsed > 0 ? `${viewsUsed}/${maxViews} played` : 'Sent'}</span>
         </div>
       </div>
     );
@@ -375,7 +389,8 @@ export const ViewOnceAudioBubble: React.FC<ViewOnceAudioBubbleProps> = ({
         </div>
         <div className="flex items-center justify-between text-[11px] font-mono text-vault-400">
           <span className="text-emerald font-semibold flex items-center gap-1">
-            <EyeOff className="w-3 h-3 inline" /> 1 Play
+            <EyeOff className="w-3 h-3 inline" />
+            {viewsUsed > 0 ? `${maxViews - viewsUsed} play left` : viewMode === 'allow_replay' ? '2 Plays' : '1 Play'}
           </span>
           <span>{duration}</span>
         </div>

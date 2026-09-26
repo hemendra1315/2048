@@ -63,6 +63,7 @@ export interface ConversationItem {
   unreadCount: number;
   isPartnerTyping?: boolean;
   pinnedAt?: string | null;
+  mutedAt?: string | null;
   disappearAfterSeconds?: number | null;
 }
 
@@ -81,10 +82,14 @@ export interface MessageItem {
   deleted_at?: string | null;
   /** Set when the chat has disappearing messages on. */
   expires_at?: string | null;
-  /** Set when the media is one-time ephemeral view. */
+  /** Set when the media is one-time ephemeral view. Kept for back-compat; view_mode is authoritative. */
   is_view_once?: boolean;
-  /** Timestamp when the recipient claimed/opened the View Once media. */
+  /** Timestamp the recipient first claimed/opened the ephemeral media. */
   view_once_opened_at?: string | null;
+  /** Ephemeral media retention mode. Defaults to 'keep_in_chat' server-side. */
+  view_mode?: 'view_once' | 'allow_replay' | 'keep_in_chat';
+  /** Server-authoritative count of successful claims (max 1 for view_once, 2 for allow_replay). */
+  view_count?: number;
   /** Local only: not yet confirmed by the server. */
   status?: 'sending' | 'queued' | 'failed';
 }
@@ -103,6 +108,18 @@ export interface GalleryItem {
   image_url: string;
   storage_path: string;
   caption: string | null;
+  created_at: string;
+  media_type?: string | null;
+  is_favorite?: boolean;
+  deleted_at?: string | null;
+  album_id?: string | null;
+}
+
+export interface GalleryAlbum {
+  id: string;
+  user_id: string;
+  title: string;
+  cover_item_id: string | null;
   created_at: string;
 }
 
