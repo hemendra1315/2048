@@ -286,7 +286,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
       }
       if (Capacitor.isNativePlatform()) {
-        const { BiometricAuth, BiometryError } = await import('@aparajita/capacitor-biometric-auth');
+        const { BiometricAuth } = await import('@aparajita/capacitor-biometric-auth');
         // 1. Check hardware is available
         const check = await BiometricAuth.checkBiometry();
         if (!check.isAvailable) {
