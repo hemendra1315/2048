@@ -1,16 +1,20 @@
 import React, { useState, useEffect, Suspense } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { VaultProvider, useVault } from './context/VaultContext';
 import { GameProvider } from './context/GameContext';
 import { LauncherCoverView } from './components/launcher/LauncherCoverView';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { UpdateAvailableModal } from './components/common/UpdateAvailableModal';
 import { initializeNotificationService, notifyIncomingMessage } from './lib/notifications';
 import { crashReporter } from './lib/crashReporting';
 import { useBackHandler } from './lib/backButton';
 import { FloatingPanicCircle } from './components/common/FloatingPanicCircle';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { getActiveConversationId } from './lib/activeConversation';
+import { getAppUpdateNotice, isVersionNewer, type AppUpdateNotice } from './lib/appUpdateApi';
 
 // Dynamic code splitting for secondary & admin screens
 const AuthModal = React.lazy(() =>
@@ -34,11 +38,45 @@ const MainNavigator: React.FC = () => {
   const { isUnlocked, panicLock, preferences } = useVault();
   const { showToast } = useToast();
   const [adminMode, setAdminMode] = useState(false);
+  const [updateNotice, setUpdateNotice] = useState<AppUpdateNotice | null>(null);
 
   useEffect(() => {
     crashReporter.init();
     void initializeNotificationService();
   }, []);
+
+  // After a successful PIN unlock (and sign-in), check whether an admin has published a
+  // newer APK than the one installed. Native-only: there's no "APK version" concept on web.
+  useEffect(() => {
+    if (!isUnlocked || !user || !Capacitor.isNativePlatform()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [notice, info] = await Promise.all([getAppUpdateNotice(), CapacitorApp.getInfo()]);
+        if (cancelled || !notice) return;
+        if (!isVersionNewer(notice.latest_version, info.version)) return;
+        const dismissedKey = `update_dismissed_${notice.latest_version}`;
+        if (localStorage.getItem(dismissedKey)) return;
+        setUpdateNotice(notice);
+      } catch (err) {
+        console.warn('[app-update] check failed:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isUnlocked, user]);
+
+  const dismissUpdateNotice = () => {
+    if (updateNotice) {
+      try {
+        localStorage.setItem(`update_dismissed_${updateNotice.latest_version}`, '1');
+      } catch {
+        // Ignore storage errors -- worst case the prompt reappears next unlock.
+      }
+    }
+    setUpdateNotice(null);
+  };
 
   // Realtime background listener for incoming custom disguised notifications
   useEffect(() => {
@@ -109,6 +147,7 @@ const MainNavigator: React.FC = () => {
     return (
       <>
         <FloatingPanicCircle />
+        {updateNotice && <UpdateAvailableModal notice={updateNotice} onDismiss={dismissUpdateNotice} />}
         <ErrorBoundary
           name="admin"
           secondaryAction={{ label: 'Back to app', onClick: () => setAdminMode(false) }}
@@ -125,6 +164,7 @@ const MainNavigator: React.FC = () => {
   return (
     <>
       <FloatingPanicCircle />
+      {updateNotice && <UpdateAvailableModal notice={updateNotice} onDismiss={dismissUpdateNotice} />}
       <ErrorBoundary name="social" secondaryAction={{ label: 'Lock and return to cover', onClick: panicLock }}>
         <Suspense fallback={<ViewSkeleton />}>
           <SocialLayout

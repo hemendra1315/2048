@@ -1,15 +1,16 @@
 import React, { useState, useCallback } from 'react';
-import { Users, FolderLock, Image as ImageIcon, ArrowLeft, Shield } from 'lucide-react';
+import { Users, FolderLock, Image as ImageIcon, ArrowLeft, Shield, Rocket } from 'lucide-react';
 import { UserManagement } from './UserManagement';
 import { UserDetailView } from './UserDetailView';
 import { AdminSharedVaultsView } from './AdminSharedVaultsView';
 import { AdminMediaUploadsView } from './AdminMediaUploadsView';
+import { AppUpdateView } from './AppUpdateView';
 import { ConversationViewer } from './ConversationViewer';
 import { UserProfile, MessageItem } from '../../types';
 import { useBackHandler } from '../../lib/backButton';
 import { getUserConversationsForAdmin } from '../../lib/adminApi';
 
-export type AdminTab = 'users' | 'vaults' | 'media';
+export type AdminTab = 'users' | 'vaults' | 'media' | 'updates';
 
 interface AdminLayoutProps {
   onReturnToUserMode: () => void;
@@ -152,6 +153,23 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
           <ImageIcon className="w-4 h-4" />
           <span>Admin Uploads</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('updates');
+            setSelectedUser(null);
+            setDeepLinkedConv(null);
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
+            activeTab === 'updates'
+              ? 'bg-purple-600 text-white shadow-md'
+              : 'text-vault-400 hover:text-vault-200 hover:bg-vault-800/50'
+          }`}
+        >
+          <Rocket className="w-4 h-4" />
+          <span>App Updates</span>
+        </button>
       </nav>
 
       {/* Main Content Area */}
@@ -168,6 +186,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
         )}
 
         {activeTab === 'media' && <AdminMediaUploadsView />}
+
+        {activeTab === 'updates' && <AppUpdateView />}
       </main>
 
       {/* Deep linked Full-Screen DM Viewer */}
