@@ -120,15 +120,20 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
           filter: `conversation_id=eq.${conversationId}`,
         },
         payload => {
-          if (payload.eventType === 'INSERT') {
-            const newItem = payload.new as SharedVaultItem;
-            setItems(prev => [newItem, ...prev.filter(i => i.id !== newItem.id)]);
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = payload.new as SharedVaultItem;
-            setItems(prev => prev.map(i => (i.id === updated.id ? { ...i, ...updated } : i)));
-            if (inspectedItem?.id === updated.id) {
-              setInspectedItem(updated);
-            }
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            // payload.new is the raw DB row -- its media_url is the unusable getPublicUrl()
+            // link listSharedVaultItems() would normally sign before this ever reaches state.
+            // Re-fetching (rather than merging payload.new directly) keeps every item's
+            // media_url properly signed, including for updates the current user's own action
+            // echoes back to them (e.g. a star/move-to-album that just set a correct
+            // optimistic value would otherwise get clobbered by the raw unsigned one here).
+            void listSharedVaultItems(conversationId).then(vaultItems => {
+              setItems(vaultItems);
+              if (payload.eventType === 'UPDATE' && inspectedItem?.id === (payload.new as SharedVaultItem).id) {
+                const fresh = vaultItems.find(i => i.id === (payload.new as SharedVaultItem).id);
+                if (fresh) setInspectedItem(fresh);
+              }
+            });
           } else if (payload.eventType === 'DELETE') {
             const deletedId = (payload.old as { id: string }).id;
             setItems(prev => prev.filter(i => i.id !== deletedId));

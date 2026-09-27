@@ -219,21 +219,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     withErrors('Invalid username or PIN', async () => {
       let profile: UserProfile;
       const cleanId = identifier.trim();
-      const secret = pinToSecret(password);
       if (isSupabaseConfigured()) {
         // All credential checks, lockouts and legacy-account migration happen in vault-auth.
-        try {
-          profile = await adoptSession(await callVaultAuth<AuthResult>('login', { identifier: cleanId, password: secret }));
-        } catch (loginErr) {
-          // Fallback to raw password in case of accounts registered before PIN helper
-          if (secret !== password) {
-            profile = await adoptSession(await callVaultAuth<AuthResult>('login', { identifier: cleanId, password }));
-          } else {
-            throw loginErr;
-          }
-        }
+        // The server itself now tries both the padded-PIN and raw forms in one request (see
+        // handler.ts's login action) -- a client-side retry here would double-count against
+        // the 5-attempt lockout for every real typo, the same bug class already fixed for
+        // vault unlock.
+        profile = await adoptSession(await callVaultAuth<AuthResult>('login', { identifier: cleanId, password }));
       } else if (useMock) {
-        profile = await mockBackend.loginWithPassword(cleanId, secret);
+        profile = await mockBackend.loginWithPassword(cleanId, pinToSecret(password));
         setUser(profile);
       } else {
         throw new Error(NOT_CONFIGURED);

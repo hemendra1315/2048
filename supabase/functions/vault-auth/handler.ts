@@ -62,6 +62,17 @@ export const LIMITS: Record<string, Limit> = {
 
 const USERNAME_RE = /^[a-z0-9_]{2,24}$/;
 
+/** Mirrors src/lib/pinHelper.ts's pinToSecret() exactly -- pads a short PIN to meet Supabase
+ * Auth's minimum password length deterministically. Not a secret transform, just padding. */
+function pinToSecret(pin: string): string {
+  if (!pin) return '';
+  const clean = pin.trim();
+  if (clean.length < 8) {
+    return `GAMES_PIN_${clean}_SECURE`;
+  }
+  return clean;
+}
+
 interface Account {
   user_id: string;
   username: string;
@@ -220,16 +231,33 @@ export function createHandler(deps: { auth: AuthBackend; db: Db; config: Config 
       const bucket = account ? `login:${account.user_id}` : `login:unknown:${identifier.toLowerCase()}`;
       await assertNotLocked(bucket);
 
+      // Try both the padded-PIN and raw forms in ONE request instead of the client retrying
+      // with a second full login call on failure -- a client-side retry here would fire
+      // failAuth() twice per real typo, locking a legitimate user out in ~3 attempts instead
+      // of 5 (and letting an attacker lock out a known username just as cheaply).
+      const candidates = Array.from(new Set([password, pinToSecret(password)].filter(Boolean)));
+
       let session: Session | null = null;
+      let matchedPassword: string | null = null;
       let verified = false;
-      if (account && password) {
+      if (account && candidates.length > 0) {
         if (!account.auth_migrated) {
-          // Pre-Supabase-Auth account: check the legacy hash once, then move it into Supabase Auth.
+          // Pre-Supabase-Auth account: auth_check_legacy_password already tries both forms
+          // server-side in one call (see migration 20260927123539).
           verified = await db.rpc<boolean>('auth_check_legacy_password', { p_user_id: account.user_id, p_password: password });
-          if (verified) await ensureAuthUser(account.user_id, password);
+          if (verified) {
+            matchedPassword = password;
+            await ensureAuthUser(account.user_id, password);
+          }
         } else {
-          session = await auth.passwordSignIn(emailFor(account.user_id), password);
-          verified = session !== null;
+          for (const candidate of candidates) {
+            session = await auth.passwordSignIn(emailFor(account.user_id), candidate);
+            if (session) {
+              matchedPassword = candidate;
+              verified = true;
+              break;
+            }
+          }
         }
       }
       if (!account || !verified) {
@@ -237,7 +265,7 @@ export function createHandler(deps: { auth: AuthBackend; db: Db; config: Config 
       }
       await clear(bucket);
       assertActiveStatus(account.status);
-      session ??= await auth.passwordSignIn(emailFor(account.user_id), password);
+      session ??= await auth.passwordSignIn(emailFor(account.user_id), matchedPassword as string);
       if (!session) throw new HttpError(500, 'session_failed', 'Could not start a session');
       await db.rpc('auth_touch_login', { p_user_id: account.user_id });
       return { session, profile: await profileOf(account.user_id) };
