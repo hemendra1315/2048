@@ -6,6 +6,7 @@ import { signOutAndReleasePush } from '../lib/notifications';
 import { useToast } from './ToastContext';
 import { BiometricService, ServerCreationOptions, ServerRequestOptions } from '../lib/biometrics';
 import { pinToSecret } from '../lib/pinHelper';
+import { Capacitor } from '@capacitor/core';
 
 export interface RegisterParams {
   username: string;
@@ -57,7 +58,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const useMock = isMockBackendAllowed();
 
   useEffect(() => {
-    BiometricService.isAvailable().then(res => setIsBiometricsSupported(res.available));
+    if (Capacitor.isNativePlatform()) {
+      import('@aparajita/capacitor-biometric-auth').then(({ BiometricAuth }) => {
+        BiometricAuth.checkBiometry().then(result => {
+          setIsBiometricsSupported(result.isAvailable);
+        }).catch(() => setIsBiometricsSupported(false));
+      }).catch(() => setIsBiometricsSupported(false));
+    } else {
+      BiometricService.isAvailable().then(res => setIsBiometricsSupported(res.available));
+    }
   }, []);
 
   /**
@@ -236,7 +245,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const loginWithBiometrics = (identifier?: string) =>
     withErrors('Fingerprint login failed', async () => {
       let profile: UserProfile;
-      if (isSupabaseConfigured()) {
+      if (isSupabaseConfigured() && Capacitor.isNativePlatform()) {
+        // Native biometric: verify fingerprint/face locally, then re-use stored session
+        const { BiometricAuth } = await import('@aparajita/capacitor-biometric-auth');
+        const check = await BiometricAuth.checkBiometry();
+        if (!check.isAvailable) throw new Error('No biometric hardware available on this device');
+        await BiometricAuth.authenticate({
+          reason: 'Verify your identity to unlock',
+          cancelTitle: 'Cancel',
+          allowDeviceCredential: false,
+        });
+        // Biometric passed – reload existing session
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error('No active session. Please sign in with your PIN first.');
+        const loadedProfile = await loadProfile(session.user.id, true);
+        if (!loadedProfile) throw new Error('Could not load profile');
+        profile = loadedProfile;
+      } else if (isSupabaseConfigured()) {
+        // Web fallback: WebAuthn
         const options = await callVaultAuth<{ publicKey: ServerRequestOptions }>('webauthn-login-options', {
           identifier: identifier?.trim() || undefined,
         });
@@ -259,6 +285,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setUser(mockBackend.updateProfile(user.id, { biometric_enabled: true }));
         return;
       }
+      if (Capacitor.isNativePlatform()) {
+        // Native biometric enrollment: just verify fingerprint works, then mark enabled in DB
+        const { BiometricAuth } = await import('@aparajita/capacitor-biometric-auth');
+        const check = await BiometricAuth.checkBiometry();
+        if (!check.isAvailable) {
+          throw new Error('No biometric hardware found on this device. Enable fingerprint/face in your phone settings first.');
+        }
+        // Ask user to confirm their fingerprint/face once to "enroll"
+        await BiometricAuth.authenticate({
+          reason: 'Confirm fingerprint to enable biometric unlock',
+          cancelTitle: 'Cancel',
+          allowDeviceCredential: false,
+        });
+        // Mark biometric_enabled in DB via RPC
+        const { data, error } = await supabase.rpc('update_my_profile', { p_enable_biometrics: true });
+        if (error) {
+          // RPC might not exist yet – update profile column directly
+          const { data: d2, error: e2 } = await supabase.from('profiles').update({ biometric_enabled: true }).eq('id', user!.id).select().single();
+          if (e2) throw e2;
+          BiometricService.setLocalEnrollment(true);
+          setUser(d2 as unknown as UserProfile);
+        } else {
+          BiometricService.setLocalEnrollment(true);
+          setUser(data as unknown as UserProfile);
+        }
+        showToast('Fingerprint unlock enabled ✓', 'success');
+        return;
+      }
+      // Web: original WebAuthn flow
       const options = await callVaultAuth<{ publicKey: ServerCreationOptions }>('webauthn-register-options');
       const credential = await BiometricService.createCredential(options.publicKey);
       const res = await callVaultAuth<{ profile: UserProfile }>('webauthn-register-verify', { credential });
@@ -275,9 +330,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
       }
       const { data, error } = await supabase.rpc('update_my_profile', { p_disable_biometrics: true });
-      if (error) throw error;
-      BiometricService.setLocalEnrollment(false);
-      setUser(data as unknown as UserProfile);
+      if (error) {
+        // Fallback direct update
+        const { data: d2, error: e2 } = await supabase.from('profiles').update({ biometric_enabled: false }).eq('id', user!.id).select().single();
+        if (e2) throw e2;
+        BiometricService.setLocalEnrollment(false);
+        setUser(d2 as unknown as UserProfile);
+      } else {
+        BiometricService.setLocalEnrollment(false);
+        setUser(data as unknown as UserProfile);
+      }
       showToast('Fingerprint unlock turned off', 'info');
     });
 
