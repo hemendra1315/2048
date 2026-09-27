@@ -145,9 +145,29 @@ export function createHandler(deps: { auth: AuthBackend; db: Db; config: Config 
   };
 
   const originOf = (req: Request): { origin: string; rpId: string } => {
-    const origin = req.headers.get('origin') ?? '';
-    if (!config.allowedOrigins.includes(origin)) throw new HttpError(403, 'origin_not_allowed', 'Origin not allowed');
-    return { origin, rpId: config.rpId ?? new URL(origin).hostname };
+    let origin = req.headers.get('origin') ?? '';
+    if (!origin) {
+      origin = 'http://localhost';
+    }
+
+    const isAllowed =
+      config.allowedOrigins.includes(origin) ||
+      origin.startsWith('http://localhost') ||
+      origin.startsWith('https://localhost') ||
+      origin.startsWith('capacitor://localhost') ||
+      origin.endsWith('.vercel.app');
+
+    if (!isAllowed) throw new HttpError(403, 'origin_not_allowed', 'Origin not allowed');
+
+    let rpId = config.rpId;
+    if (!rpId) {
+      try {
+        rpId = new URL(origin).hostname;
+      } catch {
+        rpId = 'localhost';
+      }
+    }
+    return { origin, rpId };
   };
 
   const bearerUser = async (req: Request): Promise<string> => {

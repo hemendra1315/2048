@@ -5,10 +5,11 @@ import { VaultProvider, useVault } from './context/VaultContext';
 import { GameProvider } from './context/GameContext';
 import { LauncherCoverView } from './components/launcher/LauncherCoverView';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
-import { initializeNotificationService } from './lib/notifications';
+import { initializeNotificationService, notifyIncomingMessage } from './lib/notifications';
 import { crashReporter } from './lib/crashReporting';
 import { useBackHandler } from './lib/backButton';
 import { FloatingPanicCircle } from './components/common/FloatingPanicCircle';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
 
 // Dynamic code splitting for secondary & admin screens
 const AuthModal = React.lazy(() =>
@@ -29,7 +30,7 @@ const ViewSkeleton: React.FC = () => (
 
 const MainNavigator: React.FC = () => {
   const { user, isSuperAdmin, recoveryCodeToShow } = useAuth();
-  const { isUnlocked, panicLock } = useVault();
+  const { isUnlocked, panicLock, preferences } = useVault();
   const { showToast } = useToast();
   const [adminMode, setAdminMode] = useState(false);
 
@@ -37,6 +38,34 @@ const MainNavigator: React.FC = () => {
     crashReporter.init();
     void initializeNotificationService();
   }, []);
+
+  // Realtime background listener for incoming custom disguised notifications
+  useEffect(() => {
+    if (!user || !isSupabaseConfigured()) return;
+
+    const channel = supabase
+      .channel(`global_message_notifications_${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        payload => {
+          const newMsg = payload.new as {
+            id?: string;
+            sender_id: string;
+            conversation_id: string;
+            content: string;
+          };
+          if (newMsg && newMsg.sender_id !== user.id) {
+            void notifyIncomingMessage(newMsg, user.id, null, preferences?.custom_app_name);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, preferences?.custom_app_name]);
 
   // Network disconnect/reconnect detector
   useEffect(() => {

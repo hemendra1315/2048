@@ -503,12 +503,22 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
-        setActiveConversation({ id: convId, partner: targetPartner });
+        setActiveConversation({
+          id: convId,
+          partner: targetPartner,
+          is_group: true,
+          group_name: cleanName,
+        });
         notifyDesktopSelection(targetPartner, convId);
       } else {
         const newConv = mockBackend.createGroupConversation(user.id, cleanName, memberIds);
         void loadConversations();
-        setActiveConversation({ id: newConv.id, partner: newConv.partner });
+        setActiveConversation({
+          id: newConv.id,
+          partner: newConv.partner,
+          is_group: true,
+          group_name: cleanName,
+        });
         notifyDesktopSelection(newConv.partner, newConv.id);
       }
       setNewChatModalOpen(false);

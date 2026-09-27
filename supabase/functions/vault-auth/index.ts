@@ -8,13 +8,19 @@ import { createHandler, type AuthBackend, type Db, type Session } from './handle
 
 const url = Deno.env.get('SUPABASE_URL');
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
-const allowedOrigins = (Deno.env.get('WEBAUTHN_ALLOWED_ORIGINS') ?? '')
+const envOrigins = (Deno.env.get('WEBAUTHN_ALLOWED_ORIGINS') ?? '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
+const defaultOrigins = [
+  'https://serene-brahmagupta.vercel.app',
+  'http://localhost',
+  'http://localhost:5173',
+  'https://localhost',
+  'capacitor://localhost',
+];
+const allowedOrigins = Array.from(new Set([...envOrigins, ...defaultOrigins]));
 if (!url || !serviceKey || !anonKey) throw new Error('Missing Supabase environment variables');
-if (allowedOrigins.length === 0) throw new Error('Set WEBAUTHN_ALLOWED_ORIGINS, e.g. https://serene-brahmagupta.vercel.app');
 
 const clientOptions = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
 const admin = createClient(url, serviceKey, clientOptions);

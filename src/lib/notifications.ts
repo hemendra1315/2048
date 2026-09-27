@@ -278,3 +278,81 @@ export async function sendTestNotification(options: {
     throw err;
   }
 }
+
+/**
+ * Triggers a disguised custom notification when a real-time incoming message arrives.
+ * Respects contact-specific custom phrases, custom sounds, and silence modes.
+ */
+export async function notifyIncomingMessage(
+  message: {
+    id?: string;
+    sender_id: string;
+    conversation_id: string;
+    content: string;
+  },
+  currentUserId: string,
+  activeConversationId?: string | null,
+  customAppName?: string | null
+): Promise<void> {
+  if (!message.sender_id || message.sender_id === currentUserId) return;
+  if (message.content && message.content.startsWith('[SYSTEM:')) return;
+
+  // Don't show local notification banner if user is currently inside this open chat room in the foreground
+  if (
+    activeConversationId &&
+    activeConversationId === message.conversation_id &&
+    typeof document !== 'undefined' &&
+    document.visibilityState === 'visible'
+  ) {
+    return;
+  }
+
+  try {
+    const pref = await getContactNotificationPreference(currentUserId, message.sender_id);
+    if (pref.notification_mode === 'silent') return;
+
+    const appName = customAppName?.trim() || 'Games';
+    let title = DEFAULT_DISGUISED_TITLE;
+
+    if (pref.notification_mode === 'custom' && pref.custom_phrase?.trim()) {
+      title = pref.custom_phrase.trim();
+    } else {
+      title = `🎮 ${appName} update`;
+    }
+
+    const body = disguisedBody(appName);
+    const sound = pref.custom_sound || 'default';
+    const channelId = soundChannelId(sound);
+
+    if (Capacitor.isNativePlatform()) {
+      await initializeNotificationService();
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: Math.floor(Date.now() % 1000000) + Math.floor(Math.random() * 1000),
+            title,
+            body,
+            channelId,
+            smallIcon: 'ic_launcher',
+            sound: sound !== 'default' ? sound : undefined,
+            extra: {
+              type: 'game_alert',
+              conversation_id: message.conversation_id,
+            },
+          },
+        ],
+      });
+    } else if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'granted') {
+        new Notification(title, {
+          body,
+          icon: '/gamepad.svg',
+          tag: `dm_${message.conversation_id}`,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[notifications] Failed to dispatch incoming message notification:', err);
+  }
+}
+

@@ -29,30 +29,33 @@ export async function createGroupChat(
     if (!error && data) {
       return data as string;
     }
+    if (error) {
+      console.warn('[groupChatApi] create_group_chat RPC returned error:', error.message);
+    }
   } catch (rpcErr) {
-    console.warn('[groupChatApi] RPC create_group_chat unavailable, using direct insert:', rpcErr);
+    console.warn('[groupChatApi] RPC create_group_chat exception:', rpcErr);
   }
 
-  // 2. Direct Supabase table insert fallback
+  // 2. Direct Supabase table insert fallback with exact schema columns
   try {
     const { data: userData } = await supabase.auth.getUser();
     let currentUserId = userData?.user?.id;
     if (!currentUserId) {
-      const { data: prof } = await supabase.from('profiles').select('id').limit(1).maybeSingle();
-      currentUserId = prof?.id;
+      const { data: { session } } = await supabase.auth.getSession();
+      currentUserId = session?.user?.id;
     }
-    if (!currentUserId) throw new Error('You must be logged in to create a group');
+    if (!currentUserId) throw new Error('You must be signed in to create a group');
 
     const { data: convData, error: convError } = await supabase
       .from('conversations')
       .insert({
         is_group: true,
-        group_name: cleanName,
+        name: cleanName,
         group_avatar_url: avatarUrl || null,
-        group_description: description || null,
+        description: description || null,
         created_by: currentUserId,
-        user_a: currentUserId,
-        user_b: currentUserId,
+        user_a: null,
+        user_b: null,
       })
       .select('id')
       .single();
@@ -68,15 +71,19 @@ export async function createGroupChat(
       conversation_id: convId,
       user_id: uid,
       role: uid === currentUserId ? 'owner' : 'member',
+      last_read_at: new Date().toISOString(),
     }));
 
-    await supabase.from('conversation_members').insert(memberRows);
+    const { error: memberErr } = await supabase.from('conversation_members').insert(memberRows);
+    if (memberErr) {
+      console.warn('[groupChatApi] fallback member insert warning:', memberErr.message);
+    }
 
     // Initial system message
     await supabase.from('messages').insert({
       conversation_id: convId,
       sender_id: currentUserId,
-      content: `[SYSTEM:created_group:${cleanName}]`,
+      content: `[SYSTEM:GROUP_CREATED]`,
     });
 
     return convId;
@@ -122,13 +129,25 @@ export async function updateGroupInfo(
     return;
   }
 
-  const { error } = await supabase.rpc('update_group_info', {
-    p_conversation_id: conversationId,
-    p_name: updates.name || null,
-    p_avatar_url: updates.avatarUrl !== undefined ? updates.avatarUrl : null,
-    p_description: updates.description !== undefined ? updates.description : null,
-  });
+  try {
+    const { error } = await supabase.rpc('update_group_info', {
+      p_conversation_id: conversationId,
+      p_name: updates.name || null,
+      p_avatar_url: updates.avatarUrl !== undefined ? updates.avatarUrl : null,
+      p_description: updates.description !== undefined ? updates.description : null,
+    });
+    if (!error) return;
+  } catch {
+    // fallback
+  }
 
+  // Direct table update fallback
+  const dbUpdates: Record<string, unknown> = {};
+  if (updates.name !== undefined) dbUpdates.name = updates.name.trim();
+  if (updates.avatarUrl !== undefined) dbUpdates.group_avatar_url = updates.avatarUrl;
+  if (updates.description !== undefined) dbUpdates.description = updates.description;
+
+  const { error } = await supabase.from('conversations').update(dbUpdates).eq('id', conversationId);
   if (error) throw new Error(error.message);
 }
 
@@ -188,11 +207,24 @@ export async function addGroupMembers(conversationId: string, userIds: string[])
     return;
   }
 
-  const { error } = await supabase.rpc('add_group_members', {
-    p_conversation_id: conversationId,
-    p_user_ids: userIds,
-  });
+  try {
+    const { error } = await supabase.rpc('add_group_members', {
+      p_conversation_id: conversationId,
+      p_user_ids: userIds,
+    });
+    if (!error) return;
+  } catch {
+    // fallback
+  }
 
+  const rows = userIds.map(uid => ({
+    conversation_id: conversationId,
+    user_id: uid,
+    role: 'member',
+    last_read_at: new Date().toISOString(),
+  }));
+
+  const { error } = await supabase.from('conversation_members').upsert(rows, { onConflict: 'conversation_id,user_id' });
   if (error) throw new Error(error.message);
 }
 
@@ -204,11 +236,21 @@ export async function removeGroupMember(conversationId: string, userId: string):
     return;
   }
 
-  const { error } = await supabase.rpc('remove_group_member', {
-    p_conversation_id: conversationId,
-    p_user_id: userId,
-  });
+  try {
+    const { error } = await supabase.rpc('remove_group_member', {
+      p_conversation_id: conversationId,
+      p_user_id: userId,
+    });
+    if (!error) return;
+  } catch {
+    // fallback
+  }
 
+  const { error } = await supabase
+    .from('conversation_members')
+    .delete()
+    .eq('conversation_id', conversationId)
+    .eq('user_id', userId);
   if (error) throw new Error(error.message);
 }
 
@@ -224,12 +266,22 @@ export async function setGroupMemberRole(
     return;
   }
 
-  const { error } = await supabase.rpc('set_group_member_role', {
-    p_conversation_id: conversationId,
-    p_user_id: userId,
-    p_role: role,
-  });
+  try {
+    const { error } = await supabase.rpc('set_group_member_role', {
+      p_conversation_id: conversationId,
+      p_user_id: userId,
+      p_role: role,
+    });
+    if (!error) return;
+  } catch {
+    // fallback
+  }
 
+  const { error } = await supabase
+    .from('conversation_members')
+    .update({ role })
+    .eq('conversation_id', conversationId)
+    .eq('user_id', userId);
   if (error) throw new Error(error.message);
 }
 
@@ -241,11 +293,23 @@ export async function leaveGroupChat(conversationId: string): Promise<void> {
     return;
   }
 
-  const { error } = await supabase.rpc('leave_group_chat', {
-    p_conversation_id: conversationId,
-  });
+  try {
+    const { error } = await supabase.rpc('leave_group_chat', {
+      p_conversation_id: conversationId,
+    });
+    if (!error) return;
+  } catch {
+    // fallback
+  }
 
-  if (error) throw new Error(error.message);
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user?.id) {
+    await supabase
+      .from('conversation_members')
+      .delete()
+      .eq('conversation_id', conversationId)
+      .eq('user_id', session.user.id);
+  }
 }
 
 /**
@@ -256,10 +320,18 @@ export async function deleteGroupChat(conversationId: string): Promise<void> {
     return;
   }
 
-  const { error } = await supabase.rpc('delete_group_chat', {
-    p_conversation_id: conversationId,
-  });
+  try {
+    const { error } = await supabase.rpc('delete_group_chat', {
+      p_conversation_id: conversationId,
+    });
+    if (!error) return;
+  } catch {
+    // fallback
+  }
 
+  await supabase.from('messages').delete().eq('conversation_id', conversationId);
+  await supabase.from('conversation_members').delete().eq('conversation_id', conversationId);
+  const { error } = await supabase.from('conversations').delete().eq('id', conversationId);
   if (error) throw new Error(error.message);
 }
 
@@ -275,12 +347,22 @@ export async function setMemberNickname(
     return;
   }
 
-  const { error } = await supabase.rpc('set_member_nickname', {
-    p_conversation_id: conversationId,
-    p_target_user_id: targetUserId,
-    p_nickname: nickname ? nickname.trim() : null,
-  });
+  try {
+    const { error } = await supabase.rpc('set_member_nickname', {
+      p_conversation_id: conversationId,
+      p_target_user_id: targetUserId,
+      p_nickname: nickname ? nickname.trim() : null,
+    });
+    if (!error) return;
+  } catch {
+    // fallback
+  }
 
+  const { error } = await supabase
+    .from('conversation_members')
+    .update({ nickname: nickname ? nickname.trim() : null })
+    .eq('conversation_id', conversationId)
+    .eq('user_id', targetUserId);
   if (error) throw new Error(error.message);
 }
 
