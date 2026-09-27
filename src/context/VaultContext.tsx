@@ -7,7 +7,6 @@ import { useAuth } from './AuthContext';
 import { mockBackend } from '../lib/mockBackend';
 import { supabase, isSupabaseConfigured, isMockBackendAllowed } from '../lib/supabase';
 import { useToast } from './ToastContext';
-import { registerPanicGestures } from '../lib/panicGestures';
 import { pinToSecret } from '../lib/pinHelper';
 
 interface UnlockResult {
@@ -154,15 +153,6 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
   }, [isUnlocked]);
 
-  // Stealth Panic Gestures: Shake device or flip phone face-down to immediately lock the vault
-  useEffect(() => {
-    if (!isUnlocked) return;
-    const cleanup = registerPanicGestures({
-      onPanic: panicLock,
-      enabled: true,
-    });
-    return cleanup;
-  }, [isUnlocked, panicLock]);
 
   // The vault opens only when the server confirms the unlock password (verify_vault_unlock).
   // There is no client-side fallback: an RPC error, a network failure or a rejected password

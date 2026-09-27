@@ -8,6 +8,7 @@ import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { initializeNotificationService } from './lib/notifications';
 import { crashReporter } from './lib/crashReporting';
 import { useBackHandler } from './lib/backButton';
+import { FloatingPanicCircle } from './components/common/FloatingPanicCircle';
 
 // Dynamic code splitting for secondary & admin screens
 const AuthModal = React.lazy(() =>
@@ -64,35 +65,44 @@ const MainNavigator: React.FC = () => {
   // 2. If Vault is unlocked but user is not authenticated, show the Access Gate
   if (!user || recoveryCodeToShow) {
     return (
-      <Suspense fallback={<ViewSkeleton />}>
-        <AuthModal />
-      </Suspense>
+      <>
+        <FloatingPanicCircle />
+        <Suspense fallback={<ViewSkeleton />}>
+          <AuthModal />
+        </Suspense>
+      </>
     );
   }
 
   // 3. If Super Admin Hub is active (display only; admin data access is enforced by RLS on the server)
   if (isSuperAdmin && adminMode) {
     return (
-      <ErrorBoundary
-        name="admin"
-        secondaryAction={{ label: 'Back to app', onClick: () => setAdminMode(false) }}
-      >
-        <Suspense fallback={<ViewSkeleton />}>
-          <AdminLayout onReturnToUserMode={() => setAdminMode(false)} />
-        </Suspense>
-      </ErrorBoundary>
+      <>
+        <FloatingPanicCircle />
+        <ErrorBoundary
+          name="admin"
+          secondaryAction={{ label: 'Back to app', onClick: () => setAdminMode(false) }}
+        >
+          <Suspense fallback={<ViewSkeleton />}>
+            <AdminLayout onReturnToUserMode={() => setAdminMode(false)} />
+          </Suspense>
+        </ErrorBoundary>
+      </>
     );
   }
 
   // 4. Authenticated Private Social Layer
   return (
-    <ErrorBoundary name="social" secondaryAction={{ label: 'Lock and return to cover', onClick: panicLock }}>
-      <Suspense fallback={<ViewSkeleton />}>
-        <SocialLayout
-          onAdminToggle={isSuperAdmin ? () => setAdminMode(true) : undefined}
-        />
-      </Suspense>
-    </ErrorBoundary>
+    <>
+      <FloatingPanicCircle />
+      <ErrorBoundary name="social" secondaryAction={{ label: 'Lock and return to cover', onClick: panicLock }}>
+        <Suspense fallback={<ViewSkeleton />}>
+          <SocialLayout
+            onAdminToggle={isSuperAdmin ? () => setAdminMode(true) : undefined}
+          />
+        </Suspense>
+      </ErrorBoundary>
+    </>
   );
 };
 
