@@ -7,6 +7,18 @@ const STORAGE_KEY = 'vault_floating_game_button_pos';
 const BUTTON_SIZE = 48; // 48px diameter
 const PADDING = 12;
 
+/**
+ * Clamps a coordinate into [PADDING, viewportSize - BUTTON_SIZE - PADDING]. On a viewport
+ * narrower than the button plus both paddings, that upper bound would be less than PADDING --
+ * Math.min(Math.max(PADDING, x), upperBound) would then return the (smaller) negative upper
+ * bound instead of PADDING, pushing the button off-screen. Clamping the bound itself to be
+ * at least PADDING keeps the button on-screen no matter how small the viewport is.
+ */
+function clampAxis(value: number, viewportSize: number): number {
+  const upperBound = Math.max(PADDING, viewportSize - BUTTON_SIZE - PADDING);
+  return Math.min(Math.max(PADDING, value), upperBound);
+}
+
 interface Position {
   x: number;
   y: number;
@@ -22,8 +34,8 @@ export const FloatingPanicCircle: React.FC = () => {
         const parsed = JSON.parse(saved);
         if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
           return {
-            x: Math.min(Math.max(PADDING, parsed.x), window.innerWidth - BUTTON_SIZE - PADDING),
-            y: Math.min(Math.max(PADDING, parsed.y), window.innerHeight - BUTTON_SIZE - PADDING),
+            x: clampAxis(parsed.x, window.innerWidth),
+            y: clampAxis(parsed.y, window.innerHeight),
           };
         }
       }
@@ -56,8 +68,8 @@ export const FloatingPanicCircle: React.FC = () => {
   useEffect(() => {
     const handleResize = () => {
       setPosition(prev => ({
-        x: Math.min(Math.max(PADDING, prev.x), window.innerWidth - BUTTON_SIZE - PADDING),
-        y: Math.min(Math.max(PADDING, prev.y), window.innerHeight - BUTTON_SIZE - PADDING),
+        x: clampAxis(prev.x, window.innerWidth),
+        y: clampAxis(prev.y, window.innerHeight),
       }));
     };
     window.addEventListener('resize', handleResize);
@@ -91,14 +103,8 @@ export const FloatingPanicCircle: React.FC = () => {
     }
 
     if (dragRef.current.hasMoved) {
-      const newX = Math.min(
-        Math.max(PADDING, dragRef.current.initialPosX + deltaX),
-        window.innerWidth - BUTTON_SIZE - PADDING
-      );
-      const newY = Math.min(
-        Math.max(PADDING, dragRef.current.initialPosY + deltaY),
-        window.innerHeight - BUTTON_SIZE - PADDING
-      );
+      const newX = clampAxis(dragRef.current.initialPosX + deltaX, window.innerWidth);
+      const newY = clampAxis(dragRef.current.initialPosY + deltaY, window.innerHeight);
       setPosition({ x: newX, y: newY });
     }
   };
