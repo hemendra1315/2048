@@ -286,30 +286,29 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
       }
       if (Capacitor.isNativePlatform()) {
-        // Native biometric enrollment: just verify fingerprint works, then mark enabled in DB
-        const { BiometricAuth } = await import('@aparajita/capacitor-biometric-auth');
+        const { BiometricAuth, BiometryError } = await import('@aparajita/capacitor-biometric-auth');
+        // 1. Check hardware is available
         const check = await BiometricAuth.checkBiometry();
         if (!check.isAvailable) {
-          throw new Error('No biometric hardware found on this device. Enable fingerprint/face in your phone settings first.');
+          throw new Error('No fingerprint/face set up on this device. Go to Android Settings → Security → Fingerprint and add one first.');
         }
-        // Ask user to confirm their fingerprint/face once to "enroll"
-        await BiometricAuth.authenticate({
-          reason: 'Confirm fingerprint to enable biometric unlock',
-          cancelTitle: 'Cancel',
-          allowDeviceCredential: false,
-        });
-        // Mark biometric_enabled in DB via RPC
+        // 2. Show native fingerprint prompt
+        try {
+          await BiometricAuth.authenticate({
+            reason: 'Confirm fingerprint to enable biometric unlock',
+            cancelTitle: 'Cancel',
+            allowDeviceCredential: false,
+          });
+        } catch (err) {
+          // User cancelled or sensor failed — don't treat as a crash
+          const msg = err instanceof Error ? err.message : '';
+          throw new Error(msg.includes('cancel') || msg.includes('Cancel') ? 'Fingerprint cancelled' : `Fingerprint error: ${msg}`);
+        }
+        // 3. Mark enabled in DB
         const { data, error } = await supabase.rpc('update_my_profile', { p_enable_biometrics: true });
-        if (error) {
-          // RPC might not exist yet – update profile column directly
-          const { data: d2, error: e2 } = await supabase.from('profiles').update({ biometric_enabled: true }).eq('id', user!.id).select().single();
-          if (e2) throw e2;
-          BiometricService.setLocalEnrollment(true);
-          setUser(d2 as unknown as UserProfile);
-        } else {
-          BiometricService.setLocalEnrollment(true);
-          setUser(data as unknown as UserProfile);
-        }
+        if (error) throw new Error(`Could not save biometric setting: ${error.message}`);
+        BiometricService.setLocalEnrollment(true);
+        setUser(data as unknown as UserProfile);
         showToast('Fingerprint unlock enabled ✓', 'success');
         return;
       }
