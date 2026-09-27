@@ -1184,7 +1184,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     return viewsUsed >= maxViews || viewOnceConsumedIds.has(msg.id);
   }, [viewOnceConsumedIds]);
 
-  const handleOpenViewOncePhoto = useCallback(async (msg: MessageItem, rawUrl: string) => {
+  const handleOpenViewOncePhoto = useCallback(async (msg: MessageItem, _rawUrl: string) => {
     if (isEphemeralExhausted(msg)) {
       showToast(msg.view_mode === 'allow_replay' ? 'No replays left for this photo' : 'This photo has already been viewed', 'info');
       return;
@@ -1236,7 +1236,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     }
   }, [userId, isEphemeralExhausted, showToast]);
 
-  const handleToggleViewOnceAudio = useCallback(async (msg: MessageItem, rawUrl: string) => {
+  const handleToggleViewOnceAudio = useCallback(async (msg: MessageItem, _rawUrl: string) => {
     if (playingAudioIdRef.current === msg.id) {
       // Already claimed when playback started below — this just stops it.
       audioElementRef.current?.pause();

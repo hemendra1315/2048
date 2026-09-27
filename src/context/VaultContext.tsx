@@ -8,7 +8,6 @@ import { mockBackend } from '../lib/mockBackend';
 import { supabase, isSupabaseConfigured, isMockBackendAllowed } from '../lib/supabase';
 import { useToast } from './ToastContext';
 import { pinToSecret } from '../lib/pinHelper';
-import { clearOutbox } from '../lib/chatOutbox';
 
 interface UnlockResult {
   ok: boolean;
