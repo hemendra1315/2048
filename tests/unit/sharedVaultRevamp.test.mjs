@@ -35,7 +35,7 @@ assert.ok(apiContent.includes('getCachedSignedUrl'), 'Must include signed URL ca
 // 4. Verify Components
 const inspectorContent = fs.readFileSync(path.join(repo, 'src/components/messages/SharedVaultInspectorSheet.tsx'), 'utf8');
 assert.ok(inspectorContent.includes('SharedVaultInspectorSheet'), 'Must export SharedVaultInspectorSheet');
-assert.ok(inspectorContent.includes('handleToggleStar'), 'Must support star toggling');
+assert.ok(inspectorContent.includes('handleDelete'), 'Must support item deletion');
 assert.ok(inspectorContent.includes('handleMoveToAlbum'), 'Must support moving to album');
 
 const albumViewContent = fs.readFileSync(path.join(repo, 'src/components/messages/SharedVaultAlbumView.tsx'), 'utf8');

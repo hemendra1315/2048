@@ -25,7 +25,7 @@ assert.equal(ext.leavingForExternalActivity(), false, 'announcement must not car
 // An announcement that never led anywhere (e.g. permission denied) expires.
 const realNow = Date.now;
 ext.expectExternalActivity();
-Date.now = () => realNow() + 6000;
+Date.now = () => realNow() + 30000;
 assert.equal(ext.leavingForExternalActivity(), false, 'stale announcement must expire');
 Date.now = realNow;
 

@@ -4,6 +4,7 @@ import { listAdminMediaUploads, uploadAdminMedia, deleteAdminMedia } from '../..
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { lightImpact, mediumImpact, errorWarning } from '../../lib/haptics';
+import { expectExternalActivity } from '../../lib/externalActivity';
 
 interface AdminUploadItem {
   id: string;
@@ -91,7 +92,10 @@ export const AdminMediaUploadsView: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => {
+            expectExternalActivity();
+            fileInputRef.current?.click();
+          }}
           disabled={uploading}
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold text-xs shadow-lg active:scale-95 transition-transform disabled:opacity-50"
         >

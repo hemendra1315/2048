@@ -34,6 +34,7 @@ import {
 } from '../../lib/groupChatApi';
 import { errorWarning } from '../../lib/haptics';
 import { useBackHandler } from '../../lib/backButton';
+import { expectExternalActivity } from '../../lib/externalActivity';
 
 interface GroupInfoSheetProps {
   conversation: ConversationItem;
@@ -323,7 +324,10 @@ export const GroupInfoSheet: React.FC<GroupInfoSheetProps> = ({
               {isAdmin && (
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => {
+                    expectExternalActivity();
+                    fileInputRef.current?.click();
+                  }}
                   disabled={isUploadingAvatar}
                   className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-emerald text-vault-950 flex items-center justify-center shadow-lg hover:scale-105 transition-transform"
                   title="Change Group Photo"

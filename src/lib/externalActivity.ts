@@ -4,7 +4,7 @@
  * to the background within a few seconds of that, it stays unlocked and the idle timer waits until
  * the user is back.
  */
-const EXPECT_WINDOW_MS = 5000;
+const EXPECT_WINDOW_MS = 25000;
 
 let expectedUntil = 0;
 let away = false;
@@ -30,3 +30,23 @@ export function returnedToApp(): void {
 export function isAwayForExternalActivity(): boolean {
   return away;
 }
+
+// Global safety interceptor: Whenever a file input is clicked or tapped, automatically register external activity
+if (typeof window !== 'undefined') {
+  window.addEventListener(
+    'click',
+    (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'file' ||
+          target.closest('input[type="file"]') ||
+          target.closest('[data-file-picker="true"]'))
+      ) {
+        expectExternalActivity();
+      }
+    },
+    { capture: true, passive: true }
+  );
+}
+

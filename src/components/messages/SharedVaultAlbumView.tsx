@@ -1,18 +1,16 @@
 import React from 'react';
 import {
   ArrowLeft,
-  Plus,
   Edit2,
   Trash2,
   Image as ImageIcon,
-  Star,
-  Quote,
   Play,
   Sparkles,
   Upload,
 } from 'lucide-react';
 import { SharedVaultAlbum, SharedVaultItem, UserProfile } from '../../types';
 import { lightImpact, mediumImpact } from '../../lib/haptics';
+import { expectExternalActivity } from '../../lib/externalActivity';
 import { GRADIENT_PRESETS } from './SharedVaultAlbumModal';
 
 interface SharedVaultAlbumViewProps {
@@ -24,7 +22,6 @@ interface SharedVaultAlbumViewProps {
   onEditAlbum: () => void;
   onDeleteAlbum: () => void;
   onSelectItem: (item: SharedVaultItem) => void;
-  onAddMemory: () => void;
   onUploadMedia?: () => void;
 }
 
@@ -35,11 +32,10 @@ export const SharedVaultAlbumView: React.FC<SharedVaultAlbumViewProps> = ({
   onEditAlbum,
   onDeleteAlbum,
   onSelectItem,
-  onAddMemory,
   onUploadMedia,
 }) => {
   const albumPreset = GRADIENT_PRESETS.find(p => p.id === album.gradient_preset) || GRADIENT_PRESETS[0];
-  const albumItems = items.filter(i => i.album_id === album.id && !i.deleted_at);
+  const albumItems = items.filter(i => i.album_id === album.id && !i.deleted_at && (i.media_type === 'image' || i.media_type === 'video'));
 
   return (
     <div className="flex-1 flex flex-col h-full bg-vault-950 text-vault-100 overflow-hidden animate-fade-in">
@@ -93,7 +89,7 @@ export const SharedVaultAlbumView: React.FC<SharedVaultAlbumViewProps> = ({
             <div className="space-y-2 max-w-lg">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/30 backdrop-blur-md text-[11px] font-bold text-white border border-white/20">
                 <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span>Collection · {albumItems.length} {albumItems.length === 1 ? 'Memory' : 'Memories'}</span>
+                <span>Collection · {albumItems.length} {albumItems.length === 1 ? 'Media item' : 'Media items'}</span>
               </span>
               <h1 className="text-2xl sm:text-3xl font-extrabold text-white drop-shadow-md tracking-tight">
                 {album.title}
@@ -111,25 +107,15 @@ export const SharedVaultAlbumView: React.FC<SharedVaultAlbumViewProps> = ({
                   type="button"
                   onClick={() => {
                     lightImpact();
+                    expectExternalActivity();
                     onUploadMedia();
                   }}
-                  className="btn btn-s py-2.5 px-4 text-xs font-bold rounded-2xl flex items-center gap-2 bg-black/40 text-white border border-white/30 hover:bg-black/60"
+                  className="btn btn-p shadow-xl py-2.5 px-4 text-xs font-bold rounded-2xl flex items-center gap-2 bg-white text-vault-950 hover:bg-white/90"
                 >
                   <Upload className="w-4 h-4" />
-                  <span>Upload Media</span>
+                  <span>Add Photos / Videos</span>
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  lightImpact();
-                  onAddMemory();
-                }}
-                className="btn btn-p shadow-xl py-2.5 px-4 text-xs font-bold rounded-2xl flex items-center gap-2 bg-white text-vault-950 hover:bg-white/90"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Add Note</span>
-              </button>
             </div>
           </div>
         </div>
@@ -142,31 +128,26 @@ export const SharedVaultAlbumView: React.FC<SharedVaultAlbumViewProps> = ({
             </div>
             <h3 className="text-sm font-bold text-white">This album is empty</h3>
             <p className="text-xs text-vault-400 max-w-sm mx-auto">
-              Save memorable photos, quotes, or videos to this collection.
+              Add photos or videos to this collection.
             </p>
             <div className="flex items-center justify-center gap-2 mt-3">
               {onUploadMedia && (
                 <button
                   type="button"
-                  onClick={onUploadMedia}
+                  onClick={() => {
+                    expectExternalActivity();
+                    onUploadMedia();
+                  }}
                   className="btn btn-p py-2 px-4 text-xs font-semibold"
                 >
-                  <Upload className="w-4 h-4 mr-1.5 inline" /> Upload Photos / Videos
+                  <Upload className="w-4 h-4 mr-1.5 inline" /> Add Photos / Videos
                 </button>
               )}
-              <button
-                type="button"
-                onClick={onAddMemory}
-                className="btn btn-g py-2 px-4 text-xs font-semibold"
-              >
-                <Plus className="w-4 h-4 mr-1 inline" /> Add Note
-              </button>
             </div>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
             {albumItems.map(item => {
-              const isStarred = (item.starred_by || []).length > 0;
               return (
                 <div
                   key={item.id}
@@ -196,29 +177,7 @@ export const SharedVaultAlbumView: React.FC<SharedVaultAlbumViewProps> = ({
                     </div>
                   )}
 
-                  {item.media_type === 'audio' && (
-                    <div className="w-full h-full p-4 bg-gradient-to-br from-purple-950/60 to-vault-950 flex flex-col items-center justify-center text-center gap-2">
-                      <div className="w-10 h-10 rounded-full bg-purple-500/30 text-purple-300 flex items-center justify-center">
-                        <Play className="w-5 h-5 fill-current ml-0.5" />
-                      </div>
-                      <span className="text-[11px] font-mono text-purple-200">Voice Note</span>
-                    </div>
-                  )}
-
-                  {item.media_type === 'text_memory' && (
-                    <div className="w-full h-full p-4 bg-gradient-to-br from-vault-850 to-vault-950 flex flex-col items-center justify-center text-center">
-                      <Quote className="w-6 h-6 text-emerald mb-1.5 opacity-80" />
-                      <p className="text-xs font-serif italic text-white line-clamp-3">"{item.caption || item.media_url}"</p>
-                    </div>
-                  )}
-
-                  {isStarred && (
-                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center text-amber-400">
-                      <Star className="w-3.5 h-3.5 fill-current" />
-                    </div>
-                  )}
-
-                  {item.caption && item.media_type !== 'text_memory' && (
+                  {item.caption && (
                     <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent">
                       <p className="text-[11px] text-white font-medium truncate drop-shadow">{item.caption}</p>
                     </div>

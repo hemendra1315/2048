@@ -2,16 +2,13 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   ArrowLeft,
   Search,
-  Star,
-  Plus,
   Play,
   X,
   Calendar,
   Sparkles,
-  Quote,
-  FolderHeart,
   FolderPlus,
   Folder,
+  FolderHeart,
   LayoutGrid,
   Columns,
   Image as ImageIcon,
@@ -26,12 +23,12 @@ import {
   createSharedVaultAlbum,
   updateSharedVaultAlbum,
   deleteSharedVaultAlbum,
-  restoreSharedVaultItem,
 } from '../../lib/sharedVaultApi';
 import { uploadChatMedia } from '../../lib/storageHelper';
 import { formatTimestamp } from '../../lib/utils';
 import { useToast } from '../../context/ToastContext';
 import { lightImpact, mediumImpact, selectionChange, notificationSuccess, errorWarning } from '../../lib/haptics';
+import { expectExternalActivity } from '../../lib/externalActivity';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { uniqueChannelName } from '../../lib/realtime';
 import { useBackHandler } from '../../lib/backButton';
@@ -47,7 +44,7 @@ interface SharedVaultViewProps {
   onClose?: () => void;
 }
 
-type FilterCategory = 'all' | 'albums' | 'image' | 'video' | 'text_memory' | 'favorites' | 'trash';
+type FilterCategory = 'all' | 'albums' | 'image' | 'video';
 
 export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
   conversationId,
@@ -77,13 +74,6 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
   const [isAlbumModalOpen, setIsAlbumModalOpen] = useState(false);
   const [editingAlbum, setEditingAlbum] = useState<SharedVaultAlbum | null>(null);
 
-  // Add Memory Modal state
-  const [isAddMemoryModalOpen, setIsAddMemoryModalOpen] = useState(false);
-  const [newMemoryText, setNewMemoryText] = useState('');
-  const [newMemoryCaption, setNewMemoryCaption] = useState('');
-  const [newMemoryAlbumId, setNewMemoryAlbumId] = useState<string | null>(null);
-  const [addingMemory, setAddingMemory] = useState(false);
-
   // Back handler support for sub-page navigation
   useBackHandler(navState.view !== 'root' || Boolean(inspectedItem), () => {
     if (inspectedItem) {
@@ -98,7 +88,7 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
     setLoading(true);
     try {
       const [vaultItems, vaultAlbums] = await Promise.all([
-        listSharedVaultItems(conversationId, { includeDeleted: true }),
+        listSharedVaultItems(conversationId),
         listSharedVaultAlbums(conversationId),
       ]);
       setItems(vaultItems);
@@ -235,56 +225,12 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
     }
   };
 
-  // 5. Create Text Memory Handler
-  const handleCreateMemory = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMemoryText.trim() || addingMemory) return;
-
-    setAddingMemory(true);
-    mediumImpact();
-    try {
-      const saved = await saveToSharedVault({
-        conversation_id: conversationId,
-        saved_by: currentUserProfile.id,
-        album_id: newMemoryAlbumId,
-        media_type: 'text_memory',
-        media_url: newMemoryText.trim(),
-        caption: newMemoryCaption.trim() || null,
-        memory_date: new Date().toISOString(),
-        metadata: {
-          quote_author: currentUserProfile.display_name,
-        },
-      });
-
-      setItems(prev => [saved, ...prev]);
-      setNewMemoryText('');
-      setNewMemoryCaption('');
-      setNewMemoryAlbumId(null);
-      setIsAddMemoryModalOpen(false);
-      showToast('Memory saved to Shared Vault ✨', 'success');
-      notificationSuccess();
-    } catch (err) {
-      console.error(err);
-      showToast('Failed to save memory', 'error');
-      errorWarning();
-    } finally {
-      setAddingMemory(false);
-    }
-  };
-
-  // 6. Active items based on filters and search (excluding audio/VM)
+  // 5. Active items based on filters and search (photos & videos)
   const activeItems = useMemo(() => {
-    let list = items.filter(i => i.media_type !== 'audio');
+    let list = items.filter(i => !i.deleted_at && (i.media_type === 'image' || i.media_type === 'video'));
 
-    if (selectedFilter === 'trash') {
-      list = list.filter(i => Boolean(i.deleted_at));
-    } else {
-      list = list.filter(i => !i.deleted_at);
-      if (selectedFilter === 'favorites') {
-        list = list.filter(i => (i.starred_by || []).length > 0 || i.is_favorite);
-      } else if (selectedFilter !== 'all' && selectedFilter !== 'albums') {
-        list = list.filter(i => i.media_type === selectedFilter);
-      }
+    if (selectedFilter === 'image' || selectedFilter === 'video') {
+      list = list.filter(i => i.media_type === selectedFilter);
     }
 
     if (searchQuery.trim()) {
@@ -300,11 +246,9 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
     return list;
   }, [items, selectedFilter, searchQuery]);
 
-  // Highlight billboard memory (random or most recent favorite)
+  // Highlight billboard memory (most recent photo/video)
   const spotlightMemory = useMemo(() => {
-    const favorites = items.filter(i => !i.deleted_at && ((i.starred_by || []).length > 0 || i.is_favorite));
-    if (favorites.length > 0) return favorites[0];
-    const nonDeleted = items.filter(i => !i.deleted_at);
+    const nonDeleted = items.filter(i => !i.deleted_at && (i.media_type === 'image' || i.media_type === 'video'));
     return nonDeleted.length > 0 ? nonDeleted[0] : null;
   }, [items]);
 
@@ -324,11 +268,8 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
           }}
           onDeleteAlbum={() => handleDeleteAlbum(navState.album.id)}
           onSelectItem={item => setInspectedItem(item)}
-          onAddMemory={() => {
-            setNewMemoryAlbumId(navState.album.id);
-            setIsAddMemoryModalOpen(true);
-          }}
           onUploadMedia={() => {
+            expectExternalActivity();
             sharedFileInputRef.current?.click();
           }}
         />
@@ -353,20 +294,6 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
           onSave={handleSaveAlbum}
           initialData={editingAlbum}
         />
-
-        {/* Add Memory Modal */}
-        {isAddMemoryModalOpen && (
-          <AddMemoryModal
-            isOpen={isAddMemoryModalOpen}
-            onClose={() => setIsAddMemoryModalOpen(false)}
-            onSubmit={handleCreateMemory}
-            newMemoryText={newMemoryText}
-            setNewMemoryText={setNewMemoryText}
-            newMemoryCaption={newMemoryCaption}
-            setNewMemoryCaption={setNewMemoryCaption}
-            addingMemory={addingMemory}
-          />
-        )}
       </>
     );
   }
@@ -446,25 +373,14 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
             disabled={isUploadingSharedMedia}
             onClick={() => {
               lightImpact();
+              expectExternalActivity();
               sharedFileInputRef.current?.click();
             }}
-            className="btn btn-s py-2 px-3 text-xs font-semibold flex items-center gap-1.5 rounded-xl border border-vault-700 hover:border-emerald text-vault-200 hover:text-white"
+            className="btn btn-p py-2 px-3.5 text-xs font-bold flex items-center gap-1.5 rounded-xl shadow-lg"
             title="Upload Photos or Videos"
           >
-            {isUploadingSharedMedia ? <Loader2 className="w-4 h-4 animate-spin text-emerald" /> : <Upload className="w-4 h-4 text-emerald" />}
-            <span className="hidden sm:inline">Add Photos / Videos</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              lightImpact();
-              setIsAddMemoryModalOpen(true);
-            }}
-            className="btn btn-p py-2 px-3.5 text-xs font-bold flex items-center gap-1.5 rounded-xl shadow-lg"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Add Note</span>
+            {isUploadingSharedMedia ? <Loader2 className="w-4 h-4 animate-spin text-white" /> : <Upload className="w-4 h-4" />}
+            <span>Add Photos / Videos</span>
           </button>
         </div>
       </header>
@@ -477,7 +393,7 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search photos, videos, notes, quotes..."
+            placeholder="Search photos, videos, albums..."
             autoFocus
             className="w-full bg-transparent text-white text-xs placeholder:text-vault-500 focus:outline-none"
           />
@@ -489,16 +405,13 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
         </div>
       )}
 
-      {/* Spacious Category Filter Pills */}
+      {/* Category Filter Pills */}
       <div className="px-5 py-2.5 border-b border-vault-850 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0 bg-vault-950/80">
         {[
           { id: 'all', label: 'All Media' },
           { id: 'albums', label: `Albums (${albums.length})` },
           { id: 'image', label: 'Photos' },
           { id: 'video', label: 'Videos' },
-          { id: 'text_memory', label: 'Quotes & Notes' },
-          { id: 'favorites', label: '⭐ Starred' },
-          { id: 'trash', label: '🗑️ Trash' },
         ].map(cat => {
           const isSelected = selectedFilter === cat.id;
           return (
@@ -539,7 +452,7 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
                   <span>Spotlight Memory · Tap to Inspect</span>
                 </div>
                 <h3 className="text-xl sm:text-2xl font-black text-white drop-shadow">
-                  {spotlightMemory.caption || (spotlightMemory.media_type === 'text_memory' ? `"${spotlightMemory.media_url}"` : 'Shared with love')}
+                  {spotlightMemory.caption || 'Shared with love'}
                 </h3>
                 <p className="text-xs text-vault-300 flex items-center gap-1.5 font-medium">
                   <Calendar className="w-3.5 h-3.5" /> {formatTimestamp(spotlightMemory.created_at)}
@@ -559,7 +472,7 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
         {loading ? (
           <div className="py-24 flex flex-col items-center justify-center gap-3 text-vault-400">
             <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
-            <span className="text-xs font-medium">Loading Vault Memories…</span>
+            <span className="text-xs font-medium">Loading Shared Vault…</span>
           </div>
         ) : selectedFilter === 'albums' ? (
           <div className="space-y-4">
@@ -631,22 +544,28 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
             <div className="w-16 h-16 rounded-full bg-vault-850 mx-auto flex items-center justify-center text-vault-500">
               <ImageIcon className="w-8 h-8 opacity-60" />
             </div>
-            <h3 className="text-sm font-bold text-white">
-              {selectedFilter === 'trash' ? 'Trash is empty' : 'No memories found'}
-            </h3>
+            <h3 className="text-sm font-bold text-white">No media found</h3>
             <p className="text-xs text-vault-400 max-w-sm mx-auto">
-              {selectedFilter === 'trash'
-                ? 'Items moved to trash will appear here for 30 days.'
-                : 'Start adding photos, voice notes, and sweet quotes to your Shared Vault.'}
+              Add memorable photos and videos to your Shared Vault.
             </p>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  expectExternalActivity();
+                  sharedFileInputRef.current?.click();
+                }}
+                className="btn btn-p py-2 px-4 text-xs font-semibold inline-flex items-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Add Photos / Videos</span>
+              </button>
+            </div>
           </div>
         ) : layoutMode === 'magazine' ? (
           /* Magazine Feed Layout (1-Column Spacious Cards) */
           <div className="max-w-xl mx-auto space-y-5">
             {activeItems.map(item => {
-              const isStarred = (item.starred_by || []).length > 0;
-              const isDeleted = Boolean(item.deleted_at);
-
               return (
                 <div
                   key={item.id}
@@ -665,11 +584,6 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         loading="lazy"
                       />
-                      {isStarred && (
-                        <div className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center text-amber-400 shadow-lg">
-                          <Star className="w-4 h-4 fill-current" />
-                        </div>
-                      )}
                     </div>
                   )}
 
@@ -684,56 +598,14 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
                     </div>
                   )}
 
-                  {item.media_type === 'audio' && (
-                    <div className="p-6 bg-gradient-to-r from-purple-950/60 to-vault-900 flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-full bg-purple-500 text-white flex items-center justify-center shadow-lg">
-                        <Play className="w-6 h-6 fill-current ml-0.5" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-xs font-bold text-white block truncate">Shared Voice Note</span>
-                        <span className="text-[11px] font-mono text-purple-300">
-                          {item.metadata?.duration || 'Audio clip'} · Tap to listen
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {item.media_type === 'text_memory' && (
-                    <div className="p-6 bg-gradient-to-br from-vault-850 to-vault-950 text-center space-y-2">
-                      <Quote className="w-7 h-7 text-emerald mx-auto opacity-75" />
-                      <p className="text-base font-serif italic text-white leading-relaxed">
-                        "{item.caption || item.media_url}"
-                      </p>
-                      {item.metadata?.quote_author && (
-                        <span className="text-xs text-emerald font-semibold block">— {item.metadata.quote_author}</span>
-                      )}
-                    </div>
-                  )}
-
                   {/* Card Bottom Meta Bar */}
                   <div className="p-4 flex items-center justify-between border-t border-vault-850/80">
                     <div className="space-y-0.5">
-                      {item.caption && item.media_type !== 'text_memory' && (
+                      {item.caption && (
                         <p className="text-xs font-semibold text-white leading-snug">{item.caption}</p>
                       )}
                       <p className="text-[11px] text-vault-400 font-medium">{formatTimestamp(item.created_at)}</p>
                     </div>
-
-                    {isDeleted && (
-                      <button
-                        type="button"
-                        onClick={e => {
-                          e.stopPropagation();
-                          void restoreSharedVaultItem(item.id).then(() => {
-                            setItems(prev => prev.map(i => (i.id === item.id ? { ...i, deleted_at: null } : i)));
-                            showToast('Restored from Trash', 'success');
-                          });
-                        }}
-                        className="btn btn-g py-1 px-2.5 text-[11px] !text-emerald"
-                      >
-                        Restore
-                      </button>
-                    )}
                   </div>
                 </div>
               );
@@ -743,7 +615,6 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
           /* Spacious 2-Column Grid Layout */
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
             {activeItems.map(item => {
-              const isStarred = (item.starred_by || []).length > 0;
               return (
                 <div
                   key={item.id}
@@ -773,31 +644,7 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
                     </div>
                   )}
 
-                  {item.media_type === 'audio' && (
-                    <div className="w-full h-full p-4 bg-gradient-to-br from-purple-950/60 to-vault-950 flex flex-col items-center justify-center text-center gap-2">
-                      <div className="w-10 h-10 rounded-full bg-purple-500/30 text-purple-300 flex items-center justify-center">
-                        <Play className="w-5 h-5 fill-current ml-0.5" />
-                      </div>
-                      <span className="text-[11px] font-mono text-purple-200">Voice Note</span>
-                    </div>
-                  )}
-
-                  {item.media_type === 'text_memory' && (
-                    <div className="w-full h-full p-4 bg-gradient-to-br from-vault-850 to-vault-950 flex flex-col items-center justify-center text-center">
-                      <Quote className="w-6 h-6 text-emerald mb-1 opacity-80" />
-                      <p className="text-xs font-serif italic text-white line-clamp-3">
-                        "{item.caption || item.media_url}"
-                      </p>
-                    </div>
-                  )}
-
-                  {isStarred && (
-                    <div className="absolute top-2.5 right-2.5 w-6 h-6 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center text-amber-400">
-                      <Star className="w-3.5 h-3.5 fill-current" />
-                    </div>
-                  )}
-
-                  {item.caption && item.media_type !== 'text_memory' && (
+                  {item.caption && (
                     <div className="absolute inset-x-0 bottom-0 p-2.5 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
                       <p className="text-[11px] text-white font-medium truncate drop-shadow">{item.caption}</p>
                     </div>
@@ -831,107 +678,6 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
         onSave={handleSaveAlbum}
         initialData={editingAlbum}
       />
-
-      {/* Add Memory Modal */}
-      {isAddMemoryModalOpen && (
-        <AddMemoryModal
-          isOpen={isAddMemoryModalOpen}
-          onClose={() => setIsAddMemoryModalOpen(false)}
-          onSubmit={handleCreateMemory}
-          newMemoryText={newMemoryText}
-          setNewMemoryText={setNewMemoryText}
-          newMemoryCaption={newMemoryCaption}
-          setNewMemoryCaption={setNewMemoryCaption}
-          addingMemory={addingMemory}
-        />
-      )}
-    </div>
-  );
-};
-
-interface AddMemoryModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSubmit: (e: React.FormEvent) => void;
-  newMemoryText: string;
-  setNewMemoryText: (v: string) => void;
-  newMemoryCaption: string;
-  setNewMemoryCaption: (v: string) => void;
-  addingMemory: boolean;
-}
-
-const AddMemoryModal: React.FC<AddMemoryModalProps> = ({
-  isOpen,
-  onClose,
-  onSubmit,
-  newMemoryText,
-  setNewMemoryText,
-  newMemoryCaption,
-  setNewMemoryCaption,
-  addingMemory,
-}) => {
-  if (!isOpen) return null;
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 anim-fade"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md glass-panel rounded-3xl p-6 shadow-2xl space-y-4 anim-sheet"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between pb-3 border-b border-vault-800">
-          <div className="flex items-center gap-2 text-white font-bold text-base">
-            <Quote className="w-5 h-5 text-emerald" />
-            <span>Save Quote or Text Memory</span>
-          </div>
-          <button type="button" onClick={onClose} className="ib ib-s rounded-full" aria-label="Close">
-            <X className="i" />
-          </button>
-        </div>
-
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div>
-            <label className="text-xs font-semibold text-vault-300 block mb-1">Quote or Memory Text *</label>
-            <textarea
-              value={newMemoryText}
-              onChange={e => setNewMemoryText(e.target.value)}
-              placeholder="e.g. 'You are my favorite notification in the entire universe.'"
-              rows={3}
-              required
-              className="w-full px-4 py-2.5 rounded-xl bg-vault-900 border border-vault-700 text-white placeholder:text-vault-500 text-xs focus:outline-none focus:border-emerald resize-none font-serif italic"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold text-vault-300 block mb-1">Note or Context (Optional)</label>
-            <input
-              type="text"
-              value={newMemoryCaption}
-              onChange={e => setNewMemoryCaption(e.target.value)}
-              placeholder="e.g. Late night conversation, 2am..."
-              maxLength={80}
-              className="w-full px-4 py-2.5 rounded-xl bg-vault-900 border border-vault-700 text-white placeholder:text-vault-500 text-xs focus:outline-none focus:border-emerald"
-            />
-          </div>
-
-          <div className="pt-2 flex items-center justify-end gap-2">
-            <button type="button" onClick={onClose} className="btn btn-g py-2 px-4 text-xs">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!newMemoryText.trim() || addingMemory}
-              className="btn btn-p py-2 px-5 text-xs font-bold"
-            >
-              {addingMemory ? 'Saving…' : 'Save to Vault'}
-            </button>
-          </div>
-        </form>
-      </div>
     </div>
   );
 };

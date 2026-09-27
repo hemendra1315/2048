@@ -248,8 +248,6 @@ export async function listSharedVaultItems(
     let local = getLocalSharedVaultItems().filter(i => i.conversation_id === conversationId);
     if (!includeDeleted) {
       local = local.filter(i => !i.deleted_at);
-    } else {
-      local = local.filter(i => Boolean(i.deleted_at));
     }
     if (albumId !== undefined) {
       local = local.filter(i => (albumId === null ? !i.album_id : i.album_id === albumId));
@@ -264,8 +262,6 @@ export async function listSharedVaultItems(
 
   if (!includeDeleted) {
     query = query.is('deleted_at', null);
-  } else {
-    query = query.not('deleted_at', 'is', null);
   }
 
   if (albumId !== undefined) {

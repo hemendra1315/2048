@@ -84,12 +84,32 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showHeartBurst, setShowHeartBurst] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState<number>(7);
 
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const posStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const lastTapRef = useRef<number>(0);
   const initialPinchDistRef = useRef<number | null>(null);
   const initialPinchScaleRef = useRef<number>(1);
+
+  // 7-second timer for ephemeral media (View Once & View Twice)
+  useEffect(() => {
+    if (!isEphemeral || !item) return;
+    setSecondsLeft(7);
+    const interval = setInterval(() => {
+      setSecondsLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          lightImpact();
+          onClose();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [item?.id, isEphemeral, onClose]);
 
   // Reset zoom & drag on item switch
   useEffect(() => {
@@ -288,6 +308,16 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
     >
       <ScreenShieldOverlay show={isShielded} message="Screenshots, screen recording, and saving are strictly blocked for ephemeral media." />
 
+      {/* Top countdown progress bar for ephemeral media */}
+      {isEphemeral && (
+        <div className="absolute top-0 inset-x-0 z-30 h-1 bg-white/10 overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-emerald-400 to-teal-300 transition-all duration-1000 ease-linear shadow-[0_0_8px_rgba(52,211,153,0.8)]"
+            style={{ width: `${(Math.max(0, secondsLeft) / 7) * 100}%` }}
+          />
+        </div>
+      )}
+
       {/* Top Bar (HUD) */}
       <header
         className={`p-4 pt-[calc(0.75rem+env(safe-area-inset-top))] flex items-center justify-between z-20 transition-all duration-200 ${
@@ -305,10 +335,12 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
 
         <div className="text-center px-2 min-w-0">
           {isEphemeral ? (
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald/20 border border-emerald/40 text-emerald text-xs font-bold tracking-wide">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 text-xs font-bold tracking-wide shadow-md backdrop-blur-md">
               <EyeOff className="w-3.5 h-3.5" />
               <span>{viewMode === 'allow_replay' ? '2 Views (Twice)' : '1 View Once'}</span>
-              <Shield className="w-3 h-3 text-emerald ml-0.5" />
+              <span className="w-1 h-1 rounded-full bg-emerald-400 mx-0.5" />
+              <span className="font-mono text-white font-black">{secondsLeft}s</span>
+              <Shield className="w-3 h-3 text-emerald-400 ml-0.5" />
             </div>
           ) : (
             <>

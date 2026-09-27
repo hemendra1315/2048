@@ -3,7 +3,6 @@ import {
   X,
   Maximize2,
   Minimize2,
-  Star,
   Download,
   FolderHeart,
   ExternalLink,
@@ -21,7 +20,7 @@ import {
 import { SharedVaultItem, SharedVaultAlbum, UserProfile } from '../../types';
 import { lightImpact, mediumImpact, selectionChange } from '../../lib/haptics';
 import { useToast } from '../../context/ToastContext';
-import { cloneToPersonalVault, toggleStarSharedVaultItem, moveItemsToAlbum, softDeleteSharedVaultItem } from '../../lib/sharedVaultApi';
+import { cloneToPersonalVault, moveItemsToAlbum, deleteSharedVaultItem } from '../../lib/sharedVaultApi';
 
 interface SharedVaultInspectorSheetProps {
   item: SharedVaultItem | null;
@@ -65,18 +64,7 @@ export const SharedVaultInspectorSheet: React.FC<SharedVaultInspectorSheetProps>
   if (!item) return null;
 
   const isSavedByMe = item.saved_by === currentUserProfile.id;
-  const isStarredByMe = (item.starred_by || []).includes(currentUserProfile.id);
-  const isStarredByPartner = (item.starred_by || []).includes(partnerProfile.id);
   const currentAlbum = albums.find(a => a.id === item.album_id);
-
-  const handleToggleStar = async () => {
-    lightImpact();
-    const updated = await toggleStarSharedVaultItem(item.id, currentUserProfile.id);
-    if (updated) {
-      onItemUpdated(updated);
-      showToast(isStarredByMe ? 'Removed star' : 'Starred in Vault ⭐', 'success');
-    }
-  };
 
   const handleMoveToAlbum = async (albumId: string | null) => {
     selectionChange();
@@ -99,13 +87,13 @@ export const SharedVaultInspectorSheet: React.FC<SharedVaultInspectorSheetProps>
     }
   };
 
-  const handleSoftDelete = async () => {
-    if (!window.confirm('Move this memory to Trash? You can restore it anytime within 30 days.')) return;
+  const handleDelete = async () => {
+    if (!window.confirm('Delete this memory from Shared Vault? This cannot be undone.')) return;
     mediumImpact();
-    await softDeleteSharedVaultItem(item.id);
+    await deleteSharedVaultItem(item.id, currentUserProfile.id);
     onItemDeleted(item.id);
     onClose();
-    showToast('Moved to Trash', 'info');
+    showToast('Deleted from Shared Vault', 'info');
   };
 
   const toggleAudioPlayback = () => {
@@ -277,34 +265,7 @@ export const SharedVaultInspectorSheet: React.FC<SharedVaultInspectorSheetProps>
                 </span>
               </div>
             </div>
-
-            <button
-              type="button"
-              onClick={handleToggleStar}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition-all active:scale-95 ${
-                isStarredByMe
-                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 font-bold'
-                  : 'bg-vault-800 border-vault-700 text-vault-300 hover:text-white'
-              }`}
-            >
-              <Star className={`w-4 h-4 ${isStarredByMe ? 'fill-current text-amber-400' : ''}`} />
-              <span>{isStarredByMe ? 'Starred' : 'Star'}</span>
-            </button>
           </div>
-
-          {/* Dual-Partner Star Status Banner */}
-          {(isStarredByMe || isStarredByPartner) && (
-            <div className="px-3.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center gap-2 text-amber-300 text-[11px]">
-              <Star className="w-3.5 h-3.5 fill-current text-amber-400 shrink-0" />
-              <span>
-                {isStarredByMe && isStarredByPartner
-                  ? `⭐ Starred by both you and ${partnerProfile.display_name}`
-                  : isStarredByMe
-                  ? '⭐ Starred by you'
-                  : `⭐ Starred by ${partnerProfile.display_name}`}
-              </span>
-            </div>
-          )}
 
           {/* Caption / Note */}
           {item.caption && item.media_type !== 'text_memory' && (
@@ -400,11 +361,11 @@ export const SharedVaultInspectorSheet: React.FC<SharedVaultInspectorSheetProps>
 
             <button
               type="button"
-              onClick={handleSoftDelete}
+              onClick={handleDelete}
               className="btn btn-g py-2.5 px-3 flex items-center justify-center gap-1.5 text-xs !text-red-400 hover:!text-red-300 hover:bg-red-500/10"
             >
               <Trash2 className="w-4 h-4" />
-              <span>Move to Trash</span>
+              <span>Delete</span>
             </button>
           </div>
         </div>
