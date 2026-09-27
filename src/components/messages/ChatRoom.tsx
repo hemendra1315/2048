@@ -93,6 +93,7 @@ import { GroupInfoSheet } from './GroupInfoSheet';
 import { fetchGroupMembers } from '../../lib/groupChatApi';
 import type { GroupMember } from '../../types';
 import { getCustomWallpaper, syncCustomWallpaper, removeAndSyncCustomWallpaper } from '../../lib/chatWallpaper';
+import { setActiveConversationId, clearActiveConversationId } from '../../lib/activeConversation';
 
 interface ChatRoomProps {
   conversationId: string;
@@ -122,6 +123,13 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const { user } = useAuth();
   const { showToast } = useToast();
   const isGroup = Boolean(isGroupProp);
+
+  // Lets the global notification listener (App.tsx) suppress a local notification for a
+  // message that's already showing live in this open chat.
+  useEffect(() => {
+    setActiveConversationId(conversationId);
+    return () => clearActiveConversationId(conversationId);
+  }, [conversationId]);
   const [currentGroupName, setCurrentGroupName] = useState(groupNameProp || partner.display_name);
   const [currentGroupAvatar, setCurrentGroupAvatar] = useState(groupAvatarUrlProp || null);
   const [currentGroupDesc, setCurrentGroupDesc] = useState(groupDescriptionProp || '');

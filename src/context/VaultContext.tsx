@@ -8,6 +8,7 @@ import { mockBackend } from '../lib/mockBackend';
 import { supabase, isSupabaseConfigured, isMockBackendAllowed } from '../lib/supabase';
 import { useToast } from './ToastContext';
 import { pinToSecret } from '../lib/pinHelper';
+import { clearOutbox } from '../lib/chatOutbox';
 
 interface UnlockResult {
   ok: boolean;
@@ -156,7 +157,10 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // The vault opens only when the server confirms the unlock password (verify_vault_unlock).
   // There is no client-side fallback: an RPC error, a network failure or a rejected password
-  // all keep the vault locked.
+  // all keep the vault locked. The server itself now tries both the current-scheme padded PIN
+  // and the legacy raw PIN in one call (see _unlock_password_matches), so this only ever makes
+  // a single request -- a client-side retry loop here would double-count against the 5-attempt
+  // lockout for every real typo.
   const verifyAndUnlock = async (secret: string): Promise<boolean> => {
     if (!user) {
       showToast('Sign in first', 'error');
@@ -164,28 +168,21 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
     try {
       let ok = false;
-      const transformedSecret = pinToSecret(secret);
       if (isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('verify_vault_unlock', { p_secret: transformedSecret });
-        let result = data as UnlockResult | null;
-        if (result?.ok) {
-          ok = true;
-        } else if (transformedSecret !== secret) {
-          // Fallback to raw secret for backward-compatibility with previously created vaults
-          const { data: rawData } = await supabase.rpc('verify_vault_unlock', { p_secret: secret });
-          const rawResult = rawData as UnlockResult | null;
-          if (rawResult?.ok) ok = true;
-          else result = rawResult ?? result;
-        }
+        const { data, error } = await supabase.rpc('verify_vault_unlock', { p_secret: secret });
         if (error) {
           showToast('Could not verify PIN. Check your connection and try again.', 'error');
           return false;
         }
+        const result = data as UnlockResult | null;
+        ok = Boolean(result?.ok);
         if (!ok) {
           showToast(unlockErrorMessage(result), 'error');
           return false;
         }
       } else if (isMockBackendAllowed()) {
+        // No server/lockout counter involved here, so trying both forms locally is harmless.
+        const transformedSecret = pinToSecret(secret);
         ok = await mockBackend.verifyUnlockSecret(user.id, transformedSecret) || (transformedSecret !== secret && await mockBackend.verifyUnlockSecret(user.id, secret));
         if (!ok) {
           showToast('Incorrect PIN', 'error');
@@ -239,17 +236,20 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const updateSecret = async (oldSecret: string, newSecret: string) => {
     if (!user) return;
     try {
-      const transformedOld = pinToSecret(oldSecret);
       const transformedNew = pinToSecret(newSecret);
       if (isSupabaseConfigured()) {
+        // p_old_secret is sent raw: the server tries both the padded and legacy raw forms
+        // itself (see _unlock_password_matches), so a user whose PIN predates the padding
+        // scheme can change it too, not just unlock with it.
         const { data, error } = await supabase.rpc('update_vault_unlock', {
-          p_old_secret: transformedOld,
+          p_old_secret: oldSecret,
           p_new_secret: transformedNew,
         });
         if (error) throw error;
         const result = data as UnlockResult | null;
         if (!result?.ok) throw new Error(unlockErrorMessage(result));
       } else if (isMockBackendAllowed()) {
+        const transformedOld = pinToSecret(oldSecret);
         await mockBackend.updateUnlockSecret(user.id, transformedOld, transformedNew);
       } else {
         throw new Error('Server is not configured');

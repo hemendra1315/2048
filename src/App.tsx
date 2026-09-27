@@ -10,6 +10,7 @@ import { crashReporter } from './lib/crashReporting';
 import { useBackHandler } from './lib/backButton';
 import { FloatingPanicCircle } from './components/common/FloatingPanicCircle';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { getActiveConversationId } from './lib/activeConversation';
 
 // Dynamic code splitting for secondary & admin screens
 const AuthModal = React.lazy(() =>
@@ -56,7 +57,7 @@ const MainNavigator: React.FC = () => {
             content: string;
           };
           if (newMsg && newMsg.sender_id !== user.id) {
-            void notifyIncomingMessage(newMsg, user.id, null, preferences?.custom_app_name);
+            void notifyIncomingMessage(newMsg, user.id, getActiveConversationId(), preferences?.custom_app_name);
           }
         }
       )

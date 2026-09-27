@@ -167,6 +167,11 @@ export function systemMessageText(content: string): string {
   if (grp) {
     return `created group "${grp[1]}"`;
   }
+  // Written by create_group_chat() -- no name captured server-side (the group's own name is
+  // already shown in the chat header), so this only needs a generic, correctly-worded notice.
+  if (content === '[SYSTEM:GROUP_CREATED]') {
+    return 'created this group';
+  }
   return 'updated the chat';
 }
 

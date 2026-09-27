@@ -330,9 +330,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       const { data, error } = await supabase.rpc('update_my_profile', { p_disable_biometrics: true });
       if (error) {
-        // Fallback direct update
+        // Fallback direct update. The RPC would also have deleted this user's WebAuthn
+        // credential rows; do that separately here so a stale credential can't linger.
         const { data: d2, error: e2 } = await supabase.from('profiles').update({ biometric_enabled: false }).eq('id', user!.id).select().single();
         if (e2) throw e2;
+        const { error: e3 } = await supabase.rpc('clear_my_webauthn_credentials');
+        if (e3) console.warn('[auth] could not clear WebAuthn credentials:', e3.message);
         BiometricService.setLocalEnrollment(false);
         setUser(d2 as unknown as UserProfile);
       } else {

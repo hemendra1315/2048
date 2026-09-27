@@ -532,18 +532,22 @@ export async function editMessageAsAdmin(
   conversationId?: string
 ): Promise<void> {
   if (backendIsSupabase()) {
-    const { error } = await supabase
-      .from('messages')
-      .update({ content: newContent })
-      .eq('id', messageId);
+    // messages has no client-reachable UPDATE policy by design (blocks content
+    // tampering) -- admin_edit_message is the sanctioned, audit-logged path.
+    void conversationId;
+    void adminId;
+    const { error } = await supabase.rpc('admin_edit_message', {
+      p_message_id: messageId,
+      p_new_content: newContent,
+    });
     fail(error);
   } else {
     mockBackend.adminEditMessage(messageId, newContent);
+    await logAdminAction(adminId, 'EDIT_MESSAGE', null, messageId, {
+      conversationId,
+      newContent,
+    });
   }
-  await logAdminAction(adminId, 'EDIT_MESSAGE', null, messageId, {
-    conversationId,
-    newContent,
-  });
 }
 
 /** Admin: Set or change user gender */
@@ -675,7 +679,18 @@ export async function listAdminMediaUploads(): Promise<{ id: string; admin_id: s
     console.warn('[admin] list admin media failed:', error.message);
     return [];
   }
-  return data ?? [];
+  const items = data ?? [];
+  // The gallery bucket is private: getPublicUrl() (used at upload time) returns an unusable
+  // link, so every view needs a fresh signed URL for the actual storage_path.
+  if (items.length === 0) return items;
+  const { data: signed } = await supabase.storage
+    .from('gallery')
+    .createSignedUrls(items.map(i => i.storage_path), 3600);
+  const signedMap = new Map((signed ?? []).map(s => [s.path, s.signedUrl]));
+  return items.map(item => ({
+    ...item,
+    image_url: signedMap.get(item.storage_path) || item.image_url,
+  }));
 }
 
 /** Admin Media Uploads Page: Upload image */

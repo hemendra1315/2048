@@ -28,11 +28,12 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(ScreenProtectionPlugin.class);
         super.onCreate(savedInstanceState);
-        // Keep chats out of recent-apps and screen recordings in release builds.
-        boolean isDebuggable = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
-        if (!isDebuggable) {
-            getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
-        }
+        // Keep chats out of recent-apps and screen recordings, in every build variant --
+        // a debug APK handed out for field testing (or installed by mistake) must not
+        // silently lose this protection just because it's debuggable. Developers who need
+        // to capture real screenshots use ScreenProtectionPlugin's disable(), which itself
+        // only works in a debuggable build, to turn it off for that session.
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         createGameNotificationChannels();
     }
 

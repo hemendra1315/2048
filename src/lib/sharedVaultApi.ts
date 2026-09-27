@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured, isMockBackendAllowed } from './supabase';
 import { SharedVaultItem, SharedVaultAlbum, AdminSharedVaultSummary, GalleryItem, UserProfile } from '../types';
 import { logAdminAction } from './adminApi';
+import { chatMediaPath, signStoragePaths, CHAT_MEDIA_BUCKET } from './mediaUrls';
 
 const backendIsSupabase = () => {
   if (isSupabaseConfigured()) return true;
@@ -302,10 +303,33 @@ export async function listSharedVaultItems(
     }
   }
 
-  return items.map(i => ({
-    ...i,
-    media_url: i.storage_path && getCachedSignedUrl(i.storage_path) ? getCachedSignedUrl(i.storage_path)! : i.media_url,
-  }));
+  // Items saved from a chat (uploadChatMedia / "Save to Shared Vault") have no
+  // storage_path -- their media_url is an unusable getPublicUrl() link against
+  // the private chat-media bucket. Resolve those the same way chat bubbles do.
+  const chatMediaPaths: string[] = [];
+  for (const item of items) {
+    if (!item.storage_path) {
+      const path = chatMediaPath(item.media_url);
+      if (path) chatMediaPaths.push(path);
+    }
+  }
+  let chatMediaSigned = new Map<string, string>();
+  if (chatMediaPaths.length > 0) {
+    try {
+      chatMediaSigned = await signStoragePaths(CHAT_MEDIA_BUCKET, chatMediaPaths);
+    } catch (err) {
+      console.warn('[shared-vault] chat-media signing error:', err);
+    }
+  }
+
+  return items.map(i => {
+    if (i.storage_path) {
+      return { ...i, media_url: getCachedSignedUrl(i.storage_path) || i.media_url };
+    }
+    const path = chatMediaPath(i.media_url);
+    const signed = path ? chatMediaSigned.get(path) : undefined;
+    return signed ? { ...i, media_url: signed } : i;
+  });
 }
 
 /** Save an item to the Shared Vault */
@@ -507,12 +531,13 @@ export async function cloneToPersonalVault(
   sharedItem: SharedVaultItem,
   userId: string
 ): Promise<GalleryItem | null> {
+  const caption = sharedItem.caption ? `Shared: ${sharedItem.caption}` : 'Saved from Shared Vault';
   const newGalleryItem: GalleryItem = {
     id: `gal_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     user_id: userId,
     image_url: sharedItem.media_url,
     storage_path: sharedItem.storage_path || '',
-    caption: sharedItem.caption ? `Shared: ${sharedItem.caption}` : 'Saved from Shared Vault',
+    caption,
     created_at: new Date().toISOString(),
     is_favorite: false,
   };
@@ -521,14 +546,46 @@ export async function cloneToPersonalVault(
     return newGalleryItem;
   }
 
+  let storagePath = sharedItem.storage_path || null;
+  let imageUrl = sharedItem.media_url;
+
+  // Chat-media-sourced items (no gallery storage_path) would otherwise clone in with
+  // whatever short-lived signed URL happened to be resolved at this moment, which
+  // expires and leaves the cloned photo permanently broken. Copy the actual object
+  // into the user's own gallery folder so it becomes a normal, always-resignable item.
+  if (!storagePath) {
+    const chatPath = chatMediaPath(sharedItem.media_url);
+    if (chatPath) {
+      try {
+        const { data: blob, error: downloadError } = await supabase.storage
+          .from(CHAT_MEDIA_BUCKET)
+          .download(chatPath);
+        if (!downloadError && blob) {
+          const ext = chatPath.split('.').pop() || 'jpg';
+          const newPath = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${ext}`;
+          const { error: uploadError } = await supabase.storage
+            .from('gallery')
+            .upload(newPath, blob, { contentType: blob.type || undefined, upsert: false });
+          if (!uploadError) {
+            storagePath = newPath;
+            const { data: signedList } = await supabase.storage.from('gallery').createSignedUrls([newPath], 3600);
+            imageUrl = signedList?.[0]?.signedUrl || imageUrl;
+          }
+        }
+      } catch (err) {
+        console.warn('[shared-vault] clone: could not copy chat-media object into gallery', err);
+      }
+    }
+  }
+
   try {
     const { data } = await supabase
       .from('gallery_items')
       .insert({
         user_id: userId,
-        image_url: sharedItem.media_url,
-        storage_path: sharedItem.storage_path || null,
-        caption: sharedItem.caption ? `Shared: ${sharedItem.caption}` : 'Saved from Shared Vault',
+        image_url: imageUrl,
+        storage_path: storagePath,
+        caption,
       })
       .select()
       .single();
