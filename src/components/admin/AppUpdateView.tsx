@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Rocket, Loader2, CheckCircle2 } from 'lucide-react';
-import { getAppUpdateNotice, setAppUpdateNotice, type AppUpdateNotice } from '../../lib/appUpdateApi';
+import { Rocket, Loader2, CheckCircle2, BellRing } from 'lucide-react';
+import { getAppUpdateNotice, setAppUpdateNotice, notifyUsersOfUpdate, type AppUpdateNotice } from '../../lib/appUpdateApi';
 import { useToast } from '../../context/ToastContext';
-import { lightImpact, mediumImpact, errorWarning } from '../../lib/haptics';
+import { lightImpact, mediumImpact, errorWarning, notificationSuccess } from '../../lib/haptics';
 
 /** Admin page: publish the "latest APK version + download link" notice every signed-in
  *  client checks for right after PIN unlock (see App.tsx / UpdateAvailableModal). */
@@ -15,6 +15,7 @@ export const AppUpdateView: React.FC = () => {
   const [version, setVersion] = useState('');
   const [url, setUrl] = useState('');
   const [notes, setNotes] = useState('');
+  const [notifying, setNotifying] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,13 +69,30 @@ export const AppUpdateView: React.FC = () => {
     }
   };
 
+  const handleNotify = async () => {
+    setNotifying(true);
+    mediumImpact();
+    try {
+      const result = await notifyUsersOfUpdate();
+      notificationSuccess();
+      showToast(`Notified ${result.sent} device(s)${result.failed ? `, ${result.failed} failed` : ''}`, 'success');
+    } catch (err) {
+      console.error('Failed to notify users of update:', err);
+      showToast(err instanceof Error ? err.message : 'Failed to send notification', 'error');
+      errorWarning();
+    } finally {
+      setNotifying(false);
+    }
+  };
+
   return (
     <div className="space-y-4 animate-fade-in max-w-xl">
       <div className="p-4 bg-vault-900 border border-vault-800 rounded-2xl">
         <h2 className="text-base font-bold text-white m-0">App Update Notice</h2>
         <p className="text-xs text-vault-400 mt-0.5 m-0">
           Every user sees an update prompt right after unlocking with their PIN when their
-          installed app is older than the version published here.
+          installed app is older than the version published here. Use "Notify Users Now"
+          below to also push it immediately instead of waiting for their next unlock.
         </p>
       </div>
 
@@ -85,7 +103,7 @@ export const AppUpdateView: React.FC = () => {
           {current && (
             <div className="flex items-start gap-3 p-4 bg-emerald-950/30 border border-emerald-800/40 rounded-2xl">
               <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold text-white m-0">
                   Currently published: v{current.latest_version}
                 </p>
@@ -94,6 +112,18 @@ export const AppUpdateView: React.FC = () => {
                   Last updated {new Date(current.updated_at).toLocaleString()}
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  lightImpact();
+                  void handleNotify();
+                }}
+                disabled={notifying}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-900/60 hover:bg-emerald-800/60 text-emerald-300 hover:text-emerald-100 border border-emerald-700/50 text-[11px] font-bold transition-colors disabled:opacity-50"
+              >
+                {notifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BellRing className="w-3.5 h-3.5" />}
+                <span>{notifying ? 'Sending…' : 'Notify Users Now'}</span>
+              </button>
             </div>
           )}
 

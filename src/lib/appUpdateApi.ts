@@ -34,6 +34,26 @@ export async function setAppUpdateNotice(latestVersion: string, updateUrl: strin
 }
 
 /**
+ * Admin: pushes an "Update Available" notification to every device with a stored FCM
+ * token, for whatever version is currently published. Super-admin only, enforced
+ * server-side by the Edge Function itself (checks is_super_admin() with the caller's
+ * own session, independent of anything the client claims).
+ */
+export async function notifyUsersOfUpdate(): Promise<{ sent: number; failed: number; pruned: number }> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) throw new Error('Not signed in');
+
+  const { data, error } = await supabase.functions.invoke<{ sent: number; failed: number; pruned: number; error?: string }>(
+    'send-update-notification',
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data as { sent: number; failed: number; pruned: number };
+}
+
+/**
  * Compares two dotted version strings (e.g. "1.2" vs "1.10", "1.0.0" vs "1.0.1").
  * Returns true if `latest` is newer than `current`. Non-numeric segments and
  * missing segments are treated as 0, so "1.2" and "1.2.0" compare as equal.
