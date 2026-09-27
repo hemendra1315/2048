@@ -1210,8 +1210,10 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         ? { ...m, view_once_opened_at: claimRes.opened_at || new Date().toISOString(), view_count: claimRes.view_count, view_mode: claimRes.view_mode ?? m.view_mode }
         : m)));
 
-      const resolved = await resolveChatMediaUrl(rawUrl);
-      if (!resolved) {
+      // The edge function signs the URL itself only once the claim succeeds -- a plain
+      // resolveChatMediaUrl(rawUrl) here would go through the ordinary storage policy,
+      // which now flatly denies direct signing for view-once/allow-replay objects.
+      if (!claimRes.signedUrl) {
         showToast('Photo unavailable', 'error');
         errorWarning();
         return;
@@ -1220,7 +1222,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       notificationSuccess();
       setActiveViewOnceItem({
         id: msg.id,
-        url: resolved,
+        url: claimRes.signedUrl,
         created_at: msg.created_at,
         sender_id: msg.sender_id,
         view_mode: msg.view_mode,
@@ -1271,8 +1273,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         ? { ...m, view_once_opened_at: claimRes.opened_at || new Date().toISOString(), view_count: claimRes.view_count, view_mode: claimRes.view_mode ?? m.view_mode }
         : m)));
 
-      const resolved = await resolveChatMediaUrl(rawUrl);
-      if (!resolved) {
+      if (!claimRes.signedUrl) {
         showToast('Voice note unavailable', 'error');
         errorWarning();
         return;
@@ -1282,7 +1283,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       setPlayingAudioId(msg.id);
       setAudioProgress(0);
 
-      const audio = new Audio(resolved);
+      const audio = new Audio(claimRes.signedUrl);
       audioElementRef.current = audio;
       audio.playbackRate = audioSpeed;
       audio.ontimeupdate = () => {

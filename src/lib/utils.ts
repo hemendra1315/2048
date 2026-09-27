@@ -64,9 +64,36 @@ export function generateRecoveryCode(): string {
   return `RC-${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}`;
 }
 
+const MOCK_SALT_KEY = 'vault_mock_hash_salt';
+
+/**
+ * A random salt generated once per browser/install and persisted in localStorage, instead
+ * of a fixed value shared by every install of the app. Only used by the offline mock
+ * backend (see below) -- that backend's whole state already lives in this same browser's
+ * localStorage in the clear, so there's no "leaked database" scenario a salt defends
+ * against here; this just avoids every install computing identical hashes for identical
+ * secrets, which a fixed hardcoded salt would otherwise allow.
+ */
+function mockSalt(): string {
+  try {
+    let salt = localStorage.getItem(MOCK_SALT_KEY);
+    if (!salt) {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      salt = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem(MOCK_SALT_KEY, salt);
+    }
+    return salt;
+  } catch {
+    // localStorage unavailable (e.g. private browsing edge case) -- fall back to a fixed
+    // salt so hashing still works within this single page session.
+    return '_vault_salt_2026';
+  }
+}
+
 // SHA-256 hash with salt (used for high-entropy recovery keys and the offline mock backend)
 export async function hashSecret(secret: string): Promise<string> {
-  const msgUint8 = new TextEncoder().encode(secret + '_vault_salt_2026');
+  const msgUint8 = new TextEncoder().encode(secret + mockSalt());
   const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
