@@ -1,12 +1,15 @@
 import React, { useState, useCallback } from 'react';
-import { Users, Image as ImageIcon, ArrowLeft, Shield } from 'lucide-react';
+import { Users, FolderLock, Image as ImageIcon, ArrowLeft, Shield } from 'lucide-react';
 import { UserManagement } from './UserManagement';
 import { UserDetailView } from './UserDetailView';
+import { AdminSharedVaultsView } from './AdminSharedVaultsView';
 import { AdminMediaUploadsView } from './AdminMediaUploadsView';
-import { UserProfile } from '../../types';
+import { ConversationViewer } from './ConversationViewer';
+import { UserProfile, MessageItem } from '../../types';
 import { useBackHandler } from '../../lib/backButton';
+import { getUserConversationsForAdmin } from '../../lib/adminApi';
 
-export type AdminTab = 'users' | 'media';
+export type AdminTab = 'users' | 'vaults' | 'media';
 
 interface AdminLayoutProps {
   onReturnToUserMode: () => void;
@@ -16,15 +19,59 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
   const [activeTab, setActiveTab] = useState<AdminTab>('users');
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
 
+  // Deep Link Conversation Viewer State
+  const [deepLinkedConv, setDeepLinkedConv] = useState<{
+    conversationId: string;
+    partnerProfile: UserProfile;
+    currentUserProfile: UserProfile;
+    messages: MessageItem[];
+    highlightMessageId?: string | null;
+  } | null>(null);
+
+  // Handle Jump to Conversation from Shared Vault or Gallery
+  const handleGoToConversation = useCallback(
+    async (conversationId: string, messageId?: string) => {
+      try {
+        const convs = await getUserConversationsForAdmin(conversationId, '');
+        const target = convs.find(c => c.id === conversationId);
+        if (target) {
+          setDeepLinkedConv({
+            conversationId: target.id,
+            partnerProfile: target.partnerProfile,
+            currentUserProfile: {
+              id: target.user_a,
+              uid: 'USER_A',
+              display_name: 'User A',
+              avatar_url: null,
+              role: 'user',
+              status: 'active',
+              created_at: target.created_at,
+              updated_at: target.updated_at,
+            },
+            messages: target.messages,
+            highlightMessageId: messageId || null,
+          });
+        }
+      } catch (err) {
+        console.error('Failed to open deep linked conversation:', err);
+      }
+    },
+    []
+  );
+
   // Hardware Back Button integration
   const handleHardwareBack = useCallback(() => {
+    if (deepLinkedConv) {
+      setDeepLinkedConv(null);
+      return true;
+    }
     if (selectedUser) {
       setSelectedUser(null);
       return true;
     }
     onReturnToUserMode();
     return true;
-  }, [selectedUser, onReturnToUserMode]);
+  }, [deepLinkedConv, selectedUser, onReturnToUserMode]);
 
   useBackHandler(true, handleHardwareBack);
 
@@ -53,15 +100,16 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
         </button>
       </header>
 
-      {/* Primary Top-level Tab Navigation: Users (Page 1) and Admin Media Uploads (Page 2) */}
-      <nav className="bg-vault-900/60 border-b border-vault-800 px-4 py-2 flex items-center gap-2">
+      {/* Primary Top-level Tab Navigation: Users, Shared Vaults, and Admin Uploads */}
+      <nav className="bg-vault-900/60 border-b border-vault-800 px-4 py-2 flex items-center gap-2 overflow-x-auto">
         <button
           type="button"
           onClick={() => {
             setActiveTab('users');
             setSelectedUser(null);
+            setDeepLinkedConv(null);
           }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
             activeTab === 'users'
               ? 'bg-purple-600 text-white shadow-md'
               : 'text-vault-400 hover:text-vault-200 hover:bg-vault-800/50'
@@ -74,39 +122,65 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
         <button
           type="button"
           onClick={() => {
+            setActiveTab('vaults');
+            setSelectedUser(null);
+            setDeepLinkedConv(null);
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
+            activeTab === 'vaults'
+              ? 'bg-purple-600 text-white shadow-md'
+              : 'text-vault-400 hover:text-vault-200 hover:bg-vault-800/50'
+          }`}
+        >
+          <FolderLock className="w-4 h-4" />
+          <span>Shared Vaults</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
             setActiveTab('media');
             setSelectedUser(null);
+            setDeepLinkedConv(null);
           }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
             activeTab === 'media'
               ? 'bg-purple-600 text-white shadow-md'
               : 'text-vault-400 hover:text-vault-200 hover:bg-vault-800/50'
           }`}
         >
           <ImageIcon className="w-4 h-4" />
-          <span>Admin Media Uploads</span>
+          <span>Admin Uploads</span>
         </button>
       </nav>
 
       {/* Main Content Area */}
       <main className="flex-1 p-4 max-w-7xl w-full mx-auto">
-        {activeTab === 'users' && (
-          selectedUser ? (
-            <UserDetailView
-              user={selectedUser}
-              onBack={() => setSelectedUser(null)}
-            />
+        {activeTab === 'users' &&
+          (selectedUser ? (
+            <UserDetailView user={selectedUser} onBack={() => setSelectedUser(null)} />
           ) : (
-            <UserManagement
-              onSelectUser={user => setSelectedUser(user)}
-            />
-          )
+            <UserManagement onSelectUser={user => setSelectedUser(user)} />
+          ))}
+
+        {activeTab === 'vaults' && (
+          <AdminSharedVaultsView onGoToConversation={handleGoToConversation} />
         )}
 
-        {activeTab === 'media' && (
-          <AdminMediaUploadsView />
-        )}
+        {activeTab === 'media' && <AdminMediaUploadsView />}
       </main>
+
+      {/* Deep linked Full-Screen DM Viewer */}
+      {deepLinkedConv && (
+        <ConversationViewer
+          conversationId={deepLinkedConv.conversationId}
+          partnerProfile={deepLinkedConv.partnerProfile}
+          currentUserProfile={deepLinkedConv.currentUserProfile}
+          messages={deepLinkedConv.messages}
+          highlightMessageId={deepLinkedConv.highlightMessageId}
+          onBack={() => setDeepLinkedConv(null)}
+        />
+      )}
     </div>
   );
 };

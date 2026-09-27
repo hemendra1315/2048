@@ -53,6 +53,7 @@ export const AuthModal: React.FC = () => {
 
   // Onboarding form state
   const [newUsername, setNewUsername] = useState('');
+  const [newInstagramUrl, setNewInstagramUrl] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [hasSavedRecoveryCode, setHasSavedRecoveryCode] = useState(false);
@@ -87,7 +88,7 @@ export const AuthModal: React.FC = () => {
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!identifier.trim() || !password) {
-      showToast('Please enter your Username/UID and password', 'error');
+      showToast('Please enter your Username and PIN', 'error');
       return;
     }
     try {
@@ -107,13 +108,12 @@ export const AuthModal: React.FC = () => {
   };
 
   // Quick Demo Account switcher
-  const handleQuickDemo = async (role: 'user' | 'admin' | 'friend') => {
-    // The mock backend ignores passwords; this path does not exist outside local development.
+  const handleQuickDemo = async (_role: 'user' | 'admin' | 'friend') => {
     if (!isShowDemoAccounts()) return;
-    const demoUser = role === 'admin' ? 'admin' : role === 'friend' ? 'elena' : 'alex';
-    setIdentifier(demoUser);
+    setIdentifier('gopika');
+    setPassword('1245');
     try {
-      await loginWithPassword(demoUser, '');
+      await loginWithPassword('gopika', '1245');
     } catch {
       // toast shown by AuthContext
     }
@@ -134,15 +134,15 @@ export const AuthModal: React.FC = () => {
     setOnboardingStep('password');
   };
 
-  // Step 2: Validate Password -> Move to Biometrics
+  // Step 2: Validate PIN -> Move to Biometrics
   const handlePasswordNext = (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPassword.length < 8) {
-      showToast('Password must be at least 8 characters', 'error');
+    if (newPassword.length < 4) {
+      showToast('PIN must be at least 4 digits', 'error');
       return;
     }
     if (newPassword !== confirmPassword) {
-      showToast('Passwords do not match', 'error');
+      showToast('PINs do not match', 'error');
       return;
     }
     if (isBiometricsSupported) {
@@ -164,6 +164,7 @@ export const AuthModal: React.FC = () => {
         username: newUsername.trim().toLowerCase(),
         password: newPassword,
         enableBiometrics: biometricPref,
+        instagramUrl: newInstagramUrl.trim() || undefined,
       });
       if (res.recoveryCode) setOnboardingStep('recovery_code');
     } catch {
@@ -186,8 +187,8 @@ export const AuthModal: React.FC = () => {
       showToast('Please fill all recovery fields', 'error');
       return;
     }
-    if (recoveryNewPassword.length < 8) {
-      showToast('New password must be at least 8 characters', 'error');
+    if (recoveryNewPassword.length < 4) {
+      showToast('New PIN must be at least 4 digits', 'error');
       return;
     }
     try {
@@ -239,18 +240,16 @@ export const AuthModal: React.FC = () => {
                 <span className="rounded bg-[#10B981]" />
               </span>
               <h1 className="t-h1 mt-3 mb-0">Sign in</h1>
-              <p className="t-sm c2 m-0">Welcome back. Use your username and password, or a passkey.</p>
+              <p className="t-sm c2 m-0">Welcome back. Use your username and PIN, or a passkey.</p>
             </div>
 
             {/* Quick Demo Switcher (local development with the mock backend only) */}
             {import.meta.env.DEV && isShowDemoAccounts() && (
               <div className="card p-3 mt-5 flex flex-col gap-2" role="group" aria-label="Demo accounts">
                 <span className="t-over flex items-center gap-1"><Sparkles className="w-3 h-3" aria-hidden /> Demo accounts</span>
-                <div className="grid grid-cols-3 gap-1.5">
-                  <button type="button" onClick={() => handleQuickDemo('user')} className="btn btn-s btn-sm">@alex</button>
-                  <button type="button" onClick={() => handleQuickDemo('friend')} className="btn btn-s btn-sm">@elena</button>
-                  <button type="button" onClick={() => handleQuickDemo('admin')} className="btn btn-s btn-sm">
-                    <ShieldAlert className="w-3.5 h-3.5" aria-hidden /> Admin
+                <div className="grid grid-cols-1 gap-1.5">
+                  <button type="button" onClick={() => handleQuickDemo('admin')} className="btn btn-s btn-sm justify-center">
+                    <ShieldAlert className="w-3.5 h-3.5" aria-hidden /> @gopika (Super Admin)
                   </button>
                 </div>
               </div>
@@ -265,20 +264,21 @@ export const AuthModal: React.FC = () => {
                   autoComplete="username"
                   value={identifier}
                   onChange={e => setIdentifier(e.target.value)}
-                  placeholder="Username or ID"
+                  placeholder="Username"
                   className="inp outline-none focus:border-cy"
                 />
               </label>
               <label className="field">
-                <span className="lab">Password</span>
+                <span className="lab">Security PIN</span>
                 <input
                   type="password"
                   maxLength={72}
                   required
+                  inputMode="numeric"
                   autoComplete="current-password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="Password"
+                  placeholder="Enter 4+ digit PIN"
                   className="inp outline-none focus:border-cy"
                 />
               </label>
@@ -287,11 +287,11 @@ export const AuthModal: React.FC = () => {
                 onClick={() => setMode('recovery')}
                 className="self-end -mt-2.5 min-h-[44px] flex items-center text-sm font-semibold text-cy"
               >
-                Forgot password?
+                Forgot PIN?
               </button>
               <button type="submit" disabled={loading} aria-busy={loading} className="btn btn-p btn-block">
                 {loading ? <RefreshCw className="i i-sm animate-spin" aria-hidden /> : null}
-                {loading ? 'Signing in…' : 'Sign in'}
+                {loading ? 'Unlocking…' : 'Unlock with PIN'}
               </button>
             </form>
 
@@ -304,7 +304,7 @@ export const AuthModal: React.FC = () => {
                 </div>
                 <button type="button" onClick={handleBiometricAuth} disabled={loading} className="btn btn-s btn-block">
                   <KeyRound className="i" aria-hidden />
-                  Sign in with a passkey
+                  Sign in with passkey / fingerprint
                 </button>
               </>
             )}
@@ -325,7 +325,7 @@ export const AuthModal: React.FC = () => {
               </p>
               <p className="t-cap m-0 flex items-center gap-1.5">
                 <Lock className="w-3.5 h-3.5" aria-hidden />
-                Your password is never stored on this device.
+                Your PIN is encrypted and never stored in plain text.
               </p>
             </div>
           </div>
@@ -374,13 +374,13 @@ export const AuthModal: React.FC = () => {
                   </div>
                   <h3 className="t-h2 text-white">Choose Your Identity</h3>
                   <p className="t-sm c2 mt-1">
-                    No email or phone required. Pick a handle.
+                    No email or phone required. Pick a unique handle.
                   </p>
                 </div>
 
                 <div className="space-y-4">
                   <label className="field">
-                    <span className="lab">Username</span>
+                    <span className="lab">Unique Username</span>
                     <div className="relative">
                       <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-vault-400 font-mono text-sm">
                         @
@@ -395,61 +395,80 @@ export const AuthModal: React.FC = () => {
                         className="inp pl-8 font-mono outline-none focus:border-cy"
                       />
                     </div>
-                    <p className="t-cap mt-1">
-                      A unique UID (e.g. CIPHER-4921) will be generated automatically.
+                    <p className="t-cap mt-1 text-vault-400">
+                      Must be unique across all users. Only letters, numbers, and underscores.
+                    </p>
+                  </label>
+
+                  <label className="field">
+                    <div className="flex items-center justify-between">
+                      <span className="lab">Instagram Profile / Handle</span>
+                      <span className="text-[11px] text-vault-400 font-mono">Optional</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={newInstagramUrl}
+                      onChange={e => setNewInstagramUrl(e.target.value)}
+                      placeholder="https://instagram.com/yourhandle or @yourhandle"
+                      className="inp font-mono text-sm outline-none focus:border-cy"
+                    />
+                    <p className="t-cap mt-1 text-vault-400">
+                      For reporting bugs, requesting updates, and early beta access.
                     </p>
                   </label>
 
                   <button
                     type="submit"
-                    className="btn btn-p btn-block gap-2"
+                    className="btn btn-p btn-block gap-2 mt-2"
                   >
-                    <span>Continue to Password</span>
+                    <span>Continue to PIN</span>
                     <ArrowRight className="i" />
                   </button>
                 </div>
               </form>
             )}
 
-            {/* STEP 2: PASSWORD */}
+            {/* STEP 2: PIN */}
             {onboardingStep === 'password' && (
               <form onSubmit={handlePasswordNext} className="flex flex-col flex-1">
                 <div className="flex flex-col items-center text-center mb-5">
                   <div className="w-12 h-12 rounded-[14px] bg-[#111214] border border-vault-700 flex items-center justify-center text-gold mb-3">
                     <KeyRound className="w-6 h-6" />
                   </div>
-                  <h3 className="t-h2 text-white">Create a Password</h3>
+                  <h3 className="t-h2 text-white">Create a Security PIN</h3>
                   <p className="t-sm c2 mt-1">
-                    Your master key to access your private messages.
+                    Your master PIN to unlock your stealth vault and messages.
                   </p>
                 </div>
 
                 <div className="space-y-3.5">
                   <label className="field">
-                    <span className="lab">Password (min 8 characters)</span>
+                    <span className="lab">Security PIN (min 4 digits)</span>
                     <input
                       type="password"
                       maxLength={72}
                       required
                       autoFocus
+                      inputMode="numeric"
                       autoComplete="new-password"
                       value={newPassword}
                       onChange={e => setNewPassword(e.target.value)}
-                      placeholder="••••••••"
+                      placeholder="••••"
                       className="inp outline-none focus:border-cy"
                     />
                   </label>
 
                   <label className="field">
-                    <span className="lab">Confirm Password</span>
+                    <span className="lab">Confirm PIN</span>
                     <input
                       type="password"
                       maxLength={72}
                       required
+                      inputMode="numeric"
                       autoComplete="new-password"
                       value={confirmPassword}
                       onChange={e => setConfirmPassword(e.target.value)}
-                      placeholder="••••••••"
+                      placeholder="••••"
                       className="inp outline-none focus:border-cy"
                     />
                   </label>
@@ -511,7 +530,7 @@ export const AuthModal: React.FC = () => {
                     onClick={() => handleBiometricChoice(false)}
                     className="btn btn-s btn-block text-xs"
                   >
-                    Skip for Now (Use Password Only)
+                    Skip for Now (Use PIN Only)
                   </button>
                 </div>
               </div>
@@ -526,7 +545,7 @@ export const AuthModal: React.FC = () => {
                   </div>
                   <h3 className="t-h2 text-white">Save Account Recovery Key</h3>
                   <p className="t-sm c2 mt-1">
-                    Store this key securely. It is the <strong className="text-rose-400 font-semibold">ONLY</strong> way to reset your password if forgotten.
+                    Store this key securely. It is the <strong className="text-rose-400 font-semibold">ONLY</strong> way to reset your PIN if forgotten.
                   </p>
                 </div>
 
@@ -600,7 +619,7 @@ export const AuthModal: React.FC = () => {
         )}
 
         {/* ========================================================================= */}
-        {/* 3. RECOVERY MODE (Reset Password via Recovery Code) */}
+        {/* 3. RECOVERY MODE (Reset PIN via Recovery Code) */}
         {/* ========================================================================= */}
         {mode === 'recovery' && (
           <div className="flex flex-col flex-1">
@@ -608,8 +627,8 @@ export const AuthModal: React.FC = () => {
               <div className="w-12 h-12 rounded-[14px] bg-[#111214] border border-vault-700 flex items-center justify-center text-gold mb-2">
                 <RefreshCw className="w-6 h-6" />
               </div>
-              <h3 className="t-h2 text-white">Reset password</h3>
-              <p className="t-sm c2 mt-1">Enter your Recovery Key to set a new password</p>
+              <h3 className="t-h2 text-white">Reset PIN</h3>
+              <p className="t-sm c2 mt-1">Enter your Recovery Key to set a new PIN</p>
             </div>
 
             <form onSubmit={handleRecoverySubmit} className="flex flex-col gap-3.5">
@@ -638,15 +657,16 @@ export const AuthModal: React.FC = () => {
               </label>
 
               <label className="field">
-                <span className="lab">New Password (min 8 characters)</span>
+                <span className="lab">New PIN (min 4 digits)</span>
                 <input
                   type="password"
                   maxLength={72}
                   required
+                  inputMode="numeric"
                   autoComplete="new-password"
                   value={recoveryNewPassword}
                   onChange={e => setRecoveryNewPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="••••"
                   className="inp outline-none focus:border-cy"
                 />
               </label>
@@ -657,7 +677,7 @@ export const AuthModal: React.FC = () => {
                 className="btn btn-p btn-block gap-2 mt-3"
               >
                 <KeyRound className="i" />
-                <span>Reset Password & Unlock</span>
+                <span>Reset PIN & Unlock</span>
               </button>
             </form>
 

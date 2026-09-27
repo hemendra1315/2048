@@ -39,16 +39,12 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editDisplayName, setEditDisplayName] = useState('');
+  const [editInstagramUrl, setEditInstagramUrl] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
   const [cropSource, setCropSource] = useState<string | null>(null);
   const [isSavingAvatar, setIsSavingAvatar] = useState(false);
 
-  const [stats, setStats] = useState({
-    connections: 0,
-    media: 0,
-    messages: 0,
-  });
   // "Connections" here means people you have a chat with — the connection_requests/connections
   // tables exist but nothing in the live app writes to them (chats are started directly by UID),
   // so counting them always read 0 even for active accounts.
@@ -58,27 +54,18 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
   useEffect(() => {
     if (!user) return;
     setEditDisplayName(user.display_name || '');
+    setEditInstagramUrl(user.instagram_url || '');
 
     const loadProfileStats = async () => {
       try {
         if (isSupabaseConfigured()) {
-          const [{ count: galleryCount }, { count: messageCount }, { data: chatList }] = await Promise.all([
-            supabase.from('gallery_items').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
-            supabase.from('messages').select('*', { count: 'exact', head: true }).eq('sender_id', user.id),
-            supabase.rpc('get_chat_list'),
-          ]);
+          const { data: chatList } = await supabase.rpc('get_chat_list');
 
           const chats = (chatList ?? []) as {
             partner_id: string;
             last_message_at: string | null;
           }[];
           const partnerIds = chats.map(c => c.partner_id);
-
-          setStats({
-            connections: partnerIds.length,
-            media: galleryCount ?? 0,
-            messages: messageCount ?? 0,
-          });
 
           if (partnerIds.length > 0) {
             const { data: profiles } = await supabase
@@ -97,13 +84,7 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
             setRecentConnections([]);
           }
         } else {
-          const gallery = mockBackend.getGallery(user.id);
           const convs = mockBackend.getConversations(user.id);
-          setStats({
-            connections: convs.length,
-            media: gallery.length,
-            messages: 0,
-          });
           setRecentConnections(
             convs.slice(0, 6).map(c => ({
               id: c.partner.id,
@@ -122,10 +103,9 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
   }, [user]);
 
   const copyUid = () => {
-    if (user?.uid) {
-      navigator.clipboard.writeText(user.uid);
-      showToast(`UID ${user.uid} copied to clipboard`, 'success');
-    }
+    const handle = user?.username ? `@${user.username}` : `@${user?.uid?.toLowerCase() || 'user'}`;
+    navigator.clipboard.writeText(handle);
+    showToast(`Handle ${handle} copied to clipboard`, 'success');
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -136,7 +116,10 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
     }
     setIsSavingProfile(true);
     try {
-      await updateProfile({ display_name: editDisplayName.trim() });
+      await updateProfile({
+        display_name: editDisplayName.trim(),
+        instagram_url: editInstagramUrl.trim() || null,
+      });
       setIsEditModalOpen(false);
     } catch {
       // Toast already handled by updateProfile
@@ -235,36 +218,18 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
           @{user?.username || user?.uid?.toLowerCase() || 'user'}
         </p>
 
-        {/* UID Chip */}
+        {/* Username Chip */}
         <button
           type="button"
           onClick={copyUid}
-          title="Click to copy your UID"
-          aria-label={`UID ${user?.uid || ''}, click to copy`}
+          title="Click to copy your handle"
+          aria-label={`@${user?.username || user?.uid?.toLowerCase() || 'user'}, click to copy`}
           className="tag tag-em font-mono mt-3 gap-1.5 cursor-pointer hover:opacity-90 active:scale-98 transition-all"
         >
           <ShieldCheck className="w-3.5 h-3.5" aria-hidden />
-          <span>{user?.uid || 'ID'}</span>
+          <span>@{user?.username || user?.uid?.toLowerCase() || 'user'}</span>
           <Copy className="w-3 h-3 opacity-70" aria-hidden />
         </button>
-      </section>
-
-      {/* 3 Metric Summary Cards */}
-      <section className="grid grid-cols-3 gap-2" aria-label="Profile statistics">
-        <div className="card p-3.5 flex flex-col items-center justify-center text-center">
-          <span className="t-h2 font-bold font-mono text-vault-50">{stats.connections}</span>
-          <span className="t-cap c3 mt-0.5">Connections</span>
-        </div>
-        <div className="card p-3.5 flex flex-col items-center justify-center text-center">
-          <span className="t-h2 font-bold font-mono text-vault-50">{stats.media}</span>
-          <span className="t-cap c3 mt-0.5">Media</span>
-        </div>
-        <div className="card p-3.5 flex flex-col items-center justify-center text-center">
-          <span className="t-h2 font-bold font-mono text-vault-50">
-            {stats.messages >= 1000 ? `${(stats.messages / 1000).toFixed(1)}k` : stats.messages}
-          </span>
-          <span className="t-cap c3 mt-0.5">Messages</span>
-        </div>
       </section>
 
       {/* Connections Section */}
@@ -278,10 +243,9 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
           <button
             type="button"
             onClick={() => {
-              if (user?.uid) {
-                navigator.clipboard.writeText(user.uid);
-                showToast(`Share your UID ${user.uid} with contacts`, 'info');
-              }
+              const handle = user?.username ? `@${user.username}` : `@${user?.uid?.toLowerCase() || 'user'}`;
+              navigator.clipboard.writeText(handle);
+              showToast(`Share your handle ${handle} with contacts`, 'info');
             }}
             className="flex flex-col items-center gap-1.5 shrink-0 group cursor-pointer bg-transparent border-0 p-0"
             aria-label="Add new connection"
@@ -427,6 +391,21 @@ export const ProfileView: React.FC<ProfileViewProps> = () => {
                   placeholder="Enter your name"
                   className="inp text-sm"
                   maxLength={50}
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="edit-insta" className="lab">
+                  Instagram Handle / URL (optional)
+                </label>
+                <input
+                  id="edit-insta"
+                  type="text"
+                  value={editInstagramUrl}
+                  onChange={e => setEditInstagramUrl(e.target.value)}
+                  placeholder="@yourhandle or instagram.com/handle"
+                  className="inp text-sm"
+                  maxLength={100}
                 />
               </div>
 

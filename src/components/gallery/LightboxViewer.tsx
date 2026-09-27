@@ -16,12 +16,15 @@ import {
   Undo2,
   Reply,
   Smile,
+  FolderHeart,
+  Shield,
 } from 'lucide-react';
 import { GalleryItem, ReactionEmoji, REACTION_EMOJIS } from '../../types';
 import type { MediaUrlState } from '../../lib/mediaUrls';
 import { MediaImage } from '../common/MediaImage';
-import { lightImpact, mediumImpact, selectionChange } from '../../lib/haptics';
+import { lightImpact, mediumImpact, selectionChange, errorWarning } from '../../lib/haptics';
 import { useToast } from '../../context/ToastContext';
+import { useScreenProtection, ScreenShieldOverlay } from '../../lib/screenProtection';
 
 interface LightboxViewerProps {
   item: GalleryItem | null;
@@ -35,12 +38,14 @@ interface LightboxViewerProps {
   mediaState?: MediaUrlState;
   onRetry?: () => void;
   isViewOnce?: boolean;
+  viewMode?: 'view_once' | 'allow_replay' | 'keep_in_chat';
   /* Instagram Chat Photo Actions: */
   onReply?: () => void;
   onReact?: (emoji: ReactionEmoji) => void;
   myReaction?: ReactionEmoji;
   senderName?: string;
   isMyMessage?: boolean;
+  onSaveToSharedVault?: (item: GalleryItem) => void;
 }
 
 export const LightboxViewer: React.FC<LightboxViewerProps> = ({
@@ -53,13 +58,22 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
   mediaState,
   onRetry,
   isViewOnce = false,
+  viewMode,
   onReply,
   onReact,
   myReaction,
   senderName,
   isMyMessage = false,
+  onSaveToSharedVault,
 }) => {
   const { showToast } = useToast();
+  const isEphemeral = isViewOnce || viewMode === 'view_once' || viewMode === 'allow_replay';
+  const { isShielded } = useScreenProtection(isEphemeral, {
+    onScreenshotAttempt: () => {
+      showToast('Screenshots are blocked for ephemeral media', 'error');
+      errorWarning();
+    },
+  });
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [dragY, setDragY] = useState(0);
@@ -217,6 +231,11 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
   };
 
   const handleSaveToDevice = async () => {
+    if (isEphemeral) {
+      showToast('Saving ephemeral photos is prohibited', 'error');
+      errorWarning();
+      return;
+    }
     if (!downloadUrl) return;
     setIsSaving(true);
     lightImpact();
@@ -264,8 +283,11 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
       aria-modal="true"
       aria-label="Photo viewer"
       style={{ backgroundColor: `rgba(0, 0, 0, ${0.96 * bgOpacity})` }}
+      onContextMenu={isEphemeral ? e => e.preventDefault() : undefined}
       className="fixed inset-0 z-50 backdrop-blur-2xl flex flex-col justify-between select-none touch-none animate-fade-in"
     >
+      <ScreenShieldOverlay show={isShielded} message="Screenshots, screen recording, and saving are strictly blocked for ephemeral media." />
+
       {/* Top Bar (HUD) */}
       <header
         className={`p-4 pt-[calc(0.75rem+env(safe-area-inset-top))] flex items-center justify-between z-20 transition-all duration-200 ${
@@ -282,10 +304,11 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
         </button>
 
         <div className="text-center px-2 min-w-0">
-          {isViewOnce ? (
+          {isEphemeral ? (
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald/20 border border-emerald/40 text-emerald text-xs font-bold tracking-wide">
               <EyeOff className="w-3.5 h-3.5" />
-              <span>1 View Once</span>
+              <span>{viewMode === 'allow_replay' ? '2 Views (Twice)' : '1 View Once'}</span>
+              <Shield className="w-3 h-3 text-emerald ml-0.5" />
             </div>
           ) : (
             <>
@@ -316,7 +339,7 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
           >
             {scale > 1 ? <ZoomOut className="i" /> : <ZoomIn className="i" />}
           </button>
-          {!isViewOnce && onToggleFavorite && (
+          {!isEphemeral && onToggleFavorite && (
             <button
               type="button"
               onClick={() => onToggleFavorite(item)}
@@ -326,7 +349,7 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
               <Heart className={`i ${item.is_favorite ? 'fill-current' : ''}`} aria-hidden />
             </button>
           )}
-          {!isViewOnce && (
+          {!isEphemeral && (
             <button
               type="button"
               onClick={() => {
@@ -350,6 +373,7 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
         onClick={toggleHud}
+        onContextMenu={isEphemeral ? e => e.preventDefault() : undefined}
       >
         {/* Double-tap heart burst animation */}
         {showHeartBurst && (
@@ -362,6 +386,8 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
           style={{
             transform: `translate(${position.x}px, ${position.y + dragY}px) scale(${scale * dragScale})`,
             transition: isDraggingDown || isPanning ? 'none' : 'transform 240ms cubic-bezier(0.16, 1, 0.3, 1)',
+            userSelect: isEphemeral ? 'none' : undefined,
+            WebkitUserSelect: isEphemeral ? 'none' : undefined,
           }}
           className="relative w-full h-full max-h-[75vh] sm:max-h-[80vh] flex items-center justify-center will-change-transform"
         >
@@ -376,7 +402,7 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
       </main>
 
       {/* Bottom Actions Bar (Instagram Style) */}
-      {!isViewOnce ? (
+      {!isEphemeral ? (
         <div className="relative z-20 max-w-md w-full mx-auto">
           {/* Quick-Emoji Picker Sheet */}
           {showEmojiPicker && onReact && (
@@ -468,16 +494,18 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
             )}
 
             {/* 4. Save / Download to device */}
-            <button
-              type="button"
-              disabled={!downloadUrl || isSaving}
-              onClick={handleSaveToDevice}
-              className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[56px] text-vault-50 hover:text-white active:scale-95 transition-transform"
-              aria-label="Save photo to device"
-            >
-              <Download className="i" aria-hidden />
-              <span className="t-cap">{isSaving ? 'Saving…' : 'Save'}</span>
-            </button>
+            {!isEphemeral && (
+              <button
+                type="button"
+                disabled={!downloadUrl || isSaving}
+                onClick={handleSaveToDevice}
+                className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[56px] text-vault-50 hover:text-white active:scale-95 transition-transform"
+                aria-label="Save photo to device"
+              >
+                <Download className="i" aria-hidden />
+                <span className="t-cap">{isSaving ? 'Saving…' : 'Save'}</span>
+              </button>
+            )}
 
             {/* 5. More Emojis button if in chat */}
             {onReact && (
@@ -494,6 +522,22 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
               >
                 <Smile className="i" aria-hidden />
                 <span className="t-cap">Emoji</span>
+              </button>
+            )}
+
+            {/* 5.5 Save to Shared Vault */}
+            {onSaveToSharedVault && (
+              <button
+                type="button"
+                onClick={() => {
+                  mediumImpact();
+                  onSaveToSharedVault(item);
+                }}
+                className="btn btn-g flex-col gap-1 h-auto py-2 px-3 min-w-[56px] text-vault-300 hover:text-emerald"
+                aria-label="Save to Shared Vault"
+              >
+                <FolderHeart className="i" aria-hidden />
+                <span className="t-cap">Vault</span>
               </button>
             )}
 
@@ -551,8 +595,9 @@ export const LightboxViewer: React.FC<LightboxViewerProps> = ({
             showHud ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
           }`}
         >
-          <div className="glass-pill px-4 py-1.5 rounded-full text-xs font-medium text-vault-300 tracking-wide shadow-lg">
-            Swipe down or tap close to finish viewing
+          <div className="glass-pill px-4 py-1.5 rounded-full text-xs font-semibold text-vault-300 tracking-wide shadow-lg flex items-center gap-2">
+            <Shield className="w-3.5 h-3.5 text-emerald" />
+            <span>{viewMode === 'allow_replay' ? 'View Twice · Screenshots Blocked' : 'View Once · Screenshots Blocked'}</span>
           </div>
         </footer>
       )}

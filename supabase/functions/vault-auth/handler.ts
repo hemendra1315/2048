@@ -90,8 +90,8 @@ function assertActiveStatus(status: unknown): void {
 }
 
 function passwordProblem(password: unknown): string | null {
-  if (typeof password !== 'string' || password.length < 8) return 'Password must be at least 8 characters';
-  if (new TextEncoder().encode(password).length > 72) return 'Password must be at most 72 bytes';
+  if (typeof password !== 'string' || password.length < 4) return 'PIN must be at least 4 digits';
+  if (new TextEncoder().encode(password).length > 72) return 'PIN must be at most 72 bytes';
   return null;
 }
 

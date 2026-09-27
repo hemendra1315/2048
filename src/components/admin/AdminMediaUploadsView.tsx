@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Upload, Trash2, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { listAdminMediaUploads, uploadAdminMedia, deleteAdminMedia } from '../../lib/adminApi';
 import { useAuth } from '../../context/AuthContext';
@@ -21,7 +21,7 @@ export const AdminMediaUploadsView: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadUploads = async () => {
+  const loadUploads = useCallback(async () => {
     setLoading(true);
     try {
       const data = await listAdminMediaUploads();
@@ -32,11 +32,11 @@ export const AdminMediaUploadsView: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showToast]);
 
   useEffect(() => {
     void loadUploads();
-  }, []);
+  }, [loadUploads]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

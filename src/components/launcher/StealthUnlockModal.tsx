@@ -66,29 +66,30 @@ export const StealthUnlockModal: React.FC = () => {
       >
         <div className="w-9 h-1 rounded-full bg-vault-700 self-center" aria-hidden="true" />
         <div className="flex items-center justify-between">
-          <h2 id="unlock-title" className="t-h2 m-0">Enter password</h2>
+          <h2 id="unlock-title" className="t-h2 m-0">Enter PIN</h2>
           <button type="button" className="ib" aria-label="Close" onClick={closeUnlockModal}>
             <X className="i" aria-hidden />
           </button>
         </div>
         <label className="field">
-          <span className="lab">Password</span>
+          <span className="lab">PIN</span>
           <span className="inp">
             <Lock className="i i-sm c3" aria-hidden />
             <input
               ref={inputRef}
               type={showPassword ? 'text' : 'password'}
+              inputMode="numeric"
               autoComplete="current-password"
               maxLength={72}
               value={password}
               onChange={e => setPassword(e.target.value)}
-              placeholder="Password"
+              placeholder="Enter PIN"
               className="flex-1 min-w-0 bg-transparent border-0 outline-none text-vault-50 text-base"
             />
             <button
               type="button"
               onClick={() => setShowPassword(v => !v)}
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              aria-label={showPassword ? 'Hide PIN' : 'Show PIN'}
               className="ib -mr-3"
             >
               {showPassword ? <EyeOff className="i" aria-hidden /> : <Eye className="i" aria-hidden />}

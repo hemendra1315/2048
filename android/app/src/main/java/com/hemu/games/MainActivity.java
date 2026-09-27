@@ -26,9 +26,13 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(ScreenProtectionPlugin.class);
         super.onCreate(savedInstanceState);
-        // Keep chats out of the recent-apps thumbnail, screenshots and screen recordings.
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
+        // Keep chats out of recent-apps and screen recordings in release builds.
+        boolean isDebuggable = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        if (!isDebuggable) {
+            getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
+        }
         createGameNotificationChannels();
     }
 

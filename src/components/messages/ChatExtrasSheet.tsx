@@ -7,15 +7,15 @@ import { expectExternalActivity } from '../../lib/externalActivity';
 import { lightImpact, selectionChange, errorWarning } from '../../lib/haptics';
 
 interface ChatExtrasSheetProps {
-  canPlayGames: boolean;
+  canPlayGames?: boolean;
   onClose: () => void;
   onSticker: (id: string) => void;
-  onStartGame: () => void;
+  onStartGame?: () => void;
   onShareScore: (gameId: string, score: number) => void;
 }
 
-/** Stickers, and games you can play or brag about in this chat. */
-export const ChatExtrasSheet: React.FC<ChatExtrasSheetProps> = ({ canPlayGames, onClose, onSticker, onStartGame, onShareScore }) => {
+/** Stickers, and game scores you can share in this chat. */
+export const ChatExtrasSheet: React.FC<ChatExtrasSheetProps> = ({ onClose, onSticker, onShareScore }) => {
   const [tab, setTab] = useState<'stickers' | 'games'>('stickers');
   const { getHighScore } = useGame();
   const scored = COVER_GAMES.filter(g => g.implemented && g.id !== 'tic_tac_toe' && getHighScore(g.id) > 0);
@@ -67,20 +67,7 @@ export const ChatExtrasSheet: React.FC<ChatExtrasSheetProps> = ({ canPlayGames, 
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {canPlayGames && (
-                <button
-                  type="button"
-                  onClick={onStartGame}
-                  className="flex items-center gap-3 p-3 rounded-xl bg-vault-950 border border-vault-800 hover:border-emerald text-left min-h-[56px]"
-                >
-                  <Gamepad2 className="w-6 h-6 text-emerald" aria-hidden />
-                  <span>
-                    <span className="block text-sm font-bold text-white">Play Tic-Tac-Toe</span>
-                    <span className="block text-xs text-vault-400">Challenge them right here in the chat. You go first.</span>
-                  </span>
-                </button>
-              )}
-              <p className="text-xs text-vault-400 mt-2 mb-0 px-1">Share your best score</p>
+              <p className="text-xs text-vault-400 mt-1 mb-0 px-1 font-semibold uppercase tracking-wider">Share your best score</p>
               {scored.length === 0 ? (
                 <p className="text-xs text-vault-500 px-1 m-0">Play a game on the home screen to get a score you can share.</p>
               ) : (

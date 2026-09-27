@@ -229,9 +229,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         streak: prev.streak + 1,
       };
       localStorage.setItem('games_daily_challenge', JSON.stringify(updated));
+
+      if (isSupabaseConfigured() && user?.id) {
+        supabase.rpc('set_daily_challenge', {
+          p_streak: updated.streak,
+          p_date: updated.dateKey,
+        }).then(({ error }) => {
+          if (error) console.warn('[games] could not sync daily challenge to cloud:', error.message);
+        });
+      }
+
       return updated;
     });
-  }, []);
+  }, [user?.id]);
 
   const persistHighScore = useCallback((game: CoverGameType, score: number) => {
     const userId = user?.id || 'anonymous';

@@ -107,22 +107,27 @@ export function usePresence(userIds: string[]): Record<string, PresenceInfo> {
   return map;
 }
 
-/** "online", "last seen just now", "last seen 5 min ago", "last seen today at 14:03", ... */
-export function describePresence(p: PresenceInfo | undefined): string | null {
-  if (!p) return null;
-  if (p.isOnline) return 'online';
-  if (!p.lastSeenAt) return null;
-  const seen = new Date(p.lastSeenAt);
+/** "Active now", "Active just now", "Active 5m ago", "Active today at 14:03", "Active yesterday at 14:03", "Active 12 Jan", "Active recently" */
+export function describePresence(p: PresenceInfo | undefined, fallbackTimestamp?: string | null): string {
+  if (p?.isOnline) return 'Active now';
+  const rawTs = p?.lastSeenAt || fallbackTimestamp;
+  if (!rawTs) return 'Active recently';
+  const seen = new Date(rawTs);
+  if (isNaN(seen.getTime())) return 'Active recently';
   const mins = Math.floor((Date.now() - seen.getTime()) / 60000);
-  if (mins < 1) return 'last seen just now';
-  if (mins < 60) return `last seen ${mins} min ago`;
+  if (mins < 1) return 'Active just now';
+  if (mins < 60) return `Active ${mins}m ago`;
+  const hours = Math.floor(mins / 60);
   const time = seen.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
-  if (seen.toDateString() === today.toDateString()) return `last seen today at ${time}`;
-  if (seen.toDateString() === yesterday.toDateString()) return `last seen yesterday at ${time}`;
-  return `last seen ${seen.toLocaleDateString([], { day: 'numeric', month: 'short' })}`;
+  if (seen.toDateString() === today.toDateString()) {
+    if (hours < 12) return `Active ${hours}h ago`;
+    return `Active today at ${time}`;
+  }
+  if (seen.toDateString() === yesterday.toDateString()) return `Active yesterday at ${time}`;
+  return `Active ${seen.toLocaleDateString([], { day: 'numeric', month: 'short' })}`;
 }
 
 /** Whether you send read receipts (blue ticks). Off works both ways: you won't see theirs either. */

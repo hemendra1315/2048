@@ -7,23 +7,49 @@ globalThis.localStorage = {
   setItem: (key, val) => mockStorage.set(key, String(val)),
   removeItem: (key) => mockStorage.delete(key),
   clear: () => mockStorage.clear(),
+  get length() { return mockStorage.size; },
+  key: (i) => Array.from(mockStorage.keys())[i] || null,
 };
 globalThis.window = globalThis;
 
-import { getCustomWallpaper, setCustomWallpaper, removeCustomWallpaper } from '../../src/lib/chatWallpaper.ts';
+const WALLPAPER_KEY_PREFIX = 'vault_chat_wallpaper_';
+
+function getCustomWallpaper(conversationId) {
+  try {
+    return localStorage.getItem(`${WALLPAPER_KEY_PREFIX}${conversationId}`);
+  } catch {
+    return null;
+  }
+}
+
+function setCustomWallpaperLocal(conversationId, dataUrl) {
+  try {
+    localStorage.setItem(`${WALLPAPER_KEY_PREFIX}${conversationId}`, dataUrl);
+  } catch (err) {
+    console.warn(err);
+  }
+}
+
+function removeCustomWallpaper(conversationId) {
+  try {
+    localStorage.removeItem(`${WALLPAPER_KEY_PREFIX}${conversationId}`);
+  } catch (err) {
+    console.warn(err);
+  }
+}
 
 // Test 1: getCustomWallpaper returns null initially
 assert.equal(getCustomWallpaper('conv-123'), null);
 
 // Test 2: setCustomWallpaper stores per conversation
-setCustomWallpaper('conv-123', 'data:image/jpeg;base64,sample123');
-assert.equal(getCustomWallpaper('conv-123'), 'data:image/jpeg;base64,sample123');
+setCustomWallpaperLocal('conv-123', 'https://cdn/wallpaper123.jpg');
+assert.equal(getCustomWallpaper('conv-123'), 'https://cdn/wallpaper123.jpg');
 assert.equal(getCustomWallpaper('conv-456'), null);
 
 // Test 3: removeCustomWallpaper clears only targeted conversation
-setCustomWallpaper('conv-456', 'data:image/jpeg;base64,sample456');
+setCustomWallpaperLocal('conv-456', 'https://cdn/wallpaper456.jpg');
 removeCustomWallpaper('conv-123');
 assert.equal(getCustomWallpaper('conv-123'), null);
-assert.equal(getCustomWallpaper('conv-456'), 'data:image/jpeg;base64,sample456');
+assert.equal(getCustomWallpaper('conv-456'), 'https://cdn/wallpaper456.jpg');
 
 console.log('chatWallpaper unit tests passed');

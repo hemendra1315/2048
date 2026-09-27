@@ -7,6 +7,8 @@ import { useAuth } from './AuthContext';
 import { mockBackend } from '../lib/mockBackend';
 import { supabase, isSupabaseConfigured, isMockBackendAllowed } from '../lib/supabase';
 import { useToast } from './ToastContext';
+import { registerPanicGestures } from '../lib/panicGestures';
+import { pinToSecret } from '../lib/pinHelper';
 
 interface UnlockResult {
   ok: boolean;
@@ -152,6 +154,16 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
   }, [isUnlocked]);
 
+  // Stealth Panic Gestures: Shake device or flip phone face-down to immediately lock the vault
+  useEffect(() => {
+    if (!isUnlocked) return;
+    const cleanup = registerPanicGestures({
+      onPanic: panicLock,
+      enabled: true,
+    });
+    return cleanup;
+  }, [isUnlocked, panicLock]);
+
   // The vault opens only when the server confirms the unlock password (verify_vault_unlock).
   // There is no client-side fallback: an RPC error, a network failure or a rejected password
   // all keep the vault locked.
@@ -162,22 +174,31 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
     try {
       let ok = false;
+      const transformedSecret = pinToSecret(secret);
       if (isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('verify_vault_unlock', { p_secret: secret });
-        const result = data as UnlockResult | null;
+        const { data, error } = await supabase.rpc('verify_vault_unlock', { p_secret: transformedSecret });
+        let result = data as UnlockResult | null;
+        if (result?.ok) {
+          ok = true;
+        } else if (transformedSecret !== secret) {
+          // Fallback to raw secret for backward-compatibility with previously created vaults
+          const { data: rawData } = await supabase.rpc('verify_vault_unlock', { p_secret: secret });
+          const rawResult = rawData as UnlockResult | null;
+          if (rawResult?.ok) ok = true;
+          else result = rawResult ?? result;
+        }
         if (error) {
-          showToast('Could not verify password. Check your connection and try again.', 'error');
+          showToast('Could not verify PIN. Check your connection and try again.', 'error');
           return false;
         }
-        ok = result?.ok === true;
         if (!ok) {
           showToast(unlockErrorMessage(result), 'error');
           return false;
         }
       } else if (isMockBackendAllowed()) {
-        ok = await mockBackend.verifyUnlockSecret(user.id, secret);
+        ok = await mockBackend.verifyUnlockSecret(user.id, transformedSecret) || (transformedSecret !== secret && await mockBackend.verifyUnlockSecret(user.id, secret));
         if (!ok) {
-          showToast('Incorrect password', 'error');
+          showToast('Incorrect PIN', 'error');
           return false;
         }
       } else {
@@ -228,22 +249,24 @@ export const VaultProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const updateSecret = async (oldSecret: string, newSecret: string) => {
     if (!user) return;
     try {
+      const transformedOld = pinToSecret(oldSecret);
+      const transformedNew = pinToSecret(newSecret);
       if (isSupabaseConfigured()) {
         const { data, error } = await supabase.rpc('update_vault_unlock', {
-          p_old_secret: oldSecret,
-          p_new_secret: newSecret,
+          p_old_secret: transformedOld,
+          p_new_secret: transformedNew,
         });
         if (error) throw error;
         const result = data as UnlockResult | null;
         if (!result?.ok) throw new Error(unlockErrorMessage(result));
       } else if (isMockBackendAllowed()) {
-        await mockBackend.updateUnlockSecret(user.id, oldSecret, newSecret);
+        await mockBackend.updateUnlockSecret(user.id, transformedOld, transformedNew);
       } else {
         throw new Error('Server is not configured');
       }
-      showToast('Unlock password updated securely', 'success');
+      showToast('Unlock PIN updated securely', 'success');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to update password';
+      const msg = err instanceof Error ? err.message : 'Failed to update PIN';
       showToast(msg, 'error');
       throw err;
     }

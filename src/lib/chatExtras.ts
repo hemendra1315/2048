@@ -163,6 +163,10 @@ export function systemMessageText(content: string): string {
       ? 'turned off disappearing messages'
       : `turned on disappearing messages (${timerLabel(Number(m[1]))})`;
   }
+  const grp = content.match(/^\[SYSTEM:created_group:(.+)\]$/);
+  if (grp) {
+    return `created group "${grp[1]}"`;
+  }
   return 'updated the chat';
 }
 

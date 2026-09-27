@@ -24,7 +24,7 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
 }) => {
   const { showToast } = useToast();
   const partnerPresence = usePresence([partner.id])[partner.id];
-  const presenceLabel = describePresence(partnerPresence);
+  const presenceLabel = describePresence(partnerPresence, partner.last_login_at || partner.updated_at);
   const [sharedMedia, setSharedMedia] = useState<string[]>([]);
   const [loadingMedia, setLoadingMedia] = useState(false);
 
@@ -62,11 +62,10 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
     void loadSharedMedia();
   }, [conversationId, partner.id]);
 
-  const copyUid = () => {
-    if (partner.uid) {
-      navigator.clipboard.writeText(partner.uid);
-      showToast(`Contact UID ${partner.uid} copied`, 'success');
-    }
+  const copyHandle = () => {
+    const handle = partner.username ? `@${partner.username}` : `@${partner.uid?.toLowerCase() || 'peer'}`;
+    navigator.clipboard.writeText(handle);
+    showToast(`Handle ${handle} copied`, 'success');
   };
 
   return (
@@ -95,16 +94,16 @@ export const ContactDossier: React.FC<ContactDossierProps> = ({
           @{partner.username || partner.uid?.toLowerCase() || 'peer'}
         </p>
 
-        {/* UID Chip */}
+        {/* Username Chip */}
         <button
           type="button"
-          onClick={copyUid}
-          title="Click to copy contact UID"
-          aria-label={`Contact UID ${partner.uid}, click to copy`}
+          onClick={copyHandle}
+          title="Click to copy handle"
+          aria-label={`Handle @${partner.username || partner.uid?.toLowerCase() || 'peer'}, click to copy`}
           className="tag tag-em font-mono mt-2 gap-1.5 cursor-pointer hover:opacity-90 active:scale-98 transition-all"
         >
           <ShieldCheck className="w-3.5 h-3.5" aria-hidden />
-          <span>{partner.uid}</span>
+          <span>@{partner.username || partner.uid?.toLowerCase() || 'peer'}</span>
           <Copy className="w-3 h-3 opacity-60" aria-hidden />
         </button>
 

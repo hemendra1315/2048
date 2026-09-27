@@ -6,7 +6,7 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[];
 
-export type UserRole = 'user' | 'super_admin';
+export type UserRole = 'user' | 'super_admin' | 'group';
 export type AccountStatus = 'active' | 'suspended' | 'banned' | 'deleted';
 export type RequestStatus = 'pending' | 'accepted' | 'rejected';
 export type UnlockMethodType = 'pin' | 'long_press_header' | 'tile_pattern' | 'secret_gesture' | 'score_threshold';

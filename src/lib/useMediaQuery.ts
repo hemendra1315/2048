@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 
-/** Matches Tailwind's `lg` breakpoint, where the messenger switches to the split view. */
-export const DESKTOP_QUERY = '(min-width: 1024px)';
+/** Matches true desktop/laptop displays (1024px+ width, 680px+ height, fine pointer/mouse with hover).
+ *  Ensures mobile phones rotated horizontally always remain in the vertical/mobile single-column UI. */
+export const DESKTOP_QUERY = '(min-width: 1024px) and (min-height: 680px) and (hover: hover) and (pointer: fine)';
 
 /** Tracks a CSS media query so layout can be chosen in code (one tree mounted, not two hidden by CSS). */
 export function useMediaQuery(query: string): boolean {

@@ -7,8 +7,6 @@ import {
   ShieldCheck,
   Image as ImageIcon,
   Mic,
-  Play,
-  Pause,
   Lock,
   RotateCcw,
   X,
@@ -20,7 +18,6 @@ import {
   Clock,
   AlertCircle,
   Timer,
-  Smile,
   Palette,
   Trophy,
   MoreVertical,
@@ -28,12 +25,16 @@ import {
   ChevronDown,
   ChevronLeft,
   Info,
-  Eye,
   EyeOff,
   Repeat,
   Heart,
   Bell,
   BellOff,
+  FolderHeart,
+  Search,
+  Flame,
+  ChevronUp,
+  Users,
 } from 'lucide-react';
 import { CoverGameType, MessageItem, MessageReaction, ReactionEmoji, REACTION_EMOJIS, UserProfile } from '../../types';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -48,6 +49,7 @@ import {
 } from '../../lib/chatOutbox';
 import { useAuth } from '../../context/AuthContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { mockBackend } from '../../lib/mockBackend';
 import { uploadChatMedia } from '../../lib/storageHelper';
 import { uniqueChannelName } from '../../lib/realtime';
 import { formatTimestamp } from '../../lib/utils';
@@ -56,6 +58,9 @@ import { Avatar } from '../common/Avatar';
 import { ContactDossier } from './ContactDossier';
 import { ReportUserModal } from './ReportUserModal';
 import { describePresence, usePresence } from '../../lib/presence';
+import { SharedVaultView } from './SharedVaultView';
+import { saveToSharedVault } from '../../lib/sharedVaultApi';
+import { searchConversationMessages } from '../../lib/chatSearch';
 import {
   ChatThemeId,
   computeWaveform,
@@ -68,7 +73,6 @@ import {
   systemMessageText,
   timerLabel,
   themeById,
-  WAVEFORM_BARS,
 } from '../../lib/chatExtras';
 import { ChatGameCard } from './ChatGameCard';
 import { ChatExtrasSheet, ChatThemeSheet } from './ChatExtrasSheet';
@@ -77,13 +81,18 @@ import { COVER_GAMES, useGame } from '../../context/GameContext';
 import { resolveChatMediaUrl } from '../../lib/mediaUrls';
 import { BlockStatus, blockUser, getBlockStatus, unblockUser } from '../../lib/blocks';
 import { ChatImage, ViewOnceImageBubble, ViewOnceAudioBubble } from '../common/ChatMedia';
+import { VoiceMessagePlayer } from '../common/VoiceMessagePlayer';
 import { LightboxViewer } from '../gallery/LightboxViewer';
 import { claimEphemeralMedia } from '../../lib/viewOnceApi';
+import { useScreenProtection } from '../../lib/screenProtection';
 import { useBackHandler } from '../../lib/backButton';
 import { expectExternalActivity } from '../../lib/externalActivity';
 import { getDraft, setDraft } from '../../lib/chatDrafts';
-import { getCustomWallpaper, setCustomWallpaper, removeCustomWallpaper } from '../../lib/chatWallpaper';
 import { lightImpact, mediumImpact, selectionChange, notificationSuccess, errorWarning } from '../../lib/haptics';
+import { GroupInfoSheet } from './GroupInfoSheet';
+import { fetchGroupMembers } from '../../lib/groupChatApi';
+import type { GroupMember } from '../../types';
+import { getCustomWallpaper, syncCustomWallpaper, removeAndSyncCustomWallpaper } from '../../lib/chatWallpaper';
 
 interface ChatRoomProps {
   conversationId: string;
@@ -92,6 +101,10 @@ interface ChatRoomProps {
   onOpenMedia?: (url: string) => void;
   initialAttachment?: string | null;
   onClearInitialAttachment?: () => void;
+  isGroup?: boolean;
+  groupName?: string | null;
+  groupAvatarUrl?: string | null;
+  groupDescription?: string | null;
 }
 
 export const ChatRoom: React.FC<ChatRoomProps> = ({
@@ -101,9 +114,34 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   onOpenMedia: onOpenMediaProp,
   initialAttachment,
   onClearInitialAttachment,
+  isGroup: isGroupProp,
+  groupName: groupNameProp,
+  groupAvatarUrl: groupAvatarUrlProp,
+  groupDescription: groupDescriptionProp,
 }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
+  const isGroup = Boolean(isGroupProp);
+  const [currentGroupName, setCurrentGroupName] = useState(groupNameProp || partner.display_name);
+  const [currentGroupAvatar, setCurrentGroupAvatar] = useState(groupAvatarUrlProp || null);
+  const [currentGroupDesc, setCurrentGroupDesc] = useState(groupDescriptionProp || '');
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
+  const [groupMembersList, setGroupMembersList] = useState<GroupMember[]>([]);
+
+  useEffect(() => {
+    if (isGroup) {
+      let active = true;
+      void fetchGroupMembers(conversationId).then(list => {
+        if (active) setGroupMembersList(list);
+      }).catch(() => undefined);
+      return () => { active = false; };
+    }
+  }, [isGroup, conversationId]);
+
+  const groupMembersMap = useMemo(() => {
+    return new Map(groupMembersList.map(m => [m.user_id, m]));
+  }, [groupMembersList]);
+
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [inputContent, setInputContent] = useState(() => getDraft(conversationId));
   const [isTyping, setIsTyping] = useState(false);
@@ -111,7 +149,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [sendAsSpoiler, setSendAsSpoiler] = useState(false);
   type EphemeralSendMode = 'view_once' | 'allow_replay' | 'keep_in_chat';
   const [claimingViewOnceId, setClaimingViewOnceId] = useState<string | null>(null);
-  const [activeViewOnceItem, setActiveViewOnceItem] = useState<{ id: string; url: string; created_at: string; sender_id: string } | null>(null);
+  const [activeViewOnceItem, setActiveViewOnceItem] = useState<{ id: string; url: string; created_at: string; sender_id: string; view_mode?: EphemeralSendMode } | null>(null);
   const [activeMediaUrl, setActiveMediaUrl] = useState<string | null>(null);
   const [activeChatMedia, setActiveChatMedia] = useState<{ msg: MessageItem; url: string } | null>(null);
   const onOpenMedia = useCallback((url: string) => {
@@ -122,6 +160,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [viewOnceConsumedIds, setViewOnceConsumedIds] = useState<Set<string>>(() => new Set());
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioSpeed, setAudioSpeed] = useState<number>(1);
+
+  const isPlayingEphemeralAudio = Boolean(
+    playingAudioId && messages.find(m => m.id === playingAudioId)?.view_mode && messages.find(m => m.id === playingAudioId)?.view_mode !== 'keep_in_chat'
+  );
+  useScreenProtection(Boolean(activeViewOnceItem || isPlayingEphemeralAudio));
   const [showContactModal, setShowContactModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({});
@@ -148,14 +191,110 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [blockStatus, setBlockStatus] = useState<BlockStatus>({ iBlocked: false, blocked: false });
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [unreadWhileScrolled, setUnreadWhileScrolled] = useState(0);
+  const [activeTab, setActiveTab] = useState<'chat' | 'media' | 'vault'>('chat');
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchFilter, setSearchFilter] = useState<'all' | 'links'>('all');
+  const [searchIndex, setSearchIndex] = useState(0);
   const blockedRef = useRef(false);
   blockedRef.current = blockStatus.blocked;
   const theme = themeById(themeId);
-  const partnerPresence = usePresence([partner.id])[partner.id];
-  const presenceLabel = describePresence(partnerPresence);
+  const groupMemberIds = useMemo(() => isGroup ? groupMembersList.map(m => m.user_id) : [], [isGroup, groupMembersList]);
+  const groupMembersPresence = usePresence(isGroup ? groupMemberIds : []);
+  const partnerPresence = usePresence(isGroup ? [] : [partner.id])[partner.id];
+  const presenceLabel = isGroup
+    ? (groupMembersList.length > 0 ? `${groupMembersList.length} members` : 'Group Chat')
+    : describePresence(partnerPresence, partner.last_login_at || partner.updated_at);
   const listRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userId = user?.id;
+
+  const scrollToMessage = useCallback((msgId: string) => {
+    const el = document.getElementById(`msg-${msgId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-emerald', 'bg-emerald/10', 'rounded-2xl', 'transition-all');
+      setTimeout(() => {
+        el.classList.remove('ring-2', 'ring-emerald', 'bg-emerald/10');
+      }, 2000);
+    }
+  }, []);
+
+  const searchResults = useMemo(() => {
+    if (!showSearch || !searchQuery.trim()) return [];
+    return searchConversationMessages(messages, searchQuery, searchFilter);
+  }, [showSearch, messages, searchQuery, searchFilter]);
+
+  useEffect(() => {
+    setSearchIndex(0);
+    if (searchResults.length > 0) {
+      scrollToMessage(searchResults[0].message.id);
+    }
+  }, [searchQuery, searchFilter, searchResults, scrollToMessage]);
+
+  const handleNextSearchResult = useCallback(() => {
+    if (searchResults.length === 0) return;
+    const next = (searchIndex + 1) % searchResults.length;
+    setSearchIndex(next);
+    scrollToMessage(searchResults[next].message.id);
+  }, [searchIndex, searchResults, scrollToMessage]);
+
+  const handlePrevSearchResult = useCallback(() => {
+    if (searchResults.length === 0) return;
+    const prev = (searchIndex - 1 + searchResults.length) % searchResults.length;
+    setSearchIndex(prev);
+    scrollToMessage(searchResults[prev].message.id);
+  }, [searchIndex, searchResults, scrollToMessage]);
+
+  const handleSaveMessageToSharedVault = useCallback(async (targetMsg: MessageItem) => {
+    try {
+      const isVoice = Boolean(parseVoiceNote(targetMsg.content));
+      const isImg = targetMsg.content.startsWith('[IMAGE');
+      let mediaType: 'image' | 'audio' | 'text_memory' = 'text_memory';
+      let mediaUrl: string | undefined = undefined;
+      let caption: string | undefined = undefined;
+
+      if (isImg) {
+        mediaType = 'image';
+        mediaUrl = targetMsg.content.replace(/^\[IMAGE:spoiler\]|^\[IMAGE:SPOILER\]|^\[IMAGE:VIEW_ONCE\]|^\[IMAGE:ALLOW_REPLAY\]|^\[IMAGE\]/, '');
+      } else if (isVoice) {
+        mediaType = 'audio';
+        const voiceData = parseVoiceNote(targetMsg.content);
+        mediaUrl = voiceData?.url;
+        caption = `Voice Note (${voiceData?.duration || '0:00'})`;
+      } else {
+        mediaType = 'text_memory';
+        caption = targetMsg.content;
+      }
+
+      await saveToSharedVault({
+        conversation_id: conversationId,
+        saved_by: userId || 'user',
+        message_id: targetMsg.id,
+        media_type: mediaType,
+        media_url: mediaUrl || '',
+        caption: caption || null,
+        memory_date: new Date().toISOString(),
+      });
+      mediumImpact();
+      showToast('Saved to Shared Vault ✨', 'success');
+    } catch (err) {
+      console.error('Error saving to shared vault:', err);
+      showToast('Failed to save to Shared Vault', 'error');
+    }
+  }, [conversationId, userId, showToast]);
+
+  const chatImages = useMemo(() => {
+    return messages
+      .filter(m => !isDeleted(m) && (m.content.startsWith('[IMAGE]') || m.content.startsWith('[IMAGE:spoiler]')))
+      .map(m => {
+        const raw = m.content.replace(/^\[IMAGE:spoiler\]|^\[IMAGE:SPOILER\]|^\[IMAGE\]/, '');
+        return {
+          message: m,
+          url: raw,
+        };
+      });
+  }, [messages]);
 
   const stickToBottomRef = useRef(true);
   const hasScrolledInitiallyRef = useRef(false);
@@ -253,7 +392,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       if (messagesRef.current.some(m => m.expires_at && new Date(m.expires_at).getTime() <= now)) {
         setMessages(prev => prev.filter(m => !m.expires_at || new Date(m.expires_at).getTime() > now));
       }
-    }, 30_000);
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -279,14 +418,15 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     let cancelled = false;
     void supabase
       .from('conversation_members')
-      .select('chat_theme, muted_at')
+      .select('chat_theme, muted_at, chat_wallpaper_url')
       .eq('conversation_id', conversationId)
       .eq('user_id', userId)
       .maybeSingle()
       .then(({ data }) => {
         if (cancelled) return;
-        const row = data as { chat_theme?: ChatThemeId; muted_at?: string | null } | null;
+        const row = data as { chat_theme?: ChatThemeId; muted_at?: string | null; chat_wallpaper_url?: string | null } | null;
         if (row?.chat_theme) setThemeId(row.chat_theme);
+        if (row?.chat_wallpaper_url) setCustomWallpaperState(row.chat_wallpaper_url);
         setIsMuted(Boolean(row?.muted_at));
       });
     return () => { cancelled = true; };
@@ -304,16 +444,19 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       .eq('user_id', userId);
   };
 
-  const handleSetCustomWallpaper = (dataUrl: string) => {
-    setCustomWallpaper(conversationId, dataUrl);
+  const handleSetCustomWallpaper = async (dataUrl: string) => {
+    if (!userId) return;
     setCustomWallpaperState(dataUrl);
     showToast('Custom wallpaper applied', 'success');
+    const syncedUrl = await syncCustomWallpaper(userId, conversationId, dataUrl);
+    setCustomWallpaperState(syncedUrl);
   };
 
-  const handleRemoveCustomWallpaper = () => {
-    removeCustomWallpaper(conversationId);
+  const handleRemoveCustomWallpaper = async () => {
+    if (!userId) return;
     setCustomWallpaperState(null);
     showToast('Wallpaper reset to theme default', 'info');
+    await removeAndSyncCustomWallpaper(userId, conversationId);
   };
 
   const handleOpenChatImage = useCallback((msg: MessageItem, url: string) => {
@@ -376,13 +519,20 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         console.error('Failed to load messages:', error);
         return;
       }
-      const raw = (data ?? []) as MessageItem[];
+      const raw = ((data ?? []) as MessageItem[]).filter(m => !m.deleted_at && m.content !== '[DELETED]');
       setHasOlder(raw.length > PAGE_SIZE);
       const page = raw.slice(0, PAGE_SIZE).reverse();
       setMessages(page);
       void loadReactions();
     } else {
+      const now = Date.now();
+      const all = mockBackend.getMessages(conversationId).filter(m => {
+        if (m.deleted_at || m.content === '[DELETED]') return false;
+        if (m.expires_at && new Date(m.expires_at).getTime() <= now) return false;
+        return true;
+      });
       setHasOlder(false);
+      setMessages(all);
     }
   }, [conversationId, loadReactions]);
 
@@ -408,7 +558,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         prependAnchorRef.current = null;
         return;
       }
-      const raw = (data ?? []) as MessageItem[];
+      const raw = ((data ?? []) as MessageItem[]).filter(m => !m.deleted_at && m.content !== '[DELETED]');
       setHasOlder(raw.length > PAGE_SIZE);
       const older = raw.slice(0, PAGE_SIZE).reverse();
       setMessages(prev => [...older, ...prev]);
@@ -426,7 +576,12 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     setUnreadWhileScrolled(0);
     loadMessages();
 
-    if (!isSupabaseConfigured()) return;
+    if (!isSupabaseConfigured()) {
+      const unsub = mockBackend.subscribe('messages:updated', () => {
+        loadMessages();
+      });
+      return unsub;
+    }
 
     const channel = supabase
       .channel(uniqueChannelName('messages'))
@@ -445,7 +600,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           });
         } else if (payload.eventType === 'UPDATE') {
           const updated = payload.new as MessageItem;
-          setMessages(prev => prev.map(m => (m.id === updated.id ? { ...m, ...updated } : m)));
+          if (updated.deleted_at || updated.content === '[DELETED]') {
+            setMessages(prev => prev.filter(m => m.id !== updated.id));
+          } else {
+            setMessages(prev => prev.map(m => (m.id === updated.id ? { ...m, ...updated } : m)));
+          }
         } else if (payload.eventType === 'DELETE') {
           const deletedId = (payload.old as { id: string }).id;
           setMessages(prev => prev.filter(m => m.id !== deletedId));
@@ -460,6 +619,16 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       supabase.removeChannel(channel);
     };
   }, [conversationId, loadMessages, loadReactions]);
+
+  // Instantly mark conversation messages as read when opening or receiving new messages
+  useEffect(() => {
+    if (!userId || !conversationId) return;
+    if (isSupabaseConfigured()) {
+      void supabase.rpc('mark_conversation_read', { p_conversation_id: conversationId }).then(() => undefined, () => undefined);
+    } else {
+      mockBackend.markMessagesAsRead(conversationId, userId);
+    }
+  }, [conversationId, userId, messages.length]);
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
@@ -535,6 +704,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
     const clientId = newClientId();
     const replyTargetId = replyTo?.id ?? null;
+    const expiresAt = disappearAfter ? new Date(Date.now() + disappearAfter * 1000).toISOString() : null;
     setReplyTo(null);
     setInputContent('');
     setDraft(conversationId, '');
@@ -549,9 +719,10 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       reply_to_id: replyTargetId,
     };
 
-    setMessages(prev => [...prev, outboxToMessage(pendingItem, 'queued')]);
+    setMessages(prev => [...prev, { ...outboxToMessage(pendingItem, 'queued'), expires_at: expiresAt }]);
 
     if (!isSupabaseConfigured()) {
+      mockBackend.sendMessage(conversationId, user.id, raw, expiresAt);
       setMessages(prev => prev.map(m => (m.client_id === clientId ? { ...m, status: undefined } : m)));
       notificationSuccess();
       return;
@@ -600,22 +771,27 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
   const deleteForEveryone = async (msg: MessageItem) => {
     mediumImpact();
+    // Optimistically remove immediately from local state
+    setMessages(prev => prev.filter(m => m.id !== msg.id && (msg.client_id ? m.client_id !== msg.client_id : true)));
     if (!isSupabaseConfigured()) {
-      setMessages(prev => prev.filter(m => m.id !== msg.id));
-      showToast('Message removed', 'info');
+      showToast('Message deleted for everyone', 'info');
       return;
     }
-    const { error } = await supabase
-      .from('messages')
-      .update({ content: '[DELETED]', deleted_at: new Date().toISOString() })
-      .eq('id', msg.id);
-
+    const { error } = await supabase.rpc('delete_message_for_everyone', { p_message_id: msg.id });
     if (error) {
-      showToast(error.message || 'Could not delete message', 'error');
-      errorWarning();
-    } else {
-      showToast('Message deleted for everyone', 'info');
+      // Fallback to direct update if RPC is missing
+      const { error: fallbackError } = await supabase
+        .from('messages')
+        .update({ content: '[DELETED]', deleted_at: new Date().toISOString() })
+        .eq('id', msg.id);
+
+      if (fallbackError) {
+        showToast(fallbackError.message || 'Could not delete message', 'error');
+        errorWarning();
+        return;
+      }
     }
+    showToast('Message deleted for everyone', 'info');
   };
 
   const toggleReaction = async (msg: MessageItem, emoji: ReactionEmoji) => {
@@ -745,10 +921,14 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [audioSeconds, setAudioSeconds] = useState(0);
   const [recordDragX, setRecordDragX] = useState(0);
+  const [liveAudioLevels, setLiveAudioLevels] = useState<number[]>([0.2, 0.4, 0.3, 0.6, 0.4, 0.2]);
   const recordPointerRef = useRef<{ startX: number; cancelled: boolean } | null>(null);
   const RECORD_CANCEL_THRESHOLD = -72;
   const recordedSecondsRef = useRef(0);
+  const recordStartTimeRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordAudioCtxRef = useRef<AudioContext | null>(null);
+  const recordAnalyserRef = useRef<AnalyserNode | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
 
@@ -762,15 +942,99 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     return () => clearInterval(interval);
   }, [isRecordingAudio]);
 
+  // Real-time audio waveform visualizer during recording
+  useEffect(() => {
+    if (!isRecordingAudio) {
+      if (recordAudioCtxRef.current) {
+        void recordAudioCtxRef.current.close().catch(() => {});
+        recordAudioCtxRef.current = null;
+        recordAnalyserRef.current = null;
+      }
+      return;
+    }
+    let animId: number;
+    const updateLevels = () => {
+      const analyser = recordAnalyserRef.current;
+      if (analyser) {
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(data);
+        const bars = [
+          data[1] / 255,
+          data[3] / 255,
+          data[5] / 255,
+          data[7] / 255,
+          data[9] / 255,
+          data[11] / 255,
+          data[13] / 255,
+        ].map(v => Math.max(0.2, Math.min(1, (v || 0) * 1.8)));
+        setLiveAudioLevels(bars);
+      }
+      animId = requestAnimationFrame(updateLevels);
+    };
+    animId = requestAnimationFrame(updateLevels);
+    return () => cancelAnimationFrame(animId);
+  }, [isRecordingAudio]);
+
   const handleStartVoiceRecord = async () => {
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         showToast('Microphone not supported in this environment', 'error');
         return;
       }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Request high quality audio with noise suppression, echo cancellation, auto-gain
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 48000,
+        },
+      });
+
+      // Attach Web Audio API processing: 80Hz rumble cut + dynamic compressor + analyser
+      try {
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (AudioCtx) {
+          const actx = new AudioCtx();
+          const sourceNode = actx.createMediaStreamSource(stream);
+          const highPass = actx.createBiquadFilter();
+          highPass.type = 'highpass';
+          highPass.frequency.value = 80;
+
+          const compressor = actx.createDynamicsCompressor();
+          compressor.threshold.value = -24;
+          compressor.knee.value = 30;
+          compressor.ratio.value = 12;
+          compressor.attack.value = 0.003;
+          compressor.release.value = 0.25;
+
+          const analyser = actx.createAnalyser();
+          analyser.fftSize = 64;
+
+          sourceNode.connect(highPass);
+          highPass.connect(compressor);
+          compressor.connect(analyser);
+
+          recordAudioCtxRef.current = actx;
+          recordAnalyserRef.current = analyser;
+        }
+      } catch {
+        // Fallback gracefully to direct stream
+      }
+
       audioChunksRef.current = [];
-      const recorder = new MediaRecorder(stream);
+      recordStartTimeRef.current = Date.now();
+
+      // Pick best supported mime type
+      const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg;codecs=opus',
+      ];
+      const selectedMime = mimeTypes.find(t => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) || '';
+      const recorder = selectedMime ? new MediaRecorder(stream, { mimeType: selectedMime, audioBitsPerSecond: 128000 }) : new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = e => {
@@ -778,15 +1042,18 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       };
 
       recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const mime = selectedMime || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mime });
         stream.getTracks().forEach(t => t.stop());
-        const seconds = recordedSecondsRef.current;
+        const elapsedSecs = Math.max(1, Math.round((Date.now() - recordStartTimeRef.current) / 1000));
+        const seconds = recordedSecondsRef.current || elapsedSecs;
         const dur = `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`;
 
-        if (seconds >= 1) {
+        if (seconds >= 1 && audioBlob.size > 0) {
           try {
             setIsUploadingMedia(true);
-            const audioFile = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
+            const ext = mime.includes('mp4') ? 'mp4' : mime.includes('ogg') ? 'ogg' : 'webm';
+            const audioFile = new File([audioBlob], `voice-${Date.now()}.${ext}`, { type: mime });
             const [mediaUrl, levels] = await Promise.all([
               uploadChatMedia(audioFile, conversationId),
               computeWaveform(audioBlob),
@@ -805,7 +1072,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         }
       };
 
-      recorder.start();
+      recorder.start(100);
       setIsRecordingAudio(true);
       lightImpact();
       // The user may have already released (or slid to cancel) before mic
@@ -827,7 +1094,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const handleStopVoiceRecord = (send: boolean) => {
     if (mediaRecorderRef.current && isRecordingAudio) {
       if (send) {
-        recordedSecondsRef.current = audioSeconds;
+        const elapsedSecs = Math.max(1, Math.round((Date.now() - recordStartTimeRef.current) / 1000));
+        recordedSecondsRef.current = audioSeconds || elapsedSecs;
         mediaRecorderRef.current.stop();
         mediumImpact();
       } else {
@@ -888,6 +1156,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       }
       const audio = new Audio(src);
       audioElementRef.current = audio;
+      audio.volume = 1.0;
       audio.playbackRate = audioSpeed;
       audio.ontimeupdate = () => {
         if (audio.duration && Number.isFinite(audio.duration)) setAudioProgress(audio.currentTime / audio.duration);
@@ -946,6 +1215,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         url: resolved,
         created_at: msg.created_at,
         sender_id: msg.sender_id,
+        view_mode: msg.view_mode,
       });
     } catch (err) {
       console.error('Error opening ephemeral photo:', err);
@@ -1093,31 +1363,61 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
           <button
             type="button"
-            onClick={() => setShowContactModal(true)}
+            onClick={() => {
+              if (isGroup) setShowGroupInfo(true);
+              else setShowContactModal(true);
+            }}
             className="flex items-center gap-3 min-w-0 text-left -ml-1 pl-1 pr-2 py-1 rounded-xl hover:bg-vault-850 transition-colors"
-            aria-label={`Contact info for ${partner.display_name}`}
+            aria-label={`${isGroup ? 'Group info' : 'Contact info'} for ${currentGroupName}`}
           >
-            <Avatar
-              name={partner.display_name}
-              seed={partner.uid}
-              src={partner.avatar_url}
-              size={40}
-              online={partnerPresence?.isOnline ?? false}
-            />
+            {isGroup ? (
+              currentGroupAvatar ? (
+                <img
+                  src={currentGroupAvatar}
+                  alt={currentGroupName}
+                  className="w-10 h-10 rounded-full object-cover border border-emerald/40 shadow-sm shrink-0"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-emerald/20 border border-emerald/40 flex items-center justify-center text-emerald font-bold shadow-sm shrink-0">
+                  <Users className="w-5 h-5" aria-hidden />
+                </div>
+              )
+            ) : (
+              <Avatar
+                name={partner.display_name}
+                seed={partner.uid}
+                src={partner.avatar_url}
+                size={40}
+                online={partnerPresence?.isOnline ?? false}
+              />
+            )}
 
             <div className="min-w-0">
-              <h2 className="t-h3 font-bold text-white leading-tight truncate m-0">
-                {partner.display_name}
+              <h2 className="t-h3 font-bold text-white leading-tight truncate m-0 flex items-center gap-1.5">
+                <span className="truncate">{currentGroupName}</span>
+                {isGroup && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald/20 text-emerald font-mono uppercase tracking-wider font-semibold shrink-0">
+                    Group
+                  </span>
+                )}
               </h2>
               <div className="flex items-center gap-1.5 text-[11px] leading-tight mt-0.5">
                 {isTyping ? (
                   <span className="text-emerald font-sans font-semibold animate-pulse">typing…</span>
-                ) : presenceLabel ? (
-                  <span className={`font-sans ${partnerPresence?.isOnline ? 'text-emerald' : 'text-vault-400'}`}>{presenceLabel}</span>
+                ) : isGroup ? (
+                  <span className="text-vault-400 font-sans truncate flex items-center gap-1">
+                    <Users className="w-3 h-3 text-vault-500 shrink-0" />
+                    {groupMembersList.length > 0 ? `${groupMembersList.length} members` : 'Tap for group info'}
+                  </span>
                 ) : (
-                  <span className="text-vault-500 font-mono flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3" aria-hidden />
-                    {partner.uid}
+                  <span className={`flex items-center gap-1.5 font-sans ${partnerPresence?.isOnline ? 'text-emerald font-medium' : 'text-vault-400'}`}>
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        partnerPresence?.isOnline ? 'bg-emerald animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.7)]' : 'bg-vault-600'
+                      }`}
+                      aria-hidden="true"
+                    />
+                    {presenceLabel}
                   </span>
                 )}
               </div>
@@ -1126,6 +1426,18 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setShowSearch(prev => !prev);
+              lightImpact();
+            }}
+            className={`ib ib-s rounded-xl ${showSearch ? 'text-emerald bg-emerald/10' : ''}`}
+            aria-label="Search conversation"
+            title="Search conversation"
+          >
+            <Search className="i" aria-hidden />
+          </button>
           {disappearAfter ? (
             <span className="text-emerald p-1" title={`Disappearing messages: ${timerLabel(disappearAfter)}`} aria-label={`Disappearing messages: ${timerLabel(disappearAfter)}`}>
               <Timer className="w-4 h-4" aria-hidden />
@@ -1143,7 +1455,203 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         </div>
       </header>
 
-      {/* 2. MESSAGE STREAM */}
+      {/* SEARCH BANNER */}
+      {showSearch && (
+        <div className="px-4 py-2 bg-vault-900/95 backdrop-blur-md border-b border-vault-800 space-y-1.5 z-20 anim-slide-down">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 flex items-center">
+              <Search className="absolute left-3 w-4 h-4 text-vault-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search chat, media, links..."
+                autoFocus
+                className="w-full bg-vault-950 border border-vault-750 text-white text-xs rounded-xl pl-9 pr-8 py-2 focus:outline-none focus:border-emerald"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 text-vault-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            {searchResults.length > 0 && (
+              <div className="flex items-center gap-1 text-xs text-vault-300 font-mono shrink-0">
+                <span>{searchIndex + 1}/{searchResults.length}</span>
+                <button
+                  type="button"
+                  onClick={handlePrevSearchResult}
+                  className="p-1 rounded-lg hover:bg-vault-800 text-vault-300 hover:text-white"
+                  aria-label="Previous match"
+                >
+                  <ChevronUp className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNextSearchResult}
+                  className="p-1 rounded-lg hover:bg-vault-800 text-vault-300 hover:text-white"
+                  aria-label="Next match"
+                >
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            {searchQuery && searchResults.length === 0 && (
+              <span className="text-xs text-vault-500 shrink-0">No matches</span>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setShowSearch(false);
+                setSearchQuery('');
+              }}
+              className="text-vault-400 hover:text-white p-1 rounded-lg"
+              aria-label="Close search"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-[11px] font-medium">
+            {(['all', 'links'] as const).map(cat => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setSearchFilter(cat)}
+                className={`px-2.5 py-0.5 rounded-lg capitalize transition-colors ${
+                  searchFilter === cat
+                    ? 'bg-emerald text-vault-950 font-bold'
+                    : 'bg-vault-950 text-vault-400 hover:text-white'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 1.5 DM SUB-NAVIGATION TABS: Chat | Media | Shared Vault */}
+      <nav aria-label="Conversation views" className="flex items-center justify-center px-4 py-1.5 bg-vault-950/90 backdrop-blur-md border-b border-vault-850 z-10 shrink-0">
+        <div className="flex bg-vault-900 p-0.5 rounded-xl border border-vault-800 gap-0.5 text-xs font-semibold w-full max-w-xs justify-between">
+          <button
+            type="button"
+            onClick={() => { setActiveTab('chat'); lightImpact(); }}
+            className={`flex-1 py-1 px-2 rounded-lg text-center transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'chat'
+                ? 'bg-emerald text-vault-950 font-bold shadow-sm'
+                : 'text-vault-400 hover:text-white'
+            }`}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            onClick={() => { setActiveTab('media'); lightImpact(); }}
+            className={`flex-1 py-1 px-2 rounded-lg text-center transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'media'
+                ? 'bg-emerald text-vault-950 font-bold shadow-sm'
+                : 'text-vault-400 hover:text-white'
+            }`}
+          >
+            Media
+            {chatImages.length > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeTab === 'media' ? 'bg-vault-950/30 text-vault-950' : 'bg-vault-800 text-vault-300'}`}>
+                {chatImages.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setActiveTab('vault'); lightImpact(); }}
+            className={`flex-1 py-1 px-2 rounded-lg text-center transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'vault'
+                ? 'bg-emerald text-vault-950 font-bold shadow-sm'
+                : 'text-vault-400 hover:text-white'
+            }`}
+          >
+            <FolderHeart className="w-3.5 h-3.5" />
+            Vault
+          </button>
+        </div>
+      </nav>
+
+      {/* TAB CONTENT */}
+      {activeTab === 'vault' ? (
+        <SharedVaultView
+          conversationId={conversationId}
+          partnerProfile={partner}
+          currentUserProfile={user ?? {
+            id: userId || '',
+            uid: partner.uid ? 'me' : 'user',
+            display_name: 'You',
+            username: 'you',
+            avatar_url: null,
+            role: 'user',
+            status: 'active',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }}
+          onGoToMessage={(targetMsgId) => {
+            setActiveTab('chat');
+            setTimeout(() => {
+              scrollToMessage(targetMsgId);
+            }, 150);
+          }}
+          onClose={() => setActiveTab('chat')}
+        />
+      ) : activeTab === 'media' ? (
+        <div className="flex-1 overflow-y-auto p-4 bg-vault-950 select-none">
+          <div className="flex items-center justify-between mb-4 pb-2 border-b border-vault-850">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="w-5 h-5 text-emerald" />
+              <span className="text-sm font-bold text-white">Shared Media</span>
+              <span className="text-xs font-mono text-vault-400">({chatImages.length})</span>
+            </div>
+          </div>
+
+          {chatImages.length === 0 ? (
+            <div className="h-64 flex flex-col items-center justify-center text-center p-6 text-xs text-vault-500 gap-2">
+              <div className="w-12 h-12 rounded-2xl bg-vault-900 border border-vault-800 flex items-center justify-center text-vault-400 mb-2">
+                <ImageIcon className="w-6 h-6" />
+              </div>
+              <span className="font-semibold text-white">No media shared yet</span>
+              <p className="max-w-xs text-xs text-vault-400">Photos sent in this chat will appear here for quick access.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+              {chatImages.map((img) => (
+                <button
+                  key={img.message.id}
+                  type="button"
+                  onClick={() => {
+                    void resolveChatMediaUrl(img.url).then(src => {
+                      if (src) handleOpenChatImage(img.message, src);
+                    });
+                  }}
+                  className="relative aspect-square rounded-xl overflow-hidden bg-vault-900 border border-vault-800 group hover:border-emerald transition-all"
+                >
+                  <ChatImage
+                    url={img.url}
+                    alt="Chat media"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                  />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-1.5">
+                    <span className="text-[10px] text-white font-mono truncate">
+                      {formatTimestamp(img.message.created_at)}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* 2. MESSAGE STREAM */}
       <div
         ref={listRef}
         onScroll={handleListScroll}
@@ -1217,6 +1725,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 mineClass={theme.mine}
                 playProgress={playingAudioId === msg.id ? audioProgress : 0}
                 onRematch={startGame}
+                onSaveToVault={handleSaveMessageToSharedVault}
+                isGroup={isGroup}
+                senderNickname={groupMembersMap.get(msg.sender_id)?.nickname || groupMembersMap.get(msg.sender_id)?.profile?.display_name}
               />
             );
           })
@@ -1286,15 +1797,25 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           </div>
         ) : isRecordingAudio ? (
           <div
-            className="relative flex items-center justify-between bg-red-950/80 border border-red-600/50 rounded-xl px-4 py-2.5 text-red-300 overflow-hidden"
+            className="relative flex items-center justify-between bg-red-950/80 border border-red-600/50 rounded-xl px-4 py-2.5 text-red-300 overflow-hidden shadow-lg"
             style={{ opacity: recordDragX <= RECORD_CANCEL_THRESHOLD * 0.6 ? 0.6 : 1 }}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
               <span className="text-xs font-mono font-bold">REC {audioSeconds}s</span>
+              {/* Dynamic Live Audio Level Visualizer */}
+              <div className="flex items-center gap-1 h-5 px-1.5 py-0.5 bg-black/40 rounded-full border border-red-500/20">
+                {liveAudioLevels.map((lvl, idx) => (
+                  <span
+                    key={idx}
+                    className="w-1 bg-red-400 rounded-full transition-all duration-75"
+                    style={{ height: `${Math.round(lvl * 100)}%` }}
+                  />
+                ))}
+              </div>
             </div>
             <span
-              className="flex items-center gap-1 text-xs text-vault-400"
+              className="flex items-center gap-1 text-xs text-vault-400 font-medium"
               style={{ transform: `translateX(${recordDragX}px)` }}
             >
               <ChevronLeft className="w-3.5 h-3.5" aria-hidden />
@@ -1325,22 +1846,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                   <ImageIcon className="w-4 h-4" />
                 )}
               </button>
-
-              {/* Spoiler Mode Toggle */}
-              <button
-                type="button"
-                onClick={() => {
-                  selectionChange();
-                  setSendAsSpoiler(prev => !prev);
-                }}
-                className={`ib ib-s rounded-xl shrink-0 !w-8 !h-8 ${
-                  sendAsSpoiler ? '!bg-emerald/20 !border-emerald !text-emerald' : 'text-vault-400'
-                }`}
-                aria-label={sendAsSpoiler ? 'Spoiler blur active for photo' : 'Toggle spoiler blur for photo'}
-                title={sendAsSpoiler ? 'Spoiler blur enabled' : 'Hide with Spoiler blur'}
-              >
-                {sendAsSpoiler ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
             </div>
 
             <form
@@ -1351,15 +1856,6 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               className="flex-1 min-w-0 flex items-end gap-2"
             >
               <div className="relative flex-1 min-w-0">
-                <button
-                  type="button"
-                  onClick={() => setShowExtras(true)}
-                  className="absolute left-1.5 bottom-[7px] ib ib-s !w-8 !h-8 rounded-lg z-10"
-                  aria-label="Stickers and games"
-                  title="Stickers and games"
-                >
-                  <Smile className="w-5 h-5 text-vault-300" />
-                </button>
                 <textarea
                   ref={inputRef}
                   rows={1}
@@ -1375,7 +1871,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                   maxLength={4000}
                   enterKeyHint={isTouchDevice() ? 'enter' : 'send'}
                   placeholder={editing ? 'Edit message…' : 'Message'}
-                  className="inp w-full text-sm min-h-[44px] max-h-[132px] py-[11px] pl-11 leading-[20px] resize-none overflow-y-auto"
+                  className="inp w-full text-sm min-h-[44px] max-h-[132px] py-[11px] px-3.5 leading-[20px] resize-none overflow-y-auto"
                 />
               </div>
 
@@ -1405,6 +1901,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           </div>
         )}
       </footer>
+      </>
+      )}
 
       {pendingPhoto && (
         <div
@@ -1593,6 +2091,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             <div className="space-y-1">
               {[
                 { label: 'Off', seconds: null },
+                { label: '1 hour (Burn)', seconds: 3600 },
                 { label: '24 hours', seconds: 86400 },
                 { label: '7 days', seconds: 604800 },
                 { label: '90 days', seconds: 7776000 },
@@ -1605,7 +2104,10 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                     disappearAfter === opt.seconds ? 'bg-emerald text-vault-950 font-bold' : 'text-vault-200 hover:bg-vault-800'
                   }`}
                 >
-                  <span>{opt.label}</span>
+                  <span className="flex items-center gap-2">
+                    {opt.seconds === 3600 && <Flame className="w-4 h-4 text-amber-400" />}
+                    {opt.label}
+                  </span>
                   {disappearAfter === opt.seconds && <Check className="w-4 h-4" />}
                 </button>
               ))}
@@ -1658,6 +2160,10 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
               () => showToast('Copied to clipboard', 'success'),
               () => showToast('Could not copy', 'error'),
             );
+            setActionMsg(null);
+          }}
+          onSaveToVault={() => {
+            void handleSaveMessageToSharedVault(actionMsg);
             setActionMsg(null);
           }}
           onEdit={() => { startEdit(actionMsg); setActionMsg(null); }}
@@ -1735,29 +2241,152 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         >
           <div className="w-full max-w-sm bg-vault-900 h-full border-l border-vault-800 shadow-2xl relative flex flex-col">
             <div className="p-3 pt-[calc(0.75rem+env(safe-area-inset-top))] border-b border-vault-800 flex items-center justify-between bg-vault-950">
-              <span className="t-body font-bold text-white">Contact info</span>
+              <span className="t-body font-bold text-white flex items-center gap-2">
+                {isGroup ? <Users className="w-4 h-4 text-emerald" /> : null}
+                {isGroup ? 'Group info' : 'Contact info'}
+              </span>
               <button
                 type="button"
                 onClick={() => setShowContactModal(false)}
                 className="ib ib-s rounded-full"
-                aria-label="Close contact settings"
+                aria-label="Close"
               >
                 <X className="i" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto min-h-0">
-              <ContactDossier
-                partner={partner}
-                conversationId={conversationId}
-                onOpenMedia={onOpenMedia}
-                className="!w-full !border-0 !h-auto"
-              />
+              {isGroup ? (
+                <div className="p-4 space-y-6">
+                  {/* Group Header Banner */}
+                  <div className="flex flex-col items-center text-center p-5 bg-vault-950/80 rounded-2xl border border-vault-800 space-y-3">
+                    <div className="w-16 h-16 rounded-2xl bg-emerald/20 border border-emerald/40 flex items-center justify-center text-emerald shadow-lg">
+                      <Users className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-white m-0">{currentGroupName}</h3>
+                      <p className="text-xs text-vault-400 m-0 mt-0.5 font-mono">
+                        {groupMembersList.length} members
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Members Section */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-vault-400">Members</span>
+                      <span className="text-xs font-mono text-emerald bg-emerald/10 px-2 py-0.5 rounded-full">
+                        {groupMembersList.length}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {groupMembersList.map(member => {
+                        const mPres = groupMembersPresence[member.user_id];
+                        const mStatus = describePresence(mPres, member.profile.last_login_at || member.profile.updated_at);
+                        const isSelf = member.user_id === userId;
+                        const dName = member.nickname || member.profile.display_name;
+
+                        return (
+                          <div
+                            key={member.user_id}
+                            className="flex items-center justify-between p-3 rounded-xl bg-vault-950 border border-vault-850 hover:border-vault-750 transition-colors"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <Avatar
+                                name={member.profile.display_name}
+                                seed={member.profile.uid}
+                                src={member.profile.avatar_url}
+                                size={40}
+                                online={mPres?.isOnline ?? false}
+                              />
+                              <div className="min-w-0">
+                                <p className="text-sm font-bold text-white truncate m-0 flex items-center gap-1.5">
+                                  <span>{dName}</span>
+                                  {isSelf && (
+                                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald/20 text-emerald font-semibold">
+                                      You
+                                    </span>
+                                  )}
+                                </p>
+                                <p className="text-[11px] text-vault-400 truncate m-0 flex items-center gap-1 mt-0.5">
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${
+                                      mPres?.isOnline ? 'bg-emerald animate-pulse' : 'bg-vault-600'
+                                    }`}
+                                  />
+                                  <span>{mStatus}</span>
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void navigator.clipboard.writeText(member.profile.uid);
+                                showToast(`Copied ${member.profile.uid}`, 'success');
+                              }}
+                              className="ib ib-s rounded-lg text-vault-400 hover:text-white"
+                              title={`Copy ${member.profile.uid}`}
+                              aria-label={`Copy UID for ${member.profile.display_name}`}
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <ContactDossier
+                  partner={partner}
+                  conversationId={conversationId}
+                  onOpenMedia={onOpenMedia}
+                  className="!w-full !border-0 !h-auto"
+                />
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* 4. VIEW ONCE EPHEMERAL FULLSCREEN VIEWER */}
+      {isGroup && showGroupInfo && (
+        <GroupInfoSheet
+          conversation={{
+            id: conversationId,
+            user_a: userId || '',
+            user_b: conversationId,
+            created_at: '',
+            updated_at: '',
+            partner: {
+              id: conversationId,
+              uid: 'GROUP',
+              display_name: currentGroupName,
+              avatar_url: currentGroupAvatar,
+              role: 'user',
+              status: 'active',
+              created_at: '',
+              updated_at: '',
+            },
+            unreadCount: 0,
+            is_group: true,
+            group_name: currentGroupName,
+            group_avatar_url: currentGroupAvatar,
+            group_description: currentGroupDesc,
+          }}
+          isOpen={showGroupInfo}
+          onClose={() => setShowGroupInfo(false)}
+          onGroupDeleted={onBack}
+          onGroupLeft={onBack}
+          onGroupUpdated={updated => {
+            if (updated.group_name) setCurrentGroupName(updated.group_name);
+            if (updated.group_avatar_url) setCurrentGroupAvatar(updated.group_avatar_url);
+            if (updated.group_description) setCurrentGroupDesc(updated.group_description);
+          }}
+        />
+      )}
+
+      {/* 4. VIEW ONCE / ALLOW REPLAY EPHEMERAL FULLSCREEN VIEWER */}
       {activeViewOnceItem && (
         <LightboxViewer
           item={{
@@ -1765,10 +2394,11 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             user_id: activeViewOnceItem.sender_id,
             image_url: activeViewOnceItem.url,
             storage_path: '',
-            caption: 'View once photo',
+            caption: activeViewOnceItem.view_mode === 'allow_replay' ? 'View twice photo' : 'View once photo',
             created_at: activeViewOnceItem.created_at,
           }}
           isViewOnce={true}
+          viewMode={activeViewOnceItem.view_mode}
           onClose={() => {
             lightImpact();
             setActiveViewOnceItem(null);
@@ -1790,6 +2420,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           senderName={activeChatMedia.msg.sender_id === userId ? 'You' : partner.display_name}
           isMyMessage={activeChatMedia.msg.sender_id === userId}
           myReaction={reactions[activeChatMedia.msg.id]?.find(r => r.user_id === userId)?.emoji}
+          onSaveToSharedVault={() => {
+            void handleSaveMessageToSharedVault(activeChatMedia.msg);
+          }}
           onReply={() => {
             startReply(activeChatMedia.msg);
             setActiveChatMedia(null);
@@ -1889,6 +2522,9 @@ interface MessageRowProps {
   mineClass: string;
   playProgress: number;
   onRematch: (gameId: CoverGameType) => void;
+  onSaveToVault?: (msg: MessageItem) => void;
+  isGroup?: boolean;
+  senderNickname?: string | null;
 }
 
 const MessageRow = memo(function MessageRow(props: MessageRowProps) {
@@ -1936,10 +2572,32 @@ function MessageBubble({
   mineClass,
   playProgress,
   onRematch,
+  onSaveToVault,
+  isGroup,
+  senderNickname,
 }: MessageRowProps) {
   const [imageFailed, setImageFailed] = useState(false);
   const { getHighScore } = useGame();
   const deleted = isDeleted(msg);
+
+  const expiresAtMs = msg.expires_at ? new Date(msg.expires_at).getTime() : null;
+  const [burnNow, setBurnNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!expiresAtMs) return;
+    const interval = setInterval(() => setBurnNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [expiresAtMs]);
+
+  const remainingBurnSeconds = expiresAtMs ? Math.max(0, Math.floor((expiresAtMs - burnNow) / 1000)) : null;
+
+  const formatBurnCountdown = (secs: number) => {
+    if (secs <= 0) return 'expired';
+    if (secs < 60) return `${secs}s`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+    if (secs < 86400) return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+    return `${Math.floor(secs / 86400)}d`;
+  };
+
   const isViewOnceImage = !deleted && Boolean(
     (msg.is_view_once && (msg.content.startsWith('[IMAGE') || !msg.content.startsWith('['))) ||
     msg.content.startsWith('[IMAGE:VIEW_ONCE]') ||
@@ -2048,9 +2706,13 @@ function MessageBubble({
       if (now - lastTapRef.current < 300) {
         lastTapRef.current = 0;
         mediumImpact();
-        onToggleReaction(msg, '❤️');
-        setShowHeartBurst(true);
-        setTimeout(() => setShowHeartBurst(false), 650);
+        if (isImage && !isEphemeralImage && onSaveToVault) {
+          onSaveToVault(msg);
+        } else {
+          onToggleReaction(msg, '❤️');
+          setShowHeartBurst(true);
+          setTimeout(() => setShowHeartBurst(false), 650);
+        }
       } else {
         lastTapRef.current = now;
       }
@@ -2120,6 +2782,7 @@ function MessageBubble({
 
   return (
     <div
+      id={`msg-${msg.id}`}
       className={`relative group flex flex-col ${isMe ? 'items-end' : 'items-start'} ${
         isFirstInGroup ? 'mt-3.5' : 'mt-0.5'
       } ${reactionGroups.length ? 'mb-2' : ''}`}
@@ -2174,6 +2837,12 @@ function MessageBubble({
               : `bg-[#1B1D21] border border-white/[0.06] text-[#F4F5F6] shadow-sm ${bubbleRadiusClass}`
           }`}
         >
+          {isGroup && !isMe && isFirstInGroup && (
+            <div className="text-[11px] font-bold text-emerald mb-1 leading-tight">
+              {senderNickname || msg.sender?.display_name || msg.sender?.uid || partnerName}
+            </div>
+          )}
+
           {replyTarget !== undefined && !deleted && (
             <div
               className={`mb-1.5 px-2.5 py-1 rounded-lg border-l-2 text-xs ${
@@ -2258,62 +2927,18 @@ function MessageBubble({
               image
             )
           ) : isVoice ? (
-            <div className="flex items-center gap-3 min-w-[220px] py-1">
-              <button
-                type="button"
-                onClick={() => onToggleAudio(msg.id, voiceUrl)}
-                className={`w-11 h-11 shrink-0 rounded-full flex items-center justify-center ${
-                  isMe ? 'bg-black/70 text-white border border-white/15' : 'bg-[#10B981] text-[#04120C]'
-                } active:scale-95 transition-transform shadow-md`}
-                aria-label={isPlaying ? 'Pause voice message' : 'Play voice message'}
-              >
-                {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
-              </button>
-              <div className="flex-1 space-y-1.5">
-                {/* Interactive Scrubber Waveform */}
-                <div
-                  className="flex items-center gap-[2.5px] h-8 cursor-pointer py-1"
-                  onClick={e => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const p = Math.max(0, Math.min(1, x / rect.width));
-                    onScrubAudio(p);
-                  }}
-                  aria-hidden
-                >
-                  {(voice?.levels ?? Array.from({ length: WAVEFORM_BARS }, (_, i) => 0.25 + 0.2 * Math.abs(Math.sin(i * 1.7)))).map((level, i, all) => {
-                    const played = isPlaying && i / all.length < playProgress;
-                    return (
-                      <span
-                        key={i}
-                        className={`flex-1 rounded-full transition-all ${
-                          isMe ? 'bg-current' : 'bg-[#10B981]'
-                        } ${played ? 'opacity-100 scale-y-105' : 'opacity-35'}`}
-                        style={{ height: `${Math.max(16, Math.round(level * 100))}%` }}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="flex items-center justify-between text-[11px] font-mono">
-                  <span className={isMe ? 'opacity-75' : 'text-vault-400'}>
-                    {voiceDuration}
-                  </span>
-                  {isPlaying && (
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        onCycleSpeed();
-                      }}
-                      className="px-1.5 py-0.5 rounded bg-black/40 text-emerald text-[10px] font-bold border border-emerald/30 hover:bg-black/60"
-                      aria-label="Change playback speed"
-                    >
-                      {audioSpeed}x
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
+            <VoiceMessagePlayer
+              url={voiceUrl}
+              duration={voiceDuration}
+              levels={voice?.levels ?? null}
+              isMe={isMe}
+              isPlaying={isPlaying}
+              playProgress={playProgress}
+              audioSpeed={audioSpeed}
+              onTogglePlay={() => onToggleAudio(msg.id, voiceUrl)}
+              onScrub={onScrubAudio}
+              onCycleSpeed={onCycleSpeed}
+            />
           ) : (
             <span className="whitespace-pre-wrap">{msg.content}</span>
           )}
@@ -2361,6 +2986,12 @@ function MessageBubble({
         </button>
       ) : (isLastInGroup || msg.status || isImage) && (
         <div className={`flex items-center gap-1.5 text-[11px] text-vault-400 font-mono mt-1 px-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
+          {remainingBurnSeconds !== null && (
+            <span className="flex items-center gap-0.5 text-[10px] text-amber-400 bg-amber-950/60 px-1.5 py-0.5 rounded-full border border-amber-500/30 animate-pulse font-mono font-bold" title="Expiring message">
+              <Flame className="w-3 h-3 text-amber-400" aria-hidden />
+              {formatBurnCountdown(remainingBurnSeconds)}
+            </span>
+          )}
           {msg.edited_at && !deleted && <span className="font-sans italic text-vault-500">edited</span>}
           <span>{formatTimestamp(msg.created_at)}</span>
           {isMe &&
@@ -2392,6 +3023,7 @@ interface MessageActionSheetProps {
   onDelete: () => void;
   onDiscard: () => void;
   onDetails: () => void;
+  onSaveToVault?: () => void;
 }
 
 function MessageActionSheet({
@@ -2406,6 +3038,7 @@ function MessageActionSheet({
   onDelete,
   onDiscard,
   onDetails,
+  onSaveToVault,
 }: MessageActionSheetProps) {
   const failed = msg.status === 'failed';
   const deleted = isDeleted(msg);
@@ -2465,6 +3098,11 @@ function MessageActionSheet({
             {!deleted && isText && (
               <button type="button" className={item} onClick={onCopy}>
                 <Copy className="w-4 h-4 text-vault-300" aria-hidden /> Copy text
+              </button>
+            )}
+            {!deleted && onSaveToVault && (
+              <button type="button" className={item} onClick={onSaveToVault}>
+                <FolderHeart className="w-4 h-4 text-emerald" aria-hidden /> Save to Shared Vault
               </button>
             )}
             {canEdit && (

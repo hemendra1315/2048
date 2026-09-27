@@ -15,7 +15,7 @@ import { hashSecret } from './utils';
 // Offline mock backend for local UI development. It accepts any password, so every
 // sign-in entry point refuses to run in a production build.
 function assertDevOnly(): void {
-  if (import.meta.env.PROD) {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) {
     throw new Error('The offline demo backend is disabled in production builds');
   }
 }
@@ -36,58 +36,19 @@ const KEYS = {
   NOTIFICATION_PREFS: 'vault_mock_notification_prefs',
 };
 
-// Initial Demo Profiles
+// Initial Profiles (Gopika Super Admin only)
 const INITIAL_PROFILES: UserProfile[] = [
   {
-    id: 'usr_admin_001',
-    uid: 'TITAN-9000',
-    username: 'admin',
-    display_name: 'Overwatch (Admin)',
-    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    biometric_enabled: true,
+    id: 'c9e8b6e9-745b-4f79-9271-6eeb1eb99d0d',
+    uid: 'NEXUS-1255',
+    username: 'gopika',
+    display_name: 'gopika',
+    avatar_url: 'https://dddsplxihciighvmaqqt.supabase.co/storage/v1/object/public/avatars/c9e8b6e9-745b-4f79-9271-6eeb1eb99d0d/avatar_1790238855325.jpg',
+    biometric_enabled: false,
     role: 'super_admin',
     status: 'active',
-    gender: 'Male',
-    created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'usr_demo_002',
-    uid: 'CIPHER-4921',
-    username: 'alex',
-    display_name: 'Alex Mercer',
-    avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-    biometric_enabled: true,
-    role: 'user',
-    status: 'active',
-    gender: 'Male',
-    created_at: new Date(Date.now() - 86400000 * 14).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'usr_friend_003',
-    uid: 'SOLAR-8120',
-    username: 'elena',
-    display_name: 'Elena Rostova',
-    avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-    biometric_enabled: true,
-    role: 'user',
-    status: 'active',
     gender: 'Female',
-    created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'usr_friend_004',
-    uid: 'VORTEX-3391',
-    username: 'marcus',
-    display_name: 'Marcus Vance',
-    avatar_url: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&auto=format&fit=crop&q=80',
-    biometric_enabled: false,
-    role: 'user',
-    status: 'active',
-    gender: 'Male',
-    created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+    created_at: '2026-09-23T00:00:54.446697+00:00',
     updated_at: new Date().toISOString(),
   }
 ];
@@ -100,14 +61,14 @@ class MockBackendService {
   }
 
   private async seedDefaultsIfEmpty() {
-    if (import.meta.env.PROD) {
+    if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) {
       return;
     }
     if (!localStorage.getItem(KEYS.PROFILES)) {
       localStorage.setItem(KEYS.PROFILES, JSON.stringify(INITIAL_PROFILES));
     }
 
-    const defaultSecretHash = await hashSecret('2048');
+    const defaultSecretHash = await hashSecret('1245');
 
     if (!localStorage.getItem(KEYS.USER_PREFS)) {
       const prefs: Record<string, UserPreferences> = {};
@@ -311,13 +272,14 @@ class MockBackendService {
     password: string;
     enableBiometrics: boolean;
     avatarUrl?: string;
+    instagramUrl?: string | null;
   }): Promise<{ user: UserProfile; recoveryCode: string }> {
     assertDevOnly();
     const profiles = this.getProfiles();
     const cleanUsername = params.username.toLowerCase().trim();
 
     if (profiles.some(p => p.username?.toLowerCase() === cleanUsername)) {
-      throw new Error(`Username "${params.username}" is already taken.`);
+      throw new Error(`Username "@${params.username}" is already taken. Please choose another.`);
     }
 
     const newUid = this.generateUID();
@@ -330,6 +292,7 @@ class MockBackendService {
       username: cleanUsername,
       display_name: params.username.trim(),
       avatar_url: params.avatarUrl || null,
+      instagram_url: params.instagramUrl?.trim() || null,
       biometric_enabled: params.enableBiometrics,
       role: 'user',
       status: 'active',
@@ -415,6 +378,14 @@ class MockBackendService {
     const profiles = this.getProfiles();
     const index = profiles.findIndex(p => p.id === userId);
     if (index === -1) throw new Error('User not found');
+
+    if (updates.username) {
+      const clean = updates.username.toLowerCase().trim();
+      if (profiles.some(p => p.id !== userId && p.username?.toLowerCase() === clean)) {
+        throw new Error(`Username "@${updates.username}" is already taken.`);
+      }
+      updates.username = clean;
+    }
 
     const updated = { ...profiles[index], ...updates, updated_at: new Date().toISOString() };
     profiles[index] = updated;
@@ -663,22 +634,63 @@ class MockBackendService {
     );
   }
 
-  // 1-TO-1 CONVERSATIONS & REALTIME MESSAGING
+  // 1-TO-1 & GROUP CONVERSATIONS & REALTIME MESSAGING
   getConversations(userId: string): ConversationItem[] {
     const rawConvs = localStorage.getItem(KEYS.CONVERSATIONS);
-    const allConvs: { id: string; user_a: string; user_b: string; created_at: string; updated_at: string }[] = rawConvs ? JSON.parse(rawConvs) : [];
+    const allConvs: ConversationItem[] = rawConvs ? JSON.parse(rawConvs) : [];
 
-    const userConvs = allConvs.filter(c => c.user_a === userId || c.user_b === userId);
+    const userConvs = allConvs.filter(c => {
+      if (c.is_group) {
+        return Array.isArray(c.member_ids) ? c.member_ids.includes(userId) : (c.user_a === userId || c.user_b === userId);
+      }
+      return c.user_a === userId || c.user_b === userId;
+    });
 
     const messages = this.getAllMessages();
 
     return userConvs.map(conv => {
-      const partnerId = conv.user_a === userId ? conv.user_b : conv.user_a;
-      const partner = this.getProfileById(partnerId)!;
-
       const convMessages = messages.filter(m => m.conversation_id === conv.id);
       const lastMessage = convMessages[convMessages.length - 1];
       const unreadCount = convMessages.filter(m => m.sender_id !== userId && !m.is_read).length;
+
+      if (conv.is_group) {
+        return {
+          id: conv.id,
+          user_a: conv.user_a,
+          user_b: conv.user_b,
+          created_at: conv.created_at,
+          updated_at: conv.updated_at,
+          partner: conv.partner || {
+            id: conv.id,
+            uid: 'GROUP',
+            display_name: conv.group_name || 'Group Chat',
+            avatar_url: null,
+            role: 'group',
+            status: 'active',
+            created_at: conv.created_at,
+            updated_at: conv.updated_at,
+          },
+          lastMessage,
+          unreadCount,
+          is_group: true,
+          group_name: conv.group_name || conv.partner?.display_name || 'Group Chat',
+          group_members: conv.group_members || [],
+          member_ids: conv.member_ids || [conv.user_a],
+          created_by: conv.created_by,
+        };
+      }
+
+      const partnerId = conv.user_a === userId ? conv.user_b : conv.user_a;
+      const partner = this.getProfileById(partnerId) || {
+        id: partnerId,
+        uid: 'UNKNOWN',
+        display_name: 'Contact',
+        avatar_url: null,
+        role: 'user',
+        status: 'active',
+        created_at: '',
+        updated_at: '',
+      };
 
       return {
         id: conv.id,
@@ -691,6 +703,53 @@ class MockBackendService {
         unreadCount,
       };
     }).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+  }
+
+  createGroupConversation(creatorId: string, title: string, memberIds: string[]): ConversationItem {
+    const rawConvs = localStorage.getItem(KEYS.CONVERSATIONS);
+    const allConvs: ConversationItem[] = rawConvs ? JSON.parse(rawConvs) : [];
+    const allProfiles = this.getProfiles();
+    const cleanMemberIds = Array.from(new Set([creatorId, ...memberIds]));
+    const memberProfiles = cleanMemberIds
+      .map(id => allProfiles.find(p => p.id === id || p.uid === id))
+      .filter(Boolean) as UserProfile[];
+
+    const groupTitle = title.trim() || 'Group Chat';
+    const newId = `group_${Date.now()}`;
+    const groupPartner: UserProfile = {
+      id: newId,
+      uid: 'GROUP',
+      display_name: groupTitle,
+      avatar_url: null,
+      role: 'group',
+      status: 'active',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const newConv: ConversationItem = {
+      id: newId,
+      user_a: creatorId,
+      user_b: newId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      partner: groupPartner,
+      unreadCount: 0,
+      is_group: true,
+      group_name: groupTitle,
+      group_members: memberProfiles,
+      member_ids: cleanMemberIds,
+      created_by: creatorId,
+    };
+
+    allConvs.unshift(newConv);
+    localStorage.setItem(KEYS.CONVERSATIONS, JSON.stringify(allConvs));
+
+    // Send system message
+    this.sendMessage(newId, creatorId, `[SYSTEM:created_group:${groupTitle}]`);
+
+    this.emit('messages:updated', null);
+    return newConv;
   }
 
   getOrCreateConversation(user1: string, user2: string): string {
@@ -726,15 +785,16 @@ class MockBackendService {
     return msgs.map(m => ({ ...m, sender: this.getProfileById(m.sender_id) || undefined }));
   }
 
-  sendMessage(conversationId: string, senderId: string, content: string): MessageItem {
+  sendMessage(conversationId: string, senderId: string, content: string, expiresAt?: string | null): MessageItem {
     const allMsgs = this.getAllMessages();
 
     const newMsg: MessageItem = {
-      id: `msg_${Date.now()}`,
+      id: `msg_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
       conversation_id: conversationId,
       sender_id: senderId,
       content: content.trim(),
       is_read: false,
+      expires_at: expiresAt || null,
       created_at: new Date().toISOString(),
       sender: this.getProfileById(senderId) || undefined,
     };
@@ -1113,14 +1173,30 @@ class MockBackendService {
 
   adminEditMessage(messageId: string, newContent: string): void {
     const messages = this.getAllMessages();
-    const updated = messages.map(m => (m.id === messageId ? { ...m, content: newContent } : m));
+    let editedMsg: MessageItem | undefined;
+    const updated = messages.map(m => {
+      if (m.id === messageId) {
+        editedMsg = { ...m, content: newContent, edited_at: new Date().toISOString() };
+        return editedMsg;
+      }
+      return m;
+    });
     localStorage.setItem(KEYS.MESSAGES, JSON.stringify(updated));
+    if (editedMsg) {
+      this.emit(`chat:${editedMsg.conversation_id}:new_message`, editedMsg);
+      this.emit('messages:updated', editedMsg);
+    }
   }
 
   adminDeleteMessage(messageId: string): void {
     const messages = this.getAllMessages();
+    const target = messages.find(m => m.id === messageId);
     const updated = messages.filter(m => m.id !== messageId);
     localStorage.setItem(KEYS.MESSAGES, JSON.stringify(updated));
+    if (target) {
+      this.emit(`chat:${target.conversation_id}:new_message`, { ...target, content: '[DELETED]', deleted_at: new Date().toISOString() });
+      this.emit('messages:updated', target);
+    }
   }
 
   private generateUID(): string {

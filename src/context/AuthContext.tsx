@@ -5,11 +5,13 @@ import { supabase, isSupabaseConfigured, isMockBackendAllowed, callVaultAuth } f
 import { signOutAndReleasePush } from '../lib/notifications';
 import { useToast } from './ToastContext';
 import { BiometricService, ServerCreationOptions, ServerRequestOptions } from '../lib/biometrics';
+import { pinToSecret } from '../lib/pinHelper';
 
 export interface RegisterParams {
   username: string;
   password: string;
   enableBiometrics: boolean;
+  instagramUrl?: string | null;
 }
 
 interface SessionTokens {
@@ -38,7 +40,7 @@ interface AuthContextType {
   enrollBiometrics: () => Promise<void>;
   disableBiometrics: () => Promise<void>;
   logout: () => Promise<void>;
-  updateProfile: (updates: Pick<Partial<UserProfile>, 'display_name' | 'avatar_url'>) => Promise<UserProfile>;
+  updateProfile: (updates: Pick<Partial<UserProfile>, 'display_name' | 'avatar_url' | 'instagram_url'>) => Promise<UserProfile>;
   refreshUser: () => Promise<void>;
 }
 
@@ -205,14 +207,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const loginWithPassword = (identifier: string, password: string) =>
-    withErrors('Invalid username or password', async () => {
+    withErrors('Invalid username or PIN', async () => {
       let profile: UserProfile;
       const cleanId = identifier.trim();
+      const secret = pinToSecret(password);
       if (isSupabaseConfigured()) {
         // All credential checks, lockouts and legacy-account migration happen in vault-auth.
-        profile = await adoptSession(await callVaultAuth<AuthResult>('login', { identifier: cleanId, password }));
+        try {
+          profile = await adoptSession(await callVaultAuth<AuthResult>('login', { identifier: cleanId, password: secret }));
+        } catch (loginErr) {
+          // Fallback to raw password in case of accounts registered before PIN helper
+          if (secret !== password) {
+            profile = await adoptSession(await callVaultAuth<AuthResult>('login', { identifier: cleanId, password }));
+          } else {
+            throw loginErr;
+          }
+        }
       } else if (useMock) {
-        profile = await mockBackend.loginWithPassword(cleanId, password);
+        profile = await mockBackend.loginWithPassword(cleanId, secret);
         setUser(profile);
       } else {
         throw new Error(NOT_CONFIGURED);
@@ -272,15 +284,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const registerFrictionless = (params: RegisterParams) =>
     withErrors('Registration failed', async () => {
       const cleanUsername = params.username.toLowerCase().trim();
+      const secret = pinToSecret(params.password);
       if (isSupabaseConfigured()) {
         // Accounts are created only by vault-auth (server-side validation, throttling, bcrypt).
         const result = await callVaultAuth<AuthResult>('register', {
           username: cleanUsername,
-          password: params.password,
+          password: secret,
         });
         // Show the recovery key before the vault opens.
         setRecoveryCodeToShow(result.recoveryCode ?? null);
-        const profile = await adoptSession(result);
+        let profile = await adoptSession(result);
+        if (params.instagramUrl) {
+          try {
+            const { data: updatedProf } = await supabase.from('profiles').update({ instagram_url: params.instagramUrl.trim() }).eq('id', profile.id).select().maybeSingle();
+            if (updatedProf) profile = updatedProf as unknown as UserProfile;
+          } catch {}
+        }
         if (params.enableBiometrics) {
           try {
             const options = await callVaultAuth<{ publicKey: ServerCreationOptions }>('webauthn-register-options');
@@ -296,30 +315,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return { user: profile, recoveryCode: result.recoveryCode ?? '' };
       }
       if (!useMock) throw new Error(NOT_CONFIGURED);
-      const res = await mockBackend.registerFrictionless(params);
+      const res = await mockBackend.registerFrictionless({ ...params, password: secret });
       setRecoveryCodeToShow(res.recoveryCode);
       setUser(res.user);
       return res;
     });
 
   const resetPasswordWithRecovery = (identifier: string, recoveryCode: string, newPassword: string) =>
-    withErrors('Password reset failed', async () => {
+    withErrors('PIN reset failed', async () => {
       let profile: UserProfile;
+      const secret = pinToSecret(newPassword);
       if (isSupabaseConfigured()) {
         const result = await callVaultAuth<AuthResult>('reset', {
           identifier: identifier.trim(),
           recoveryCode: recoveryCode.trim(),
-          newPassword,
+          newPassword: secret,
         });
         setRecoveryCodeToShow(result.recoveryCode ?? null);
         profile = await adoptSession(result);
       } else if (useMock) {
-        profile = await mockBackend.resetPasswordWithRecoveryCode(identifier.trim(), recoveryCode, newPassword);
+        profile = await mockBackend.resetPasswordWithRecoveryCode(identifier.trim(), recoveryCode, secret);
         setUser(profile);
       } else {
         throw new Error(NOT_CONFIGURED);
       }
-      showToast('Password reset. Save your new recovery key.', 'success');
+      showToast('PIN reset. Save your new recovery key.', 'success');
       return profile;
     });
 
@@ -338,7 +358,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const updateProfile = async (updates: Pick<Partial<UserProfile>, 'display_name' | 'avatar_url'>): Promise<UserProfile> => {
+  const updateProfile = async (updates: Pick<Partial<UserProfile>, 'display_name' | 'avatar_url' | 'instagram_url'>): Promise<UserProfile> => {
     if (!user) throw new Error('Not authenticated');
     try {
       let updated: UserProfile;
@@ -346,6 +366,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const { data, error } = await supabase.rpc('update_my_profile', {
           p_display_name: updates.display_name ?? null,
           p_avatar_url: updates.avatar_url ?? null,
+          p_instagram_url: updates.instagram_url ?? null,
         });
         if (error) throw error;
         updated = data as unknown as UserProfile;

@@ -15,11 +15,15 @@ import {
   Trash2,
   MailOpen,
   RotateCcw,
+  Users,
+  Plus,
+  Check,
 } from 'lucide-react';
 import { ConversationItem, UserProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { mockBackend } from '../../lib/mockBackend';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { createGroupChat } from '../../lib/groupChatApi';
 import { uniqueChannelName } from '../../lib/realtime';
 import { formatTimestamp } from '../../lib/utils';
 import { ChatRoom } from './ChatRoom';
@@ -29,7 +33,7 @@ import { useMediaQuery, DESKTOP_QUERY } from '../../lib/useMediaQuery';
 import { usePresence } from '../../lib/presence';
 import { readableMessagePreview } from '../../lib/chatExtras';
 import { useToast } from '../../context/ToastContext';
-import { mediumImpact } from '../../lib/haptics';
+import { mediumImpact, lightImpact } from '../../lib/haptics';
 import { useBackHandler } from '../../lib/backButton';
 
 interface MessagesViewProps {
@@ -58,6 +62,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [activeConversation, setActiveConversation] = useState<{
     id: string;
     partner: UserProfile;
+    is_group?: boolean;
+    group_name?: string | null;
+    group_avatar_url?: string | null;
+    group_description?: string | null;
   } | null>(null);
 
   useEffect(() => {
@@ -68,6 +76,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [newChatUidInput, setNewChatUidInput] = useState('');
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
+  const [newChatTab, setNewChatTab] = useState<'direct' | 'group'>('direct');
+  const [groupNameInput, setGroupNameInput] = useState('');
+  const [groupMemberUidInput, setGroupMemberUidInput] = useState('');
+  const [selectedGroupMembers, setSelectedGroupMembers] = useState<UserProfile[]>([]);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const { showToast } = useToast();
   const [pinTarget, setPinTarget] = useState<ConversationItem | null>(null);
@@ -150,34 +162,60 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           pinned_at: string | null;
           muted_at: string | null;
           disappear_after_seconds: number | null;
+          is_group?: boolean;
+          group_name?: string | null;
+          group_avatar_url?: string | null;
+          group_description?: string | null;
+          member_count?: number;
         }[];
 
         if (list.length > 0) {
-          const partnerIds = [...new Set(list.map(r => r.partner_id))];
-          const { data: rawProfiles, error: profilesError } = await supabase.from('profiles').select('*').in('id', partnerIds);
+          const directPartnerIds = [
+            ...new Set(list.filter(r => !r.is_group).map(r => r.partner_id).filter(Boolean)),
+          ];
+          const { data: rawProfiles, error: profilesError } = directPartnerIds.length > 0
+            ? await supabase.from('profiles').select('*').in('id', directPartnerIds)
+            : { data: [], error: null };
           if (profilesError) {
             console.warn('[messages] could not load partner profiles; showing placeholders', profilesError);
           }
           const profiles = (rawProfiles || []) as unknown as UserProfile[];
 
           const formatted: ConversationItem[] = list.map(r => {
-            const partner = profiles.find(p => p.id === r.partner_id) || {
-              id: r.partner_id,
-              uid: 'UNKNOWN',
-              display_name: 'Contact',
-              avatar_url: null,
-              role: 'user',
-              status: 'active',
-              created_at: '',
-              updated_at: '',
-            };
+            const isGroup = Boolean(r.is_group);
+            const partner = isGroup
+              ? ({
+                  id: r.conversation_id,
+                  uid: 'GROUP',
+                  display_name: r.group_name || 'Group Chat',
+                  avatar_url: r.group_avatar_url || null,
+                  role: 'user',
+                  status: 'active',
+                  created_at: r.created_at,
+                  updated_at: r.updated_at,
+                } as UserProfile)
+              : profiles.find(p => p.id === r.partner_id) || {
+                  id: r.partner_id,
+                  uid: 'UNKNOWN',
+                  display_name: 'Contact',
+                  avatar_url: null,
+                  role: 'user',
+                  status: 'active',
+                  created_at: '',
+                  updated_at: '',
+                };
             return {
               id: r.conversation_id,
               user_a: user.id,
-              user_b: r.partner_id,
+              user_b: isGroup ? r.conversation_id : r.partner_id,
               created_at: r.created_at,
               updated_at: r.updated_at,
               partner: partner as ConversationItem['partner'],
+              is_group: isGroup,
+              group_name: r.group_name,
+              group_avatar_url: r.group_avatar_url,
+              group_description: r.group_description,
+              member_count: r.member_count,
               lastMessage: r.last_message_id
                 ? {
                     id: r.last_message_id,
@@ -194,10 +232,14 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               disappearAfterSeconds: r.disappear_after_seconds,
             };
           });
-          setConversations(formatted);
-          autoSelectFirstOnDesktop(formatted);
+          const sorted = [...formatted].sort(
+            (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+          );
+          setConversations(sorted);
+          autoSelectFirstOnDesktop(sorted);
         } else {
           setConversations([]);
+          autoSelectFirstOnDesktop([]);
         }
       } else {
         const list = mockBackend.getConversations(user.id);
@@ -278,8 +320,23 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
   }, [initialPartnerId, conversations, user, onClearInitialPartner, notifyDesktopSelection, loadConversations]);
 
-  const handleStartDirectChat = (partner: UserProfile, convId: string) => {
-    setActiveConversation({ id: convId, partner });
+  const handleStartDirectChat = (partner: UserProfile, convId: string, convItem?: ConversationItem) => {
+    // Optimistically clear unread badge immediately (Instagram style)
+    setConversations(prev => prev.map(c => c.id === convId ? { ...c, unreadCount: 0 } : c));
+    if (isSupabaseConfigured()) {
+      void supabase.rpc('mark_conversation_read', { p_conversation_id: convId }).then(() => undefined, () => undefined);
+    } else if (user) {
+      mockBackend.markMessagesAsRead(convId, user.id);
+    }
+
+    setActiveConversation({
+      id: convId,
+      partner,
+      is_group: convItem?.is_group,
+      group_name: convItem?.group_name,
+      group_avatar_url: convItem?.group_avatar_url,
+      group_description: convItem?.group_description,
+    });
     notifyDesktopSelection(partner, convId);
   };
 
@@ -353,6 +410,116 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       } else {
         alert(`No user found with UID "${cleanUid}"`);
       }
+    }
+  };
+
+  const handleAddMemberToGroup = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!groupMemberUidInput.trim()) return;
+    const cleanUid = groupMemberUidInput.trim().toUpperCase();
+
+    if (user?.uid === cleanUid) {
+      showToast('You are automatically included in the group', 'info');
+      return;
+    }
+
+    if (selectedGroupMembers.some(m => m.uid.toUpperCase() === cleanUid || (m.username && m.username.toUpperCase() === cleanUid))) {
+      showToast('Member already added', 'info');
+      return;
+    }
+
+    let targetProfile: UserProfile | null = null;
+    if (isSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .or(`uid.eq.${cleanUid},username.eq.${cleanUid.toLowerCase()}`)
+          .maybeSingle();
+        if (!error && data) {
+          targetProfile = data as unknown as UserProfile;
+        }
+      } catch (err) {
+        console.error('Error finding profile for group:', err);
+      }
+    }
+
+    if (!targetProfile) {
+      const all = mockBackend.getProfiles();
+      targetProfile = all.find(
+        p => p.uid.toUpperCase() === cleanUid || (p.username && p.username.toUpperCase() === cleanUid)
+      ) || null;
+    }
+
+    if (targetProfile) {
+      setSelectedGroupMembers(prev => [...prev, targetProfile!]);
+      setGroupMemberUidInput('');
+      lightImpact();
+      showToast(`Added ${targetProfile.display_name}`, 'success');
+    } else {
+      showToast(`No user found with UID "${cleanUid}"`, 'error');
+    }
+  };
+
+  const handleToggleContactForGroup = (contact: UserProfile) => {
+    if (contact.id === user?.id) return;
+    lightImpact();
+    setSelectedGroupMembers(prev => {
+      const exists = prev.some(m => m.id === contact.id);
+      if (exists) {
+        return prev.filter(m => m.id !== contact.id);
+      } else {
+        return [...prev, contact];
+      }
+    });
+  };
+
+  const handleCreateGroupChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    if (!groupNameInput.trim()) {
+      showToast('Please enter a group name', 'info');
+      return;
+    }
+    if (selectedGroupMembers.length === 0) {
+      showToast('Please select at least 1 member for the group', 'info');
+      return;
+    }
+
+    const cleanName = groupNameInput.trim();
+    const memberIds = selectedGroupMembers.map(m => m.id);
+
+    try {
+      if (isSupabaseConfigured()) {
+        const convId = await createGroupChat(cleanName, memberIds);
+        await loadConversations();
+        const targetPartner: UserProfile = {
+          id: convId,
+          uid: 'GROUP',
+          display_name: cleanName,
+          avatar_url: null,
+          role: 'user',
+          status: 'active',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        setActiveConversation({ id: convId, partner: targetPartner });
+        notifyDesktopSelection(targetPartner, convId);
+      } else {
+        const newConv = mockBackend.createGroupConversation(user.id, cleanName, memberIds);
+        void loadConversations();
+        setActiveConversation({ id: newConv.id, partner: newConv.partner });
+        notifyDesktopSelection(newConv.partner, newConv.id);
+      }
+      setNewChatModalOpen(false);
+      setGroupNameInput('');
+      setSelectedGroupMembers([]);
+      setGroupMemberUidInput('');
+      mediumImpact();
+      showToast(`Created group "${cleanName}" 🎉`, 'success');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to create group';
+      showToast(msg, 'error');
     }
   };
 
@@ -555,7 +722,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   )}
                   <button
                     type="button"
-                    onClick={() => (isSwiped ? setSwipedId(null) : handleStartDirectChat(c.partner, c.id))}
+                    onClick={() => (isSwiped ? setSwipedId(null) : handleStartDirectChat(c.partner, c.id, c))}
                     onContextMenu={e => {
                       if (!isSupabaseConfigured()) return;
                       e.preventDefault();
@@ -571,17 +738,36 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                       isSelected ? 'bg-vault-850 border border-vault-750' : 'bg-vault-950 hover:bg-vault-900 border border-transparent'
                     }`}
                   >
-                    <Avatar
-                      name={c.partner.display_name}
-                      seed={c.partner.uid}
-                      src={c.partner.avatar_url}
-                      size={56}
-                      online={presence[c.partner.id]?.isOnline ?? false}
-                    />
+                    {c.is_group ? (
+                      c.group_avatar_url ? (
+                        <img
+                          src={c.group_avatar_url}
+                          alt={c.group_name || 'Group'}
+                          className="w-14 h-14 rounded-full object-cover border border-emerald/40 shadow-sm shrink-0"
+                        />
+                      ) : (
+                        <div className="w-14 h-14 rounded-full bg-emerald/20 border border-emerald/40 flex items-center justify-center text-emerald font-bold shadow-sm shrink-0">
+                          <Users className="w-6 h-6" aria-hidden />
+                        </div>
+                      )
+                    ) : (
+                      <Avatar
+                        name={c.partner.display_name}
+                        seed={c.partner.uid}
+                        src={c.partner.avatar_url}
+                        size={56}
+                        online={presence[c.partner.id]?.isOnline ?? false}
+                      />
+                    )}
                     <span className="flex-1 min-w-0 flex flex-col gap-0.5 ml-1">
                       <span className="flex justify-between items-baseline gap-2">
                         <span className="t-body font-bold text-white truncate flex items-center gap-1 min-w-0">
-                          <span className="truncate">{c.partner.display_name}</span>
+                          <span className="truncate">{c.is_group ? (c.group_name || c.partner.display_name) : c.partner.display_name}</span>
+                          {c.is_group && (
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald/20 text-emerald font-mono font-bold shrink-0">
+                              Group
+                            </span>
+                          )}
                           {c.pinnedAt && <Pin className="w-3 h-3 text-emerald shrink-0" aria-label="Pinned" />}
                           {c.mutedAt && <BellOff className="w-3 h-3 text-vault-500 shrink-0" aria-label="Muted" />}
                           {c.disappearAfterSeconds ? <Timer className="w-3 h-3 text-vault-400 shrink-0" aria-label="Disappearing messages on" /> : null}
@@ -624,6 +810,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       key={activeConversation.id}
       conversationId={activeConversation.id}
       partner={activeConversation.partner}
+      isGroup={activeConversation.is_group}
+      groupName={activeConversation.group_name}
+      groupAvatarUrl={activeConversation.group_avatar_url}
+      groupDescription={activeConversation.group_description}
       onBack={() => setActiveConversation(null)}
       initialAttachment={initialAttachment}
       onClearInitialAttachment={onClearInitialAttachment}
@@ -721,18 +911,31 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         <div className="h-full min-h-0 flex flex-col">{activeChat ?? ConversationListView}</div>
       )}
 
-      {/* Direct UID Connect Modal */}
+      {/* Direct UID Connect & Group Chat Modal */}
       {newChatModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-vault-900 border border-vault-750 rounded-2xl p-6 max-w-sm w-full space-y-4 animate-fade-in shadow-2xl">
+          <div className="bg-vault-900 border border-vault-750 rounded-2xl p-5 max-w-sm w-full space-y-4 animate-fade-in shadow-2xl">
+            {/* Modal Header */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-emerald" />
-                <h3 className="text-sm font-bold text-white m-0">Direct Connect</h3>
+                {newChatTab === 'direct' ? (
+                  <ShieldCheck className="w-5 h-5 text-emerald" />
+                ) : (
+                  <Users className="w-5 h-5 text-emerald" />
+                )}
+                <h3 className="text-sm font-bold text-white m-0">
+                  {newChatTab === 'direct' ? 'Direct Connect' : 'Create Group Chat'}
+                </h3>
               </div>
               <button
                 type="button"
-                onClick={() => setNewChatModalOpen(false)}
+                onClick={() => {
+                  setNewChatModalOpen(false);
+                  setNewChatTab('direct');
+                  setSelectedGroupMembers([]);
+                  setGroupNameInput('');
+                  setGroupMemberUidInput('');
+                }}
                 className="ib"
                 aria-label="Close"
               >
@@ -740,26 +943,177 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               </button>
             </div>
 
-            <p className="text-xs text-vault-400 m-0">
-              Enter the peer's unique UID tag (e.g. <span className="font-mono text-white">CIPHER-1082</span> or <span className="font-mono text-white">SOLAR-8120</span>) to open an encrypted channel.
-            </p>
-
-            <form onSubmit={handleCreateChatByUid} className="space-y-3">
-              <input
-                type="text"
-                placeholder="Enter UID..."
-                value={newChatUidInput}
-                onChange={e => setNewChatUidInput(e.target.value)}
-                className="w-full py-2.5 px-4 bg-vault-950 border border-vault-700 focus:border-emerald rounded-xl text-white font-mono text-sm placeholder:text-vault-500 focus:outline-none"
-              />
-
+            {/* Tab Switcher */}
+            <div className="grid grid-cols-2 p-1 bg-vault-950 rounded-xl border border-vault-800 text-xs font-semibold">
               <button
-                type="submit"
-                className="btn btn-p btn-block font-bold text-xs"
+                type="button"
+                onClick={() => { setNewChatTab('direct'); lightImpact(); }}
+                className={`py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+                  newChatTab === 'direct'
+                    ? 'bg-emerald text-vault-950 font-bold shadow-sm'
+                    : 'text-vault-400 hover:text-white'
+                }`}
               >
-                Open Encrypted Channel
+                <MessageSquare className="w-3.5 h-3.5" />
+                Direct 1:1
               </button>
-            </form>
+              <button
+                type="button"
+                onClick={() => { setNewChatTab('group'); lightImpact(); }}
+                className={`py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+                  newChatTab === 'group'
+                    ? 'bg-emerald text-vault-950 font-bold shadow-sm'
+                    : 'text-vault-400 hover:text-white'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                New Group
+              </button>
+            </div>
+
+            {newChatTab === 'direct' ? (
+              <>
+                <p className="text-xs text-vault-400 m-0">
+                  Enter username (e.g. <span className="font-medium text-emerald">@akshara</span> or <span className="font-medium text-emerald">@rohit</span>) or unique ID to open an encrypted channel.
+                </p>
+
+                <form onSubmit={handleCreateChatByUid} className="space-y-3">
+                  <input
+                    type="text"
+                    placeholder="Enter @username or ID..."
+                    value={newChatUidInput}
+                    onChange={e => setNewChatUidInput(e.target.value)}
+                    className="w-full py-2.5 px-4 bg-vault-950 border border-vault-700 focus:border-emerald rounded-xl text-white text-sm placeholder:text-vault-500 focus:outline-none"
+                  />
+
+                  <button
+                    type="submit"
+                    className="btn btn-p btn-block font-bold text-xs"
+                  >
+                    Open Encrypted Channel
+                  </button>
+                </form>
+              </>
+            ) : (
+              <form onSubmit={handleCreateGroupChat} className="space-y-3.5">
+                {/* Group Name Input */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-vault-400 mb-1.5">
+                    Group Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Arcade Squad, Secret Vault"
+                    value={groupNameInput}
+                    onChange={e => setGroupNameInput(e.target.value)}
+                    className="w-full py-2 px-3.5 bg-vault-950 border border-vault-700 focus:border-emerald rounded-xl text-white text-sm placeholder:text-vault-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Add Member by Username / UID */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-vault-400 mb-1.5">
+                    Add Member by @Username or ID
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Enter @username or ID..."
+                      value={groupMemberUidInput}
+                      onChange={e => setGroupMemberUidInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          void handleAddMemberToGroup();
+                        }
+                      }}
+                      className="flex-1 min-w-0 py-2 px-3 bg-vault-950 border border-vault-700 focus:border-emerald rounded-xl text-white text-xs placeholder:text-vault-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleAddMemberToGroup()}
+                      className="btn btn-sm btn-p px-3 text-xs shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add
+                    </button>
+                  </div>
+                </div>
+
+                {/* Selected Members Chips */}
+                {selectedGroupMembers.length > 0 && (
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-vault-400 mb-1.5">
+                      Selected Members ({selectedGroupMembers.length})
+                    </label>
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 bg-vault-950 rounded-xl border border-vault-800">
+                      {selectedGroupMembers.map(m => (
+                        <span
+                          key={m.id}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald/20 border border-emerald/40 text-emerald text-xs font-semibold"
+                        >
+                          <span className="truncate max-w-[120px]">{m.display_name}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleContactForGroup(m)}
+                            className="text-emerald hover:text-white"
+                            aria-label={`Remove ${m.display_name}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Quick Add from Contacts */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-vault-400 mb-1.5">
+                    Quick Add Contacts
+                  </label>
+                  <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
+                    {(conversations.filter(c => !c.is_group).map(c => c.partner).length > 0
+                      ? conversations.filter(c => !c.is_group).map(c => c.partner)
+                      : mockBackend.getProfiles().filter(p => p.id !== user?.id)
+                    ).map(p => {
+                      const isSelected = selectedGroupMembers.some(m => m.id === p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => handleToggleContactForGroup(p)}
+                          className={`w-full flex items-center justify-between p-2 rounded-xl text-left text-xs transition-colors ${
+                            isSelected
+                              ? 'bg-emerald/15 border border-emerald/40 text-white'
+                              : 'bg-vault-950 hover:bg-vault-850 text-vault-300 border border-transparent'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Avatar name={p.display_name} seed={p.uid} src={p.avatar_url} size={32} />
+                            <div className="min-w-0">
+                              <p className="font-bold text-white truncate m-0">{p.display_name}</p>
+                              <p className="text-[10px] text-vault-400 font-mono m-0 truncate">{p.uid}</p>
+                            </div>
+                          </div>
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center ${isSelected ? 'bg-emerald text-vault-950' : 'border border-vault-700'}`}>
+                            {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={!groupNameInput.trim() || selectedGroupMembers.length === 0}
+                  className="btn btn-p btn-block font-bold text-xs disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+                >
+                  Create Group Chat
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}

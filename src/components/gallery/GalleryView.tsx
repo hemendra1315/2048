@@ -6,7 +6,6 @@ import {
   RotateCcw,
   Grid3X3,
   LayoutGrid,
-  Square,
   Check,
   CheckSquare,
   Trash2,
@@ -32,8 +31,8 @@ import { useBackHandler } from '../../lib/backButton';
 import { formatDayHeading } from '../../lib/utils';
 import { lightImpact, mediumImpact, selectionChange, notificationSuccess } from '../../lib/haptics';
 
-type GridDensity = '3' | '2' | '1';
-type Collection = 'photos' | 'favorites' | 'videos' | 'screenshots' | 'recent' | 'trash';
+type GridDensity = '4' | '3' | '2';
+type Collection = 'photos' | 'favorites' | 'albums' | 'videos' | 'screenshots' | 'recent' | 'trash';
 
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'm4v', '3gp'];
 /** Photos taken within this many ms of each other are grouped into a "Burst" stack.
@@ -100,7 +99,8 @@ export const GalleryView: React.FC = () => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [density, setDensity] = useState<GridDensity>(() => {
-    return (localStorage.getItem('gallery_density') as GridDensity) || '3';
+    const saved = localStorage.getItem('gallery_density') as GridDensity;
+    return saved === '4' || saved === '3' || saved === '2' ? saved : '4';
   });
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -489,25 +489,25 @@ export const GalleryView: React.FC = () => {
   useBackHandler(searchOpen, () => { setSearchOpen(false); setSearchQuery(''); });
 
   const gridClass =
-    density === '1'
-      ? 'grid grid-cols-1 gap-4 max-w-md mx-auto'
-      : density === '2'
-      ? 'grid grid-cols-2 gap-2.5 sm:gap-3'
-      : 'grid grid-cols-3 gap-1.5 sm:gap-2';
+    density === '4'
+      ? 'grid grid-cols-4 gap-1 sm:gap-1.5'
+      : density === '3'
+      ? 'grid grid-cols-3 gap-1.5 sm:gap-2'
+      : 'grid grid-cols-2 gap-2.5 sm:gap-3';
 
   const itemAspectClass =
-    density === '1'
-      ? 'aspect-[4/3] rounded-2xl'
-      : density === '2'
-      ? 'aspect-[4/5] rounded-xl'
-      : 'aspect-square rounded-lg sm:rounded-xl';
+    density === '4'
+      ? 'aspect-square rounded-md sm:rounded-lg'
+      : density === '3'
+      ? 'aspect-square rounded-lg sm:rounded-xl'
+      : 'aspect-[4/5] rounded-xl';
 
   const collections: { id: Collection; label: string; count?: number }[] = [
     { id: 'photos', label: 'Photos', count: photoCount },
     { id: 'favorites', label: 'Favorites', count: favoriteCount },
     { id: 'videos', label: 'Videos', count: videoCount },
     { id: 'screenshots', label: 'Screenshots' },
-    { id: 'recent', label: 'Recently Added' },
+    { id: 'recent', label: 'Recent' },
     { id: 'trash', label: 'Trash', count: trashedItems.length },
   ];
 
@@ -619,7 +619,7 @@ export const GalleryView: React.FC = () => {
           </div>
         )}
 
-        {density === '1' && item.caption && !isSelectMode && (
+        {density === '2' && item.caption && !isSelectMode && (
           <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/80 to-transparent text-left">
             <p className="text-sm font-semibold text-white truncate m-0">{item.caption}</p>
           </div>
@@ -679,6 +679,22 @@ export const GalleryView: React.FC = () => {
             <div className="flex items-center bg-vault-900 border border-vault-800 p-0.5 rounded-xl">
               <button
                 type="button"
+                onClick={() => handleDensityChange('4')}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  density === '4' ? 'bg-emerald text-vault-950 shadow-sm' : 'text-vault-400 hover:text-white'
+                }`}
+                title="4-Column Compact"
+                aria-label="4-Column Compact"
+              >
+                <div className="w-4 h-4 grid grid-cols-2 gap-0.5 p-0.5">
+                  <div className="bg-current rounded-[1px]" />
+                  <div className="bg-current rounded-[1px]" />
+                  <div className="bg-current rounded-[1px]" />
+                  <div className="bg-current rounded-[1px]" />
+                </div>
+              </button>
+              <button
+                type="button"
                 onClick={() => handleDensityChange('3')}
                 className={`p-1.5 rounded-lg transition-colors ${
                   density === '3' ? 'bg-emerald text-vault-950 shadow-sm' : 'text-vault-400 hover:text-white'
@@ -694,21 +710,10 @@ export const GalleryView: React.FC = () => {
                 className={`p-1.5 rounded-lg transition-colors ${
                   density === '2' ? 'bg-emerald text-vault-950 shadow-sm' : 'text-vault-400 hover:text-white'
                 }`}
-                title="2-Column Editorial"
-                aria-label="2-Column Editorial"
+                title="2-Column Large"
+                aria-label="2-Column Large"
               >
                 <LayoutGrid className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDensityChange('1')}
-                className={`p-1.5 rounded-lg transition-colors ${
-                  density === '1' ? 'bg-emerald text-vault-950 shadow-sm' : 'text-vault-400 hover:text-white'
-                }`}
-                title="1-Column Cinematic"
-                aria-label="1-Column Cinematic"
-              >
-                <Square className="w-4 h-4" />
               </button>
             </div>
           )}

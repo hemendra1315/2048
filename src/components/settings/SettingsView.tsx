@@ -123,12 +123,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPassword.length < 8) {
-      showToast('Password must be at least 8 characters', 'error');
+    if (newPassword.length < 4) {
+      showToast('PIN must be at least 4 digits', 'error');
       return;
     }
     if (newPassword !== confirmPassword) {
-      showToast('New passwords do not match', 'error');
+      showToast('New PINs do not match', 'error');
       return;
     }
 
@@ -138,7 +138,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      showToast('Unlock password updated', 'success');
+      showToast('Unlock PIN updated', 'success');
     } catch {
       // Error toast already triggered in context
     } finally {
@@ -358,46 +358,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
         </div>
       </section>
 
-      {/* 4. CHANGE VAULT UNLOCK PASSWORD */}
+      {/* 4. CHANGE VAULT UNLOCK PIN */}
       <section className="flex flex-col gap-2">
-        <h2 className="t-over px-1 m-0">Change Unlock Password</h2>
+        <h2 className="t-over px-1 m-0">Change Unlock PIN</h2>
         <div className="card p-4 flex flex-col gap-3">
           <form onSubmit={handleUpdatePassword} className="flex flex-col gap-3">
             <div className="field">
-              <label htmlFor="current-pw" className="lab">Current Password</label>
+              <label htmlFor="current-pw" className="lab">Current PIN</label>
               <input
                 id="current-pw"
                 type="password"
                 required
+                inputMode="numeric"
                 value={oldPassword}
                 onChange={e => setOldPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="••••"
                 className="inp text-sm"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="field">
-                <label htmlFor="new-pw" className="lab">New Password</label>
+                <label htmlFor="new-pw" className="lab">New PIN</label>
                 <input
                   id="new-pw"
                   type="password"
                   required
+                  inputMode="numeric"
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
-                  placeholder="Min 8 characters"
+                  placeholder="Min 4 digits"
                   className="inp text-sm"
                 />
               </div>
               <div className="field">
-                <label htmlFor="confirm-pw" className="lab">Confirm Password</label>
+                <label htmlFor="confirm-pw" className="lab">Confirm PIN</label>
                 <input
                   id="confirm-pw"
                   type="password"
                   required
+                  inputMode="numeric"
                   value={confirmPassword}
                   onChange={e => setConfirmPassword(e.target.value)}
-                  placeholder="Repeat new password"
+                  placeholder="Repeat new PIN"
                   className="inp text-sm"
                 />
               </div>
@@ -409,7 +412,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
               className="btn btn-s btn-block mt-1"
             >
               <KeyRound className="i i-sm" aria-hidden />
-              <span>{passwordUpdating ? 'Updating...' : 'Update Password'}</span>
+              <span>{passwordUpdating ? 'Updating...' : 'Update PIN'}</span>
             </button>
           </form>
         </div>
