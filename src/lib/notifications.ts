@@ -326,6 +326,16 @@ export async function notifyIncomingMessage(
 
     if (Capacitor.isNativePlatform()) {
       await initializeNotificationService();
+      // Ensure local notification permission is granted
+      try {
+        const localPerm = await LocalNotifications.checkPermissions();
+        if (localPerm.display !== 'granted') {
+          const req = await LocalNotifications.requestPermissions();
+          if (req.display !== 'granted') return;
+        }
+      } catch {
+        // Older plugin version – proceed anyway
+      }
       await LocalNotifications.schedule({
         notifications: [
           {

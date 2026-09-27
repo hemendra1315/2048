@@ -8,6 +8,7 @@ import { createHandler, type AuthBackend, type Db, type Session } from './handle
 
 const url = Deno.env.get('SUPABASE_URL');
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const envOrigins = (Deno.env.get('WEBAUTHN_ALLOWED_ORIGINS') ?? '')
   .split(',')
   .map(s => s.trim())
@@ -20,7 +21,7 @@ const defaultOrigins = [
   'capacitor://localhost',
 ];
 const allowedOrigins = Array.from(new Set([...envOrigins, ...defaultOrigins]));
-if (!url || !serviceKey || !anonKey) throw new Error('Missing Supabase environment variables');
+if (!url || !serviceKey) throw new Error('Missing Supabase environment variables');
 
 const clientOptions = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
 const admin = createClient(url, serviceKey, clientOptions);
