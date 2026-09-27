@@ -1,0 +1,61 @@
+{
+  "timestamp": "2026-09-27T09:30:23.956Z",
+  "captureReport": [
+    {
+      "scene": 1,
+      "title": "2048 Game Board",
+      "path": "C:\\Users\\SELVI\\Documents\\antigravity\\serene-brahmagupta\\REEL_SOURCE_CAPTURE\\SCENE_01_2048_Gameplay.png",
+      "time": "0s-2s",
+      "text": "Just another 2048 game?"
+    },
+    {
+      "scene": 2,
+      "title": "Stealth PIN Unlock",
+      "path": "C:\\Users\\SELVI\\Documents\\antigravity\\serene-brahmagupta\\REEL_SOURCE_CAPTURE\\SCENE_02_Stealth_PIN_Unlock.png",
+      "time": "2s-4.5s",
+      "text": "Look closer."
+    },
+    {
+      "scene": 3,
+      "title": "Hidden Inbox",
+      "path": "C:\\Users\\SELVI\\Documents\\antigravity\\serene-brahmagupta\\REEL_SOURCE_CAPTURE\\SCENE_03_Hidden_Inbox.png",
+      "time": "4.5s-7.5s",
+      "text": "Hidden Inbox"
+    },
+    {
+      "scene": 4,
+      "title": "Private Messages",
+      "path": "C:\\Users\\SELVI\\Documents\\antigravity\\serene-brahmagupta\\REEL_SOURCE_CAPTURE\\SCENE_04_Direct_Messages.png",
+      "time": "7.5s-11s",
+      "text": "Private Messages"
+    },
+    {
+      "scene": 5,
+      "title": "Voice Notes Waveform",
+      "path": "C:\\Users\\SELVI\\Documents\\antigravity\\serene-brahmagupta\\REEL_SOURCE_CAPTURE\\SCENE_05_Voice_Notes.png",
+      "time": "11s-14.5s",
+      "text": "Voice Notes"
+    },
+    {
+      "scene": 6,
+      "title": "View Once Media",
+      "path": "C:\\Users\\SELVI\\Documents\\antigravity\\serene-brahmagupta\\REEL_SOURCE_CAPTURE\\SCENE_06_View_Once.png",
+      "time": "14.5s-17.5s",
+      "text": "View Once"
+    },
+    {
+      "scene": 7,
+      "title": "Private Gallery",
+      "path": "C:\\Users\\SELVI\\Documents\\antigravity\\serene-brahmagupta\\REEL_SOURCE_CAPTURE\\SCENE_07_Private_Gallery.png",
+      "time": "17.5s-20.5s",
+      "text": "Private Gallery"
+    },
+    {
+      "scene": 8,
+      "title": "Panic Exit to 2048",
+      "path": "C:\\Users\\SELVI\\Documents\\antigravity\\serene-brahmagupta\\REEL_SOURCE_CAPTURE\\SCENE_08_Panic_Exit_2048.png",
+      "time": "20.5s-24s",
+      "text": "Looks like a game. Isn't one."
+    }
+  ]
+}

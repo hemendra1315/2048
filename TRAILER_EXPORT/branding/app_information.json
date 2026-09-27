@@ -1,0 +1,76 @@
+{
+  "appName": "Games",
+  "packageName": "com.hemu.games",
+  "version": "1.0.0",
+  "tagline": "It was never just a game.",
+  "secondaryTagline": "Some things are worth keeping private.",
+  "positioning": "A private communication and curated memory platform hidden behind a classic 2048 game decoy.",
+  "brandColors": {
+    "obsidianBlack": "#030406",
+    "surfaceDark": "#07090E",
+    "surfaceCard": "#0D1117",
+    "emeraldTeal": "#0F766E",
+    "electricTeal": "#2DD4BF",
+    "alertCrimson": "#EF4444",
+    "goldAccent": "#F59E0B"
+  },
+  "typography": {
+    "primaryFont": "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif",
+    "monospaceFont": "'JetBrains Mono', 'Fira Code', monospace",
+    "displayFont": "'SF Pro Expanded', 'Cabinet Grotesk', sans-serif"
+  },
+  "keyFeatures": [
+    {
+      "name": "Stealth Decoy Launcher",
+      "desc": "Fully functional 2048 classic game hiding private portal behind hidden gesture & 4-digit PIN."
+    },
+    {
+      "name": "Zero-Knowledge Messaging",
+      "desc": "Private end-to-end chat with live presence, typing indicators, and instant read receipts."
+    },
+    {
+      "name": "2X Audio Player",
+      "desc": "Dynamic audio wave visualization with instant 1X/1.5X/2X speed switching."
+    },
+    {
+      "name": "Floating Emoji Reactions",
+      "desc": "Haptic-driven floating emoji burst interactions on message bubbles."
+    },
+    {
+      "name": "Ephemeral View Once Media",
+      "desc": "Self-destructing photo/video viewer with 3-second countdown and zero local trace."
+    },
+    {
+      "name": "The Shared Vault",
+      "desc": "Magazine-style curated shared memory album with dual-user starring and tags."
+    },
+    {
+      "name": "Half-Page Media Inspector",
+      "desc": "Fluid 50% to 100% sliding drawer displaying metadata, dates, and jump-to-chat links."
+    },
+    {
+      "name": "Hardware DRM FLAG_SECURE",
+      "desc": "Android WindowManager security enforcement blocking all OS screenshots and screen recorders."
+    },
+    {
+      "name": "1-Tap Panic Escape",
+      "desc": "Instant hardware/gesture emergency escape immediately resetting app to innocent 2048 board."
+    },
+    {
+      "name": "Biometric & Passkey Lock",
+      "desc": "Native fingerprint and device passkey biometric authentication."
+    }
+  ],
+  "marketingCharacters": {
+    "userA": {
+      "name": "Rohit",
+      "role": "Primary User",
+      "handle": "@rohit"
+    },
+    "userB": {
+      "name": "Akshara",
+      "role": "Vault Partner",
+      "handle": "@akshara"
+    }
+  }
+}

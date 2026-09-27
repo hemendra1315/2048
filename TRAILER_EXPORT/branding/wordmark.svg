@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 320" width="1080" height="320">
+  <defs>
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="60%" stop-color="#f3f4f6"/>
+      <stop offset="100%" stop-color="#2dd4bf"/>
+    </linearGradient>
+  </defs>
+  <rect width="1080" height="320" fill="#030406"/>
+  <g transform="translate(60, 40)">
+    <rect width="160" height="160" rx="40" fill="#0b0f14" stroke="#2dd4bf" stroke-width="4"/>
+    <path d="M80 35 L125 62 L125 118 L80 145 L35 118 L35 62 Z" fill="none" stroke="#2dd4bf" stroke-width="8"/>
+    <circle cx="80" cy="90" r="18" fill="#2dd4bf"/>
+    <text x="200" y="125" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="110" font-weight="900" letter-spacing="16" fill="url(#textGrad)">GAMES</text>
+    <text x="205" y="185" font-family="monospace" font-size="28" font-weight="700" letter-spacing="6" fill="#0f766e">COM.HEMU.GAMES · SECURE VAULT</text>
+  </g>
+</svg>

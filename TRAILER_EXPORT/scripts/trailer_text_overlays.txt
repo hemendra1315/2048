@@ -1,0 +1,23 @@
+================================================================================
+GAMES LAUNCH TRAILER — KINETIC TEXT OVERLAYS (FOR EDITORS)
+Font: Sans-Serif Bold / Expanded Monospace | Fill: #FFFFFF / #2DD4BF
+================================================================================
+
+[00:00.00] "Just another 2048 game?"
+[00:01.20] "WRONG."
+[00:02.80] "PRIVATE."
+[00:04.50] "FAST."
+[00:06.20] "HIDDEN."
+[00:08.50] "Akshara: Reached home ❤️"
+[00:13.00] "2X VOICE NOTES"
+[00:16.50] "FLOATING REACTIONS"
+[00:23.00] "VIEW ONCE: 03s"
+[00:26.50] "VANISHED."
+[00:28.50] "SOME THINGS ARE WORTH KEEPING."
+[00:35.00] "THE SHARED VAULT"
+[00:44.00] "HARDWARE SHIELD ACTIVE"
+[00:49.00] "1-TAP DECOY ESCAPE"
+[00:58.00] "GAMES"
+[00:58.80] "It was never just a game."
+[00:59.50] "com.hemu.games"
+================================================================================

@@ -1,0 +1,93 @@
+{
+  "marketingCampaign": "Games App Official Launch 2026",
+  "guidelines": "Family-friendly, realistic lifestyle, high-curiosity tech aesthetic",
+  "primaryUsers": [
+    {
+      "name": "Rohit",
+      "role": "Account Holder",
+      "avatarColor": "#0f766e"
+    },
+    {
+      "name": "Akshara",
+      "role": "Vault Partner",
+      "avatarColor": "#2dd4bf"
+    }
+  ],
+  "sampleMessages": [
+    {
+      "sender": "Akshara",
+      "time": "10:42 PM",
+      "text": "Reached home ❤️",
+      "status": "read"
+    },
+    {
+      "sender": "Rohit",
+      "time": "10:43 PM",
+      "text": "Sent the tickets to our shared vault!",
+      "status": "read"
+    },
+    {
+      "sender": "Akshara",
+      "time": "10:44 PM",
+      "text": "Checking now! Also sent a view-once snapshot 🌌",
+      "status": "read"
+    }
+  ],
+  "voiceNotes": [
+    {
+      "sender": "Akshara",
+      "duration": "0:14",
+      "speed": "2.0x",
+      "transcript": "Hey! Just packed for the Manali trip. Don't forget the camera!"
+    }
+  ],
+  "sharedVaultItems": [
+    {
+      "title": "Golden Hour in Manali",
+      "type": "photo",
+      "date": "September 24",
+      "stars": 2,
+      "tags": [
+        "Travel",
+        "Featured"
+      ]
+    },
+    {
+      "title": "Flight Tickets & Pass",
+      "type": "document",
+      "date": "September 25",
+      "stars": 2,
+      "tags": [
+        "Tickets",
+        "Vault"
+      ]
+    },
+    {
+      "title": "Birthday Surprise Itinerary",
+      "type": "note",
+      "date": "September 26",
+      "stars": 1,
+      "tags": [
+        "Confidential",
+        "Pinned"
+      ]
+    }
+  ],
+  "curatedAlbums": [
+    {
+      "albumName": "Himachal Expedition",
+      "photoCount": 24,
+      "coverTheme": "Mountain Sunset"
+    },
+    {
+      "albumName": "Concert Night 2026",
+      "photoCount": 18,
+      "coverTheme": "Neon Stage"
+    },
+    {
+      "albumName": "Family Milestones",
+      "photoCount": 32,
+      "coverTheme": "Golden Hour"
+    }
+  ]
+}

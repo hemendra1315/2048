@@ -1,0 +1,63 @@
+================================================================================
+GAMES (com.hemu.games) — OFFICIAL 60-SECOND LAUNCH TRAILER SCRIPT
+TITLE: "It Was Never Just a Game"
+TEMPO: 132 BPM | THEME: Obsidian Black (#030406) × Electric Teal (#2dd4bf)
+AUDIO TRACK: trailer_soundtrack_132bpm.wav
+================================================================================
+
+[00:00.00 - 00:01.20] — THE HOOK
+VISUAL: Innocent 2048 game board on obsidian glass. Rapid tile movements (128 -> 256 -> 1024).
+SFX: Clean mechanical tile slide clicks.
+ON-SCREEN TEXT: "Just another 2048 game?"
+
+[00:01.20 - 00:02.50] — THE GLITCH & DROP
+VISUAL: Screen flashes with chromatic aberration. Subtle triple-tap on top header reveals hidden biometric prompt.
+SFX: Sharp analog glitch whoosh (sfx_glitch_whoosh.wav) -> HEAVY SUB BASS DROP (sfx_sub_bass_drop.wav).
+ON-SCREEN TEXT: "WRONG."
+
+[00:02.50 - 00:08.50] — THE REVEAL & INBOX
+VISUAL: Decoy board dissolves into encrypted dark luxury inbox. Active chats, live presence indicators.
+ON-SCREEN TEXT: "PRIVATE. FAST. HIDDEN."
+NOTIFICATION POP: "Akshara: Reached home ❤️"
+
+[00:08.50 - 00:16.00] — CONVERSATION & AUDIO
+VISUAL: Chat opens instantly. Double teal read receipts (✓✓). Voice note waveform plays with dynamic neon wave.
+VOICE PILL: Instant switch to 2X speed.
+ON-SCREEN TEXT: "2X VOICE NOTES."
+
+[00:16.00 - 00:22.00] — EXPRESSION & REACTIONS
+VISUAL: Message bubble long-press triggers floating particle emoji explosion (🔥 ❤️ ⚡).
+ON-SCREEN TEXT: "HAPTIC REACTIONS."
+
+[00:22.00 - 00:28.00] — THE MID-TRAILER SHOCK (VIEW ONCE)
+VISUAL: Media arrives with purple glow. Opened in full-screen.
+TIMER: 03s -> 02s -> 01s -> 00s.
+SFX: Ephemeral burn crackle (sfx_ephemeral_burn.wav).
+VISUAL: Image instantly incinerates into embers. Zero local trace.
+ON-SCREEN TEXT: "NOW YOU SEE IT." -> "NOW IT'S GONE."
+
+[00:28.00 - 00:28.30] — ATTENTION RESET
+VISUAL: Instant cut to absolute obsidian black for 0.3s.
+SFX: Total silence.
+
+[00:28.30 - 00:44.00] — THE SHARED VAULT
+VISUAL: Horizontal swipe into magazine-style Shared Vault. High-res travel album: "Golden Hour in Manali".
+INTERACTION: Rohit & Akshara star count badges. Half-page inspector smoothly expands to 100% theater view.
+ON-SCREEN TEXT: "SOME THINGS ARE WORTH KEEPING."
+
+[00:44.00 - 00:52.00] — UNCOMPROMISING SECURITY
+VISUAL: Screen attempts capture -> Red FLAG_SECURE hardware shield blocks frame.
+SECURITY BADGE: Biometric fingerprint + Local passkey.
+PANIC GESTURE: 1-Tap panic escape instantly reverts app to 2048 game decoy.
+ON-SCREEN TEXT: "HARDWARE SCREENSHOT SHIELD." -> "1-TAP DECOY ESCAPE."
+
+[00:52.00 - 00:58.00] — THE 24-CUT FRENZY MONTAGE
+VISUAL: Rapid beat-synced 0.25s flash cuts across all 10 core features.
+MONTAGE: 2048 -> PIN -> Chat -> 2X -> ViewOnce -> Burn -> Vault -> Inspector -> Biometrics -> Shield.
+
+[00:58.00 - 01:00.00] — BRAND FINALE
+VISUAL: 3D Electric Teal Games Icon pulses into center frame.
+ON-SCREEN TEXT: "GAMES"
+TAGLINE: "It was never just a game."
+CALL TO ACTION: "com.hemu.games | Available Now"
+================================================================================
