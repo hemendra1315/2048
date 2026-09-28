@@ -1,16 +1,17 @@
 import React, { useState, useCallback } from 'react';
-import { Users, FolderLock, Image as ImageIcon, ArrowLeft, Shield, Rocket } from 'lucide-react';
+import { Users, FolderLock, Image as ImageIcon, ArrowLeft, Shield, Rocket, Timer } from 'lucide-react';
 import { UserManagement } from './UserManagement';
 import { UserDetailView } from './UserDetailView';
 import { AdminSharedVaultsView } from './AdminSharedVaultsView';
 import { AdminMediaUploadsView } from './AdminMediaUploadsView';
 import { AppUpdateView } from './AppUpdateView';
 import { ConversationViewer } from './ConversationViewer';
+import { DisappearingArchive } from './DisappearingArchive';
 import { UserProfile, MessageItem } from '../../types';
 import { useBackHandler } from '../../lib/backButton';
-import { getUserConversationsForAdmin } from '../../lib/adminApi';
+import { getUserConversationsForAdmin, getProfileMap } from '../../lib/adminApi';
 
-export type AdminTab = 'users' | 'vaults' | 'media' | 'updates';
+export type AdminTab = 'users' | 'vaults' | 'media' | 'updates' | 'disappearing';
 
 interface AdminLayoutProps {
   onReturnToUserMode: () => void;
@@ -59,6 +60,21 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
     },
     []
   );
+
+  // Jump to a user from the Disappearing Archive (e.g. tapping a sender/recipient name)
+  const handleNavigateToUserFromArchive = useCallback(async (userId: string) => {
+    try {
+      const profiles = await getProfileMap();
+      const profile = profiles[userId];
+      if (profile) {
+        setSelectedUser(profile);
+        setActiveTab('users');
+        setDeepLinkedConv(null);
+      }
+    } catch (err) {
+      console.error('Failed to resolve user from archive:', err);
+    }
+  }, []);
 
   // Hardware Back Button integration
   const handleHardwareBack = useCallback(() => {
@@ -170,6 +186,23 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
           <Rocket className="w-4 h-4" />
           <span>App Updates</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('disappearing');
+            setSelectedUser(null);
+            setDeepLinkedConv(null);
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
+            activeTab === 'disappearing'
+              ? 'bg-purple-600 text-white shadow-md'
+              : 'text-vault-400 hover:text-vault-200 hover:bg-vault-800/50'
+          }`}
+        >
+          <Timer className="w-4 h-4" />
+          <span>Disappearing</span>
+        </button>
       </nav>
 
       {/* Main Content Area */}
@@ -188,6 +221,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onReturnToUserMode }) 
         {activeTab === 'media' && <AdminMediaUploadsView />}
 
         {activeTab === 'updates' && <AppUpdateView />}
+
+        {activeTab === 'disappearing' && (
+          <DisappearingArchive
+            onNavigateToConversation={handleGoToConversation}
+            onNavigateToUser={handleNavigateToUserFromArchive}
+          />
+        )}
       </main>
 
       {/* Deep linked Full-Screen DM Viewer */}
