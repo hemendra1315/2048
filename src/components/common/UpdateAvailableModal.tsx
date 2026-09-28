@@ -18,8 +18,14 @@ export const UpdateAvailableModal: React.FC<UpdateAvailableModalProps> = ({ noti
   };
 
   return (
-    <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-sm rounded-3xl bg-vault-950 border border-purple-700/40 shadow-2xl overflow-hidden">
+    <div
+      className="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
+      onClick={onDismiss}
+    >
+      <div
+        className="w-full max-w-sm rounded-3xl bg-vault-950 border border-purple-700/40 shadow-2xl overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
         <div className="relative p-6 pb-5 bg-gradient-to-br from-purple-950/80 via-vault-950 to-vault-950">
           <button
             type="button"

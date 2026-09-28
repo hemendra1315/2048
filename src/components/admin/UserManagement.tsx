@@ -51,6 +51,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onSelectUser }) 
       showToast(`Updated gender to ${newGender} for @${user.username || user.uid}`, 'success');
     } catch (err) {
       console.error('Failed to update gender:', err);
+      // Revert the optimistic update -- this can now genuinely fail (no more silent
+      // direct-table-update fallback), so the UI must not keep showing the unsaved value.
+      setUsers(prev => prev.map(u => (u.id === user.id ? { ...u, gender: user.gender } : u)));
+      showToast('Failed to update gender', 'error');
     } finally {
       setUpdatingUserId(null);
     }

@@ -806,18 +806,25 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     if (!userId || !isSupabaseConfigured() || isDeleted(msg)) return;
     selectionChange();
     const existing = reactions[msg.id]?.find(r => r.user_id === userId);
-    if (existing?.emoji === emoji) {
-      await supabase.from('message_reactions').delete().eq('message_id', msg.id).eq('user_id', userId);
+    const removing = existing?.emoji === emoji;
+    // set_reaction() is the only path with a real grant/RLS policy on message_reactions --
+    // a direct table insert/delete here silently fails (authenticated only has SELECT),
+    // so the optimistic UI state below would be the only place the reaction ever existed.
+    const { error } = await supabase.rpc('set_reaction', {
+      p_message_id: msg.id,
+      p_emoji: removing ? null : emoji,
+    });
+    if (error) {
+      console.error('Failed to set reaction:', error);
+      errorWarning();
+      return;
+    }
+    if (removing) {
       setReactions(prev => ({
         ...prev,
         [msg.id]: (prev[msg.id] ?? []).filter(r => r.user_id !== userId),
       }));
     } else {
-      await supabase.from('message_reactions').upsert({
-        message_id: msg.id,
-        user_id: userId,
-        emoji,
-      });
       setReactions(prev => {
         const withoutMine = (prev[msg.id] ?? []).filter(r => r.user_id !== userId);
         return { ...prev, [msg.id]: [...withoutMine, { user_id: userId, emoji }] };
@@ -844,9 +851,19 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     void handleSend(`[STICKER:${stickerId}]`);
   };
 
-  const startGame = (gameId: CoverGameType) => {
+  const startGame = async (gameId: CoverGameType) => {
+    void gameId; // only tic-tac-toe is wired server-side today; start_chat_game() decides the rest
     setShowExtras(false);
-    void handleSend(`[GAME:${gameId}]`);
+    if (!isSupabaseConfigured()) return;
+    // start_chat_game() creates the chat_games row AND writes its own '[GAME:...]' system
+    // message server-side -- sending it as a plain chat message (the old behavior) got
+    // rejected by guard_message_insert's reserved-format check every time, so the game
+    // could never actually start. The realtime subscription picks up the inserted message.
+    const { error } = await supabase.rpc('start_chat_game', { p_conversation_id: conversationId });
+    if (error) {
+      showToast(error.message || 'Could not start the game', 'error');
+      errorWarning();
+    }
   };
 
   const initialAttachmentHandlersRef = useRef({ handleSend, onClearInitialAttachment, user });

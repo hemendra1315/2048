@@ -514,11 +514,15 @@ export async function deleteMessageAsAdmin(
   conversationId?: string
 ): Promise<void> {
   if (backendIsSupabase()) {
-    const { error } = await supabase.from('messages').delete().eq('id', messageId);
+    // admin_delete_message() deletes and writes the admin_access_log row atomically, so a
+    // deletion can never happen without a trace -- a separate client-side logAdminAction()
+    // call after a raw delete could be skipped entirely by anyone hitting the REST API
+    // directly with a valid super-admin session.
+    const { error } = await supabase.rpc('admin_delete_message', { p_message_id: messageId });
     fail(error);
-  } else {
-    mockBackend.adminDeleteMessage(messageId);
+    return;
   }
+  mockBackend.adminDeleteMessage(messageId);
   await logAdminAction(adminId, 'DELETE_MESSAGE', null, messageId, {
     conversationId,
   });
@@ -559,23 +563,16 @@ export async function setUserGender(targetUserId: string, gender: 'Male' | 'Fema
     mockBackend.adminSetUserGender(targetUserId, gender);
     return;
   }
-  try {
-    const { error } = await supabase.rpc('admin_set_user_gender', {
-      p_target: targetUserId,
-      p_gender: gender,
-    });
-    if (error) {
-      // Fallback direct update if super admin has direct update permissions
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ gender, updated_at: new Date().toISOString() })
-        .eq('id', targetUserId);
-      if (updateError) {
-        console.warn('[admin] remote gender update skipped:', updateError.message);
-      }
-    }
-  } catch (err) {
-    console.warn('[admin] setUserGender remote error:', err);
+  // No direct-table-update fallback: profiles_update_policy lets a super admin write any
+  // column via a raw client update, which would succeed silently with zero audit-log entry
+  // (admin_set_user_gender() is the only path that writes one). Surface RPC failures instead
+  // of quietly working around them.
+  const { error } = await supabase.rpc('admin_set_user_gender', {
+    p_target: targetUserId,
+    p_gender: gender,
+  });
+  if (error) {
+    throw error;
   }
 }
 

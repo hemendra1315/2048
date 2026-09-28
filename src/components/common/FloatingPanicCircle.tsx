@@ -147,7 +147,9 @@ export const FloatingPanicCircle: React.FC = () => {
         transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
         touchAction: 'none',
       }}
-      className={`fixed top-0 left-0 z-[99999] w-12 h-12 rounded-full flex items-center justify-center select-none shadow-[0_4px_24px_rgba(0,0,0,0.85),0_0_16px_rgba(16,185,129,0.3)] border border-emerald-500/40 bg-[#0c0f0d]/90 backdrop-blur-md cursor-grab active:cursor-grabbing transition-shadow ${
+      // z-[999999]: must stay above every other overlay (modals, sheets, toasts -- present
+      // and future). This is the one-tap panic escape; nothing should ever be able to block it.
+      className={`fixed top-0 left-0 z-[999999] w-12 h-12 rounded-full flex items-center justify-center select-none shadow-[0_4px_24px_rgba(0,0,0,0.85),0_0_16px_rgba(16,185,129,0.3)] border border-emerald-500/40 bg-[#0c0f0d]/90 backdrop-blur-md cursor-grab active:cursor-grabbing transition-shadow ${
         isDragging ? 'scale-105 shadow-[0_6px_30px_rgba(0,0,0,0.9),0_0_24px_rgba(16,185,129,0.5)] border-emerald-400' : 'hover:border-emerald-400/70'
       }`}
       aria-label="Return to 2048 game"
