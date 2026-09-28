@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Download</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0a0a0a;
+    color: #f2f2f2;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px;
+  }
+  .card {
+    width: 100%;
+    max-width: 380px;
+    text-align: center;
+  }
+  .icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 20px;
+    background: linear-gradient(135deg,#7c3aed,#10b981);
+    margin: 0 auto 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+  }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { font-size: 14px; color: #a3a3a3; line-height: 1.5; margin: 0 0 24px; }
+  .btn {
+    display: block;
+    width: 100%;
+    padding: 14px 20px;
+    border-radius: 14px;
+    background: linear-gradient(135deg,#7c3aed,#a855f7);
+    color: #fff;
+    font-weight: 700;
+    font-size: 15px;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    margin-bottom: 12px;
+  }
+  .btn-secondary {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    color: #e5e5e5;
+  }
+  .hint {
+    font-size: 12px;
+    color: #737373;
+    margin-top: 16px;
+    line-height: 1.6;
+  }
+  .hidden { display: none !important; }
+  .steps {
+    text-align: left;
+    background: #141414;
+    border: 1px solid #2a2a2a;
+    border-radius: 14px;
+    padding: 16px 18px;
+    font-size: 13px;
+    color: #d4d4d4;
+    line-height: 1.8;
+    margin-top: 16px;
+  }
+  .steps b { color: #fff; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">📦</div>
+    <h1>Ready to download</h1>
+    <p id="subtitle">Tap below to get the file.</p>
+
+    <a id="directDownload" class="btn hidden" href="./games.apk" download>Download</a>
+    <a id="openInChrome" class="btn hidden" href="#">Open in Chrome to download</a>
+    <button id="copyLink" class="btn btn-secondary hidden" type="button">Copy link</button>
+
+    <div id="iosSteps" class="steps hidden">
+      This link opened inside Instagram's built-in browser, which blocks file downloads.<br><br>
+      Tap <b>⋯</b> (or the Share icon) at the top of the screen, then choose <b>"Open in Safari"</b> (or "Open in Browser"), and the download will start there.
+    </div>
+
+    <p class="hint" id="doneHint" style="display:none">If nothing happens, tap the button above again.</p>
+  </div>
+
+<script>
+(function () {
+  var ua = navigator.userAgent || '';
+  var isInstagram = /Instagram/i.test(ua);
+  var isAndroid = /Android/i.test(ua);
+  var isIOS = /iPhone|iPad|iPod/i.test(ua);
+  var apkUrl = location.origin + location.pathname.replace(/\/?$/, '/') + 'games.apk';
+
+  var subtitle = document.getElementById('subtitle');
+  var directBtn = document.getElementById('directDownload');
+  var chromeBtn = document.getElementById('openInChrome');
+  var copyBtn = document.getElementById('copyLink');
+  var iosSteps = document.getElementById('iosSteps');
+
+  if (isInstagram && isAndroid) {
+    // Instagram's in-app browser blocks APK downloads outright. An Android "intent://"
+    // link is the one reliable way to force the same URL open in real Chrome instead,
+    // which downloads it normally.
+    subtitle.textContent = "Instagram's built-in browser blocks this kind of download -- tap below to open it in Chrome instead.";
+    var host = location.host + location.pathname.replace(/\/?$/, '/') + 'games.apk';
+    chromeBtn.href = 'intent://' + host + '#Intent;scheme=https;package=com.android.chrome;end;';
+    chromeBtn.classList.remove('hidden');
+    copyBtn.classList.remove('hidden');
+  } else if (isInstagram && isIOS) {
+    subtitle.textContent = "Instagram's built-in browser blocks this kind of download.";
+    iosSteps.classList.remove('hidden');
+    copyBtn.classList.remove('hidden');
+  } else {
+    // Already in a real browser (Chrome, Safari, etc.) -- just download directly.
+    subtitle.textContent = 'Tap below to download.';
+    directBtn.classList.remove('hidden');
+  }
+
+  copyBtn.addEventListener('click', function () {
+    var text = apkUrl;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        copyBtn.textContent = 'Copied!';
+        setTimeout(function () { copyBtn.textContent = 'Copy link'; }, 1500);
+      });
+    }
+  });
+})();
+</script>
+</body>
+</html>
