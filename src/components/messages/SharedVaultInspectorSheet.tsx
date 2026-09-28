@@ -7,6 +7,7 @@ import {
   FolderHeart,
   ExternalLink,
   Trash2,
+  RotateCcw,
   Calendar,
   Quote,
   Play,
@@ -20,13 +21,15 @@ import {
 import { SharedVaultItem, SharedVaultAlbum, UserProfile } from '../../types';
 import { lightImpact, mediumImpact, selectionChange } from '../../lib/haptics';
 import { useToast } from '../../context/ToastContext';
-import { cloneToPersonalVault, moveItemsToAlbum, deleteSharedVaultItem } from '../../lib/sharedVaultApi';
+import { cloneToPersonalVault, moveItemsToAlbum, deleteSharedVaultItem, softDeleteSharedVaultItem, restoreSharedVaultItem } from '../../lib/sharedVaultApi';
 
 interface SharedVaultInspectorSheetProps {
   item: SharedVaultItem | null;
   albums: SharedVaultAlbum[];
   currentUserProfile: UserProfile;
   partnerProfile: UserProfile;
+  /** True when opened from the Trash tab -- swaps "Move to Trash" for "Restore" + "Delete Forever". */
+  isTrash?: boolean;
   onClose: () => void;
   onGoToMessage?: (messageId: string) => void;
   onItemUpdated: (updated: SharedVaultItem) => void;
@@ -38,6 +41,7 @@ export const SharedVaultInspectorSheet: React.FC<SharedVaultInspectorSheetProps>
   albums,
   currentUserProfile,
   partnerProfile,
+  isTrash,
   onClose,
   onGoToMessage,
   onItemUpdated,
@@ -92,16 +96,43 @@ export const SharedVaultInspectorSheet: React.FC<SharedVaultInspectorSheetProps>
       showToast('Only the person who saved this memory can delete it', 'error');
       return;
     }
-    if (!window.confirm('Delete this memory from Shared Vault? This cannot be undone.')) return;
-    mediumImpact();
-    const deleted = await deleteSharedVaultItem(item.id, currentUserProfile.id);
-    if (!deleted) {
-      showToast('Failed to delete from Shared Vault', 'error');
+
+    if (isTrash) {
+      if (!window.confirm('Permanently delete this memory? This cannot be undone.')) return;
+      mediumImpact();
+      const deleted = await deleteSharedVaultItem(item.id, currentUserProfile.id);
+      if (!deleted) {
+        showToast('Failed to delete from Shared Vault', 'error');
+        return;
+      }
+      onItemDeleted(item.id);
+      onClose();
+      showToast('Deleted forever', 'info');
       return;
     }
-    onItemDeleted(item.id);
+
+    if (!window.confirm('Move this memory to Trash? You can restore it within 30 days.')) return;
+    mediumImpact();
+    const trashed = await softDeleteSharedVaultItem(item.id);
+    if (!trashed) {
+      showToast('Failed to move to Trash', 'error');
+      return;
+    }
+    onItemUpdated({ ...item, deleted_at: new Date().toISOString() });
     onClose();
-    showToast('Deleted from Shared Vault', 'info');
+    showToast('Moved to Trash', 'info');
+  };
+
+  const handleRestore = async () => {
+    mediumImpact();
+    const restored = await restoreSharedVaultItem(item.id);
+    if (!restored) {
+      showToast('Failed to restore', 'error');
+      return;
+    }
+    onItemUpdated({ ...item, deleted_at: null });
+    onClose();
+    showToast('Restored from Trash', 'success');
   };
 
   const toggleAudioPlayback = () => {
@@ -367,6 +398,17 @@ export const SharedVaultInspectorSheet: React.FC<SharedVaultInspectorSheetProps>
               </a>
             )}
 
+            {isTrash && isSavedByMe && (
+              <button
+                type="button"
+                onClick={handleRestore}
+                className="btn btn-g py-2.5 px-3 flex items-center justify-center gap-1.5 text-xs !text-emerald-400 hover:!text-emerald-300 hover:bg-emerald-500/10"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Restore</span>
+              </button>
+            )}
+
             {isSavedByMe && (
               <button
                 type="button"
@@ -374,7 +416,7 @@ export const SharedVaultInspectorSheet: React.FC<SharedVaultInspectorSheetProps>
                 className="btn btn-g py-2.5 px-3 flex items-center justify-center gap-1.5 text-xs !text-red-400 hover:!text-red-300 hover:bg-red-500/10"
               >
                 <Trash2 className="w-4 h-4" />
-                <span>Delete</span>
+                <span>{isTrash ? 'Delete Forever' : 'Move to Trash'}</span>
               </button>
             )}
           </div>

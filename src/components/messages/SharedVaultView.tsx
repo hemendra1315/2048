@@ -14,6 +14,8 @@ import {
   Image as ImageIcon,
   Loader2,
   Upload,
+  Trash2 as Trash2Icon,
+  Quote,
 } from 'lucide-react';
 import { SharedVaultItem, SharedVaultAlbum, VaultNavigationState, UserProfile } from '../../types';
 import {
@@ -44,7 +46,7 @@ interface SharedVaultViewProps {
   onClose?: () => void;
 }
 
-type FilterCategory = 'all' | 'albums' | 'image' | 'video';
+type FilterCategory = 'all' | 'albums' | 'image' | 'video' | 'trash';
 
 export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
   conversationId,
@@ -88,7 +90,7 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
     setLoading(true);
     try {
       const [vaultItems, vaultAlbums] = await Promise.all([
-        listSharedVaultItems(conversationId),
+        listSharedVaultItems(conversationId, { includeDeleted: true }),
         listSharedVaultAlbums(conversationId),
       ]);
       setItems(vaultItems);
@@ -127,7 +129,7 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
             // media_url properly signed, including for updates the current user's own action
             // echoes back to them (e.g. a star/move-to-album that just set a correct
             // optimistic value would otherwise get clobbered by the raw unsigned one here).
-            void listSharedVaultItems(conversationId).then(vaultItems => {
+            void listSharedVaultItems(conversationId, { includeDeleted: true }).then(vaultItems => {
               setItems(vaultItems);
               if (payload.eventType === 'UPDATE' && inspectedItem?.id === (payload.new as SharedVaultItem).id) {
                 const fresh = vaultItems.find(i => i.id === (payload.new as SharedVaultItem).id);
@@ -250,6 +252,9 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
 
     return list;
   }, [items, selectedFilter, searchQuery]);
+
+  // Trashed items (any media type -- Trash isn't restricted to photos/videos like the main feed)
+  const trashedItems = useMemo(() => items.filter(i => i.deleted_at), [items]);
 
   // Highlight billboard memory (most recent photo/video)
   const spotlightMemory = useMemo(() => {
@@ -417,8 +422,10 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
           { id: 'albums', label: `Albums (${albums.length})` },
           { id: 'image', label: 'Photos' },
           { id: 'video', label: 'Videos' },
+          { id: 'trash', label: `Trash (${trashedItems.length})` },
         ].map(cat => {
           const isSelected = selectedFilter === cat.id;
+          const isTrashPill = cat.id === 'trash';
           return (
             <button
               key={cat.id}
@@ -429,8 +436,10 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
               }}
               className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
                 isSelected
-                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
-                  : 'bg-vault-900 text-vault-400 border border-vault-800 hover:text-vault-200'
+                  ? isTrashPill
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
+                    : 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
+                  : `bg-vault-900 border border-vault-800 hover:text-vault-200 ${isTrashPill ? 'text-rose-400/70' : 'text-vault-400'}`
               }`}
             >
               {cat.label}
@@ -473,11 +482,70 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
           </div>
         )}
 
-        {/* Main Content: Loading vs Albums vs Items */}
+        {/* Main Content: Loading vs Trash vs Albums vs Items */}
         {loading ? (
           <div className="py-24 flex flex-col items-center justify-center gap-3 text-vault-400">
             <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
             <span className="text-xs font-medium">Loading Shared Vault…</span>
+          </div>
+        ) : selectedFilter === 'trash' ? (
+          <div className="space-y-4">
+            {trashedItems.length > 0 && (
+              <p className="text-[11px] text-rose-300/80 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3.5 py-2">
+                Items in Trash are permanently deleted after 30 days.
+              </p>
+            )}
+            {trashedItems.length === 0 ? (
+              <div className="py-20 text-center space-y-3 bg-vault-900/30 rounded-3xl border border-vault-850 p-8">
+                <div className="w-16 h-16 rounded-full bg-vault-850 mx-auto flex items-center justify-center text-vault-500">
+                  <Trash2Icon className="w-8 h-8 opacity-60" />
+                </div>
+                <h3 className="text-sm font-bold text-white">Trash is empty</h3>
+                <p className="text-xs text-vault-400 max-w-sm mx-auto">
+                  Memories moved to Trash from this Shared Vault will show up here.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
+                {trashedItems.map(item => (
+                  <div
+                    key={item.id}
+                    onClick={() => {
+                      lightImpact();
+                      setInspectedItem(item);
+                    }}
+                    className="group relative aspect-square rounded-3xl overflow-hidden bg-vault-900 border border-vault-800 shadow-md hover:shadow-xl hover:border-rose-500/50 transition-all cursor-pointer select-none opacity-70 hover:opacity-100"
+                  >
+                    {item.media_type === 'image' && (
+                      <img src={item.media_url} alt={item.caption || 'Photo'} className="w-full h-full object-cover" loading="lazy" />
+                    )}
+                    {item.media_type === 'video' && (
+                      <div className="relative w-full h-full bg-vault-950 flex items-center justify-center">
+                        <video src={item.media_url} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-full bg-black/60 text-white flex items-center justify-center">
+                            <Play className="w-5 h-5 fill-current ml-0.5" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {(item.media_type === 'audio' || item.media_type === 'text_memory') && (
+                      <div className="w-full h-full flex flex-col items-center justify-center gap-2 p-3 text-center bg-vault-950">
+                        {item.media_type === 'audio' ? (
+                          <Play className="w-6 h-6 text-vault-500" />
+                        ) : (
+                          <Quote className="w-6 h-6 text-vault-500" />
+                        )}
+                        {item.caption && <p className="text-[10px] text-vault-400 line-clamp-3">{item.caption}</p>}
+                      </div>
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
+                      <p className="text-[10px] text-white/80 font-medium truncate">{formatTimestamp(item.deleted_at!)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : selectedFilter === 'albums' ? (
           <div className="space-y-4">
@@ -667,6 +735,7 @@ export const SharedVaultView: React.FC<SharedVaultViewProps> = ({
         albums={albums}
         currentUserProfile={currentUserProfile}
         partnerProfile={partnerProfile}
+        isTrash={selectedFilter === 'trash'}
         onClose={() => setInspectedItem(null)}
         onGoToMessage={onGoToMessage}
         onItemUpdated={updated => setItems(prev => prev.map(i => (i.id === updated.id ? updated : i)))}
