@@ -88,9 +88,17 @@ export const SharedVaultInspectorSheet: React.FC<SharedVaultInspectorSheetProps>
   };
 
   const handleDelete = async () => {
+    if (!isSavedByMe) {
+      showToast('Only the person who saved this memory can delete it', 'error');
+      return;
+    }
     if (!window.confirm('Delete this memory from Shared Vault? This cannot be undone.')) return;
     mediumImpact();
-    await deleteSharedVaultItem(item.id, currentUserProfile.id);
+    const deleted = await deleteSharedVaultItem(item.id, currentUserProfile.id);
+    if (!deleted) {
+      showToast('Failed to delete from Shared Vault', 'error');
+      return;
+    }
     onItemDeleted(item.id);
     onClose();
     showToast('Deleted from Shared Vault', 'info');
@@ -359,14 +367,16 @@ export const SharedVaultInspectorSheet: React.FC<SharedVaultInspectorSheetProps>
               </a>
             )}
 
-            <button
-              type="button"
-              onClick={handleDelete}
-              className="btn btn-g py-2.5 px-3 flex items-center justify-center gap-1.5 text-xs !text-red-400 hover:!text-red-300 hover:bg-red-500/10"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>Delete</span>
-            </button>
+            {isSavedByMe && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="btn btn-g py-2.5 px-3 flex items-center justify-center gap-1.5 text-xs !text-red-400 hover:!text-red-300 hover:bg-red-500/10"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

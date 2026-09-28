@@ -87,6 +87,10 @@ export interface SharedVaultItem {
 
 export interface AdminSharedVaultSummary {
   conversation_id: string;
+  is_group: boolean;
+  group_name?: string | null;
+  /** For a group, all members; for a DM, the two participants. */
+  members: UserProfile[];
   user_a: UserProfile;
   user_b: UserProfile;
   total_photos: number;

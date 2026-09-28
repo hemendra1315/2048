@@ -41,6 +41,12 @@ export const AdminSharedVaultsView: React.FC<AdminSharedVaultsViewProps> = ({
 
   const filteredVaults = vaults.filter(v => {
     const q = searchQuery.toLowerCase();
+    if (v.is_group) {
+      return (
+        (v.group_name && v.group_name.toLowerCase().includes(q)) ||
+        v.members.some(m => m.display_name.toLowerCase().includes(q) || (m.username && m.username.toLowerCase().includes(q)) || m.uid.toLowerCase().includes(q))
+      );
+    }
     return (
       v.user_a.display_name.toLowerCase().includes(q) ||
       v.user_b.display_name.toLowerCase().includes(q) ||
@@ -107,33 +113,37 @@ export const AdminSharedVaultsView: React.FC<AdminSharedVaultsViewProps> = ({
               key={vault.conversation_id}
               className="p-4 bg-vault-900 hover:bg-vault-850 border border-vault-800 hover:border-purple-500/50 rounded-2xl shadow-md transition-all flex flex-col justify-between gap-3"
             >
-              {/* Partner info */}
+              {/* Partner / group info */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="flex items-center -space-x-2.5 shrink-0">
-                    <Avatar
-                      name={vault.user_a.display_name}
-                      seed={vault.user_a.uid}
-                      src={vault.user_a.avatar_url}
-                      size={40}
-                    />
-                    <Avatar
-                      name={vault.user_b.display_name}
-                      seed={vault.user_b.uid}
-                      src={vault.user_b.avatar_url}
-                      size={40}
-                    />
+                    {(vault.is_group ? vault.members.slice(0, 3) : [vault.user_a, vault.user_b]).map((m, i) => (
+                      <Avatar key={`${vault.conversation_id}-${m.id}-${i}`} name={m.display_name} seed={m.uid} src={m.avatar_url} size={40} />
+                    ))}
                   </div>
 
                   <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-white truncate m-0 flex items-center gap-1.5">
-                      <span className="truncate">{vault.user_a.display_name}</span>
-                      <span className="text-purple-400 font-mono text-xs">↔</span>
-                      <span className="truncate">{vault.user_b.display_name}</span>
-                    </h3>
-                    <p className="text-[11px] text-vault-400 font-mono truncate m-0 mt-0.5">
-                      @{vault.user_a.username || vault.user_a.uid} · @{vault.user_b.username || vault.user_b.uid}
-                    </p>
+                    {vault.is_group ? (
+                      <>
+                        <h3 className="text-sm font-bold text-white truncate m-0">
+                          {vault.group_name || 'Unnamed Group'}
+                        </h3>
+                        <p className="text-[11px] text-vault-400 font-mono truncate m-0 mt-0.5">
+                          {vault.members.length} members
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <h3 className="text-sm font-bold text-white truncate m-0 flex items-center gap-1.5">
+                          <span className="truncate">{vault.user_a.display_name}</span>
+                          <span className="text-purple-400 font-mono text-xs">↔</span>
+                          <span className="truncate">{vault.user_b.display_name}</span>
+                        </h3>
+                        <p className="text-[11px] text-vault-400 font-mono truncate m-0 mt-0.5">
+                          @{vault.user_a.username || vault.user_a.uid} · @{vault.user_b.username || vault.user_b.uid}
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

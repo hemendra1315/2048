@@ -142,10 +142,16 @@ Deno.serve(async (req: Request) => {
   const title = 'Update Available';
   const body = `Version ${notice.latest_version} is ready. Tap to update.`;
 
-  await userClient.rpc('log_admin_action', {
+  const { error: logError } = await userClient.rpc('log_admin_action', {
     p_action_type: 'NOTIFY_APP_UPDATE',
     p_metadata: { latest_version: notice.latest_version },
   });
+  if (logError) {
+    // Audit-log write failed -- don't block the broadcast over it, but this must be
+    // visible somewhere, since a silently-skipped log entry defeats the point of the
+    // audit trail for who triggered a mass notification and when.
+    console.error('[send-update-notification] audit log write failed:', logError);
+  }
 
   const { data: subs, error: subsError } = await admin.from('push_subscriptions').select('fcm_token');
   if (subsError) return json(500, { error: 'lookup_failed' });

@@ -517,9 +517,16 @@ export async function deleteSharedVaultItem(itemId: string, actorUserId?: string
       if (actorUserId) {
         query = query.eq('saved_by', actorUserId);
       }
-      await query;
+      // The DELETE RLS policy only allows the item's saver (or a super admin) to
+      // delete it -- if a non-saving participant hits this, the query succeeds
+      // with zero rows affected and no error, so `.select()` + checking the
+      // returned rows is the only way to know the delete actually happened.
+      const { data, error } = await query.select('id');
+      if (error) throw error;
+      return Boolean(data && data.length > 0);
     } catch (err) {
       console.warn('[shared-vault] permanent delete error:', err);
+      return false;
     }
   }
 
@@ -604,15 +611,17 @@ export async function listAdminSharedVaults(): Promise<AdminSharedVaultSummary[]
   }
 
   try {
-    const [convRes, itemsRes, profRes] = await Promise.all([
-      supabase.from('conversations').select('id, user_a, user_b, created_at, updated_at'),
+    const [convRes, itemsRes, profRes, membersRes] = await Promise.all([
+      supabase.from('conversations').select('id, user_a, user_b, is_group, name, created_at, updated_at'),
       supabase.from('shared_vault_items').select('conversation_id, media_type, created_at').is('deleted_at', null),
       supabase.from('profiles').select('id, username, display_name, avatar_url'),
+      supabase.from('conversation_members').select('conversation_id, user_id'),
     ]);
 
-    const convs = (convRes.data ?? []) as Array<{ id: string; user_a: string; user_b: string; created_at: string; updated_at: string }>;
+    const convs = (convRes.data ?? []) as Array<{ id: string; user_a: string | null; user_b: string | null; is_group: boolean | null; name: string | null; created_at: string; updated_at: string }>;
     const items = (itemsRes.data ?? []) as Array<{ conversation_id: string; media_type: string; created_at: string }>;
     const profs = (profRes.data ?? []) as UserProfile[];
+    const members = (membersRes.data ?? []) as Array<{ conversation_id: string; user_id: string }>;
 
     const profMap = new Map<string, UserProfile>(profs.map(p => [p.id, p]));
 
@@ -628,6 +637,13 @@ export async function listAdminSharedVaults(): Promise<AdminSharedVaultSummary[]
       updated_at: new Date().toISOString(),
     });
 
+    const membersByConv = new Map<string, string[]>();
+    for (const m of members) {
+      const list = membersByConv.get(m.conversation_id) || [];
+      list.push(m.user_id);
+      membersByConv.set(m.conversation_id, list);
+    }
+
     const summaries: AdminSharedVaultSummary[] = [];
 
     for (const c of convs) {
@@ -641,10 +657,18 @@ export async function listAdminSharedVaults(): Promise<AdminSharedVaultSummary[]
         }
       }
 
+      const isGroup = Boolean(c.is_group);
+      const memberProfiles = isGroup
+        ? (membersByConv.get(c.id) || []).map(id => profMap.get(id) || fallbackUser(id))
+        : [profMap.get(c.user_a || '') || fallbackUser(c.user_a || ''), profMap.get(c.user_b || '') || fallbackUser(c.user_b || '')];
+
       summaries.push({
         conversation_id: c.id,
-        user_a: profMap.get(c.user_a) || fallbackUser(c.user_a),
-        user_b: profMap.get(c.user_b) || fallbackUser(c.user_b),
+        is_group: isGroup,
+        group_name: isGroup ? c.name : null,
+        members: memberProfiles,
+        user_a: memberProfiles[0] || fallbackUser(c.user_a || 'unknown'),
+        user_b: memberProfiles[1] || memberProfiles[0] || fallbackUser(c.user_b || 'unknown'),
         total_photos: convItems.filter(i => i.media_type === 'image').length,
         total_videos: convItems.filter(i => i.media_type === 'video').length,
         total_audio: convItems.filter(i => i.media_type === 'audio').length,
