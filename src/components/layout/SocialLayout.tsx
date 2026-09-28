@@ -58,7 +58,6 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
   const [pendingMediaAttachment, setPendingMediaAttachment] = useState<string | null>(null);
   const [stats, setStats] = useState({
     unreadCount: 0,
-    galleryCount: 0,
   });
 
   const refreshStats = useCallback(async () => {
@@ -68,32 +67,19 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
         // Same source as the chat list itself (get_chat_list), so the badge always matches what
         // each chat row shows: it accounts for read receipts being off, and skips system/game
         // notices and deleted or expired messages.
-        const [{ data: chatList }, { count: galleryCount }] = await Promise.all([
-          supabase.rpc('get_chat_list'),
-          supabase
-            .from('gallery_items')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_id', user.id),
-        ]);
+        const { data: chatList } = await supabase.rpc('get_chat_list');
 
         const unreadCount = ((chatList ?? []) as { unread_count: number }[]).reduce(
           (sum, c) => sum + (c.unread_count || 0),
           0
         );
 
-        setStats({
-          unreadCount,
-          galleryCount: galleryCount ?? 0,
-        });
+        setStats({ unreadCount });
       } else {
         const convs = mockBackend.getConversations(user.id);
-        const gallery = mockBackend.getGallery(user.id);
         const totalUnread = convs.reduce((acc, c) => acc + c.unreadCount, 0);
 
-        setStats({
-          unreadCount: totalUnread,
-          galleryCount: gallery.length,
-        });
+        setStats({ unreadCount: totalUnread });
       }
     } catch (err) {
       console.warn('Error refreshing stats:', err);
@@ -119,7 +105,7 @@ export const SocialLayout: React.FC<SocialLayoutProps> = ({ onAdminToggle }) => 
   const navItems = [
     { id: 'chats' as SocialTab, label: 'Chats', icon: MessageSquare, badge: stats.unreadCount },
     { id: 'camera' as SocialTab, label: 'Camera', icon: Camera },
-    { id: 'gallery' as SocialTab, label: 'Gallery', icon: ImageIcon, badge: stats.galleryCount },
+    { id: 'gallery' as SocialTab, label: 'Gallery', icon: ImageIcon },
     { id: 'profile' as SocialTab, label: 'Profile', icon: User },
   ];
 
